@@ -56,7 +56,9 @@ jobs:
   # Real IMAP (Dovecot) + SMTP (aiosmtpd) round trip: sync, flag push, archive
   # move, send, and the Sent copy. See tools/test-mail-servers/.
   mail-integration:
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04 ships Dovecot 2.3; 2.4 (ubuntu-latest from late 2026) rejects
+    # the test config in tools/test-mail-servers/start.sh.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install Dovecot
@@ -93,6 +95,29 @@ jobs:
         with:
           path: /tmp/mbjmap/bin
           key: stalwart-bin-${{ runner.os }}-${{ hashFiles('tools/test-mail-servers/start-jmap.sh') }}
+      # Stalwart can't be built from source: its git dependency
+      # stalwartlabs/opentelemetry-rust is gone. Use its prebuilt release,
+      # the version start-jmap.sh was written for (0.16.26), else the newest 0.16.
+      - name: Fetch Stalwart
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tags=$(gh release list -R stalwartlabs/stalwart --limit 100 --json tagName -q '.[].tagName')
+          tag=$(echo "$tags" | grep -x 'v0\.16\.26' || echo "$tags" | grep -m1 '^v0\.16\.')
+          echo "Stalwart release: $tag"
+          gh release view "$tag" -R stalwartlabs/stalwart --json assets -q '.assets[].name'
+          mkdir -p /tmp/stalwart-dl /tmp/mbjmap/bin
+          asset=stalwart-x86_64-unknown-linux-gnu.tar.gz
+          gh release download "$tag" -R stalwartlabs/stalwart -D /tmp/stalwart-dl -p "$asset"
+          tar -tzvf "/tmp/stalwart-dl/$asset"
+          tar -xzf "/tmp/stalwart-dl/$asset" -C /tmp/stalwart-dl
+          # The archive holds the server binary, named stalwart (else its one file).
+          bin=$(find /tmp/stalwart-dl -type f -name stalwart | head -1)
+          [ -n "$bin" ] || bin=$(find /tmp/stalwart-dl -type f ! -name '*.tar.gz' | head -1)
+          test -n "$bin" || { echo "no stalwart binary in $asset"; exit 1; }
+          install -m 0755 "$bin" /tmp/mbjmap/bin/stalwart
+          /tmp/mbjmap/bin/stalwart --version || true
       - name: Start Stalwart
         run: tools/test-mail-servers/start-jmap.sh
         timeout-minutes: 45
