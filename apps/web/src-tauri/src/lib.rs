@@ -60,18 +60,29 @@ impl Host for TauriHost {
     }
 }
 
+/// A secret saved before the rename (ADR-0071) sits under the old app id:
+/// move it under the new one the first time it's read.
+fn adopt_legacy_secret(key: &str, entry: &keyring::Entry) -> Option<String> {
+    let old = keyring::Entry::new(pim_app::legacy::LEGACY_ID, key).ok()?;
+    let value = old.get_password().ok()?;
+    if entry.set_password(&value).is_ok() {
+        let _ = old.delete_credential();
+    }
+    Some(value)
+}
+
 /// Account secrets in the OS keychain: macOS/iOS Keychain, Windows
 /// Credential Manager, Secret Service on Linux.
 struct Keychain;
 
-const SERVICE: &str = "design.snds.mailbird";
+const SERVICE: &str = "design.snds.vale";
 
 impl SecretStore for Keychain {
     fn get(&self, key: &str) -> Result<Option<String>, String> {
         let entry = keyring::Entry::new(SERVICE, key).map_err(|e| format!("keychain unavailable: {e}"))?;
         match entry.get_password() {
             Ok(v) => Ok(Some(v)),
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(keyring::Error::NoEntry) => Ok(adopt_legacy_secret(key, &entry)),
             Err(e) => Err(format!("couldn't read from the keychain: {e}")),
         }
     }
@@ -112,6 +123,10 @@ pub fn run() {
             }
             pim_app::secrets::install(Box::new(Keychain));
             let data_dir = app.path().app_data_dir()?;
+            // A desktop that ran the app as Mailbird keeps its data (ADR-0071).
+            if let Err(e) = pim_app::legacy::adopt_legacy_dir(&data_dir) {
+                log::warn!("couldn't move the data from before the rename: {e}");
+            }
             let state = AppState::open(&data_dir)?;
             // The locked-notes key is also kept in the shared identity (ADR-0051).
             if let Some(config) = pim_app::identity::desktop_config(&data_dir) {
@@ -124,7 +139,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move { pim_app::workers::start(handle, state) });
             Ok(())
         })
-        // With the menu-bar calendar up, closing the window keeps Mailbird
+        // With the menu-bar calendar up, closing the window keeps Vale
         // running there (ADR-0054); the mini calendar closes when you click away.
         .on_window_event(move |window, event| match (window.label(), event) {
             (menu_bar::MAIN, tauri::WindowEvent::CloseRequested { api, .. }) if closing.get() => {

@@ -82,6 +82,7 @@ export function toSvg(sketch: Sketch): string {
       return `<path d="${d}" fill="${fill}"${opacity < 1 ? ` opacity="${opacity}"` : ""}/>`
     })
     .join("")
+  // The tag inside saved sketches keeps the name from before the rename (ADR-0071).
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${sketch.w} ${sketch.h}" width="${sketch.w}" height="${sketch.h}"><metadata id="mailbird-sketch">${meta}</metadata>${paths}</svg>`
 }
 

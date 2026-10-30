@@ -1,5 +1,5 @@
 [package]
-name = "mailbird-push-relay"
+name = "vale-push-relay"
 version = "0.1.0"
 description = "Self-hosted push relay: watches mailboxes and wakes phones with content-free pushes"
 edition.workspace = true

@@ -47,9 +47,9 @@ pub struct Replies {
     pub model: String,
 }
 
-/// Where Anthropic's API is; tests set `MAILBIRD_AI_ANTHROPIC_URL` to a fake.
+/// Where Anthropic's API is; tests set `VALE_AI_ANTHROPIC_URL` to a fake.
 fn anthropic_url() -> String {
-    std::env::var("MAILBIRD_AI_ANTHROPIC_URL").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| ANTHROPIC_URL.into())
+    std::env::var("VALE_AI_ANTHROPIC_URL").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| ANTHROPIC_URL.into())
 }
 
 fn key(provider: AiProvider) -> Res<Option<String>> {

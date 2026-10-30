@@ -175,7 +175,7 @@ function seed(): { accounts: Account[]; messages: DemoMessage[]; followUps: Map<
                 d.setHours(15, 0, 0, 0)
                 const start = Math.floor(d.getTime() / 1000)
                 return {
-                  method: "counter" as const, uid: "sync-1@mailbird", title: "Studio sync", location: null, start, end: start + HOUR,
+                  method: "counter" as const, uid: "sync-1@vale", title: "Studio sync", location: null, start, end: start + HOUR,
                   organizer: { name: "Me", email: "me@studio.example" },
                   attendees: [{ name: "Sam Okafor", email: "sam@studio.example", status: "tentative" }],
                   comment: "I'm at the kiln until 2. Could we do 3?",
@@ -191,7 +191,7 @@ function seed(): { accounts: Account[]; messages: DemoMessage[]; followUps: Map<
       // `?shared=<link>`: Sam shares a note with you by link (ADR-0056).
       ...(new URLSearchParams(globalThis.location?.search ?? "").get("shared")
         ? [
-            msg("work", { name: "Sam Okafor", email: "sam@studio.example" }, "Design review agenda", `I shared a note with you: “Design review agenda”.\n\nOpen it in Mailbird: ${new URLSearchParams(globalThis.location?.search ?? "").get("shared")}\n`, 0.1 * HOUR),
+            msg("work", { name: "Sam Okafor", email: "sam@studio.example" }, "Design review agenda", `I shared a note with you: “Design review agenda”.\n\nOpen it in Vale: ${new URLSearchParams(globalThis.location?.search ?? "").get("shared")}\n`, 0.1 * HOUR),
           ]
         : []),
       // Sent with a follow-up reminder that hasn't come due (the Waiting lane).

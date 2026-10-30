@@ -4,7 +4,7 @@
 - **Date:** 2026-10-17
 - **Builds on:** [ADR-0017](0017-mail-power.md) (the composer and its menus), [ADR-0025](0025-one-action-grammar.md) (Mark read as a verb)
 
-FairEmail earns its loyal users with depth: the choices most people never touch, there for the ones who care. Mailbird had none of them. This phase adds the ones that change how mail behaves for you, behind one Advanced screen, without crowding the main settings.
+FairEmail earns its loyal users with depth: the choices most people never touch, there for the ones who care. Vale had none of them. This phase adds the ones that change how mail behaves for you, behind one Advanced screen, without crowding the main settings.
 
 ## Decisions
 
@@ -41,12 +41,12 @@ FairEmail earns its loyal users with depth: the choices most people never touch,
 - **Read receipts:**
   - Asking for one adds `Disposition-Notification-To` with your address (RFC 8098) to the message, for every kind of account. Whether a receipt comes back is up to the other person's app.
   - **Per message,** the composer's menu (the templates button) has **Ask for a read receipt**. It starts from the setting, and you can change it for this message.
-  - **Mailbird never sends receipts** for mail you read. Asking is your choice; answering would give the sender information about you without asking. The setting's own text says so.
-- **Checking for new mail:** for accounts without push, Mailbird checks on the chosen interval. It looks at the setting every 30 seconds, so a shorter interval takes effect without waiting out the old one. Push (IMAP IDLE, the relay) is untouched.
+  - **Vale never sends receipts** for mail you read. Asking is your choice; answering would give the sender information about you without asking. The setting's own text says so.
+- **Checking for new mail:** for accounts without push, Vale checks on the chosen interval. It looks at the setting every 30 seconds, so a shorter interval takes effect without waiting out the old one. Push (IMAP IDLE, the relay) is untouched.
 
 ### Also in this phase: the identity's device name
 
-The desktop now names its identity device **"Mailbird on <computer name>"** (with `.local` and `.lan` dropped), not just "Mailbird". Each app on a computer is its own device in the shared identity, a decision agreed with Lockdown (which names its own "Lockdown on …"). Without the computer's name, a person with two laptops would see two identical "Mailbird" devices.
+The desktop now names its identity device **"Vale on <computer name>"** (with `.local` and `.lan` dropped), not just "Vale". Each app on a computer is its own device in the shared identity, a decision agreed with Lockdown (which names its own "Lockdown on …"). Without the computer's name, a person with two laptops would see two identical "Vale" devices.
 
 ## Verification
 
@@ -58,7 +58,7 @@ The desktop now names its identity device **"Mailbird on <computer name>"** (wit
   - the receipt header present only when asked for, with the sender's address.
 - **App:**
   - through the dispatcher: the defaults, a save, and snapping;
-  - the device name from the computer name (`.local` dropped; a blank or missing name gives "Mailbird").
+  - the device name from the computer name (`.local` dropped; a blank or missing name gives "Vale").
 - **Clippy** is clean on the core, app, gateway, relay, and shell. The mail integration tests compile with the new draft field.
 - **Browser** (`phase43`, 25 checks):
   - **The dialog:** its defaults and their explanations.

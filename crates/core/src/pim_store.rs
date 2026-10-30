@@ -406,7 +406,7 @@ impl Store {
     pub fn create_event(&self, input: &EventInput) -> Result<EventDetail> {
         let c = self.writable(&input.calendar_id)?;
         Self::guests_allowed(&c, input)?;
-        let uid = format!("{}@mailbird", uuid::Uuid::new_v4());
+        let uid = format!("{}@vale", uuid::Uuid::new_v4());
         let ics = ical::new_event(&uid, input)?;
         let href = child_href(self.collection_href(&c.id)?.as_deref(), &uid, "ics");
         let id = self.insert_event(&c.id, href.as_deref(), None, &ics, Self::edit_state(&c))?;
@@ -450,7 +450,7 @@ impl Store {
             }
             (EditScope::Following, Some(at)) if at > ical::read_event(&ics, &tz)?.first_start => {
                 let to = self.writable(&input.calendar_id)?;
-                let uid = format!("{}@mailbird", uuid::Uuid::new_v4());
+                let uid = format!("{}@vale", uuid::Uuid::new_v4());
                 let tail = ical::split_series(&ics, at, &uid, input, &tz)?;
                 let head = ical::end_series_before(&ics, at, &tz)?;
                 self.rewrite_event(id, &head, Self::edit_state(&from))?;

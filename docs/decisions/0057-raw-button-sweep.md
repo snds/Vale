@@ -1,6 +1,6 @@
 # ADR-0057 · Raw buttons: a sweep and a ratchet
 
-- **Status:** Accepted. The four proposals shipped, and Mailbird adopted them in [ADR-0058](0058-ds-additions-adopted.md), which also retires the interim raw-button script.
+- **Status:** Accepted. The four proposals shipped, and Vale adopted them in [ADR-0058](0058-ds-additions-adopted.md), which also retires the interim raw-button script.
 - **Date:** 2026-10-17
 - **Builds on:** [ADR-0048](0048-design-system-cleanup.md) (the design-system cleanup and its ratchet), [ADR-0052](0052-unicron-packages.md) (unicron as packages)
 
@@ -93,4 +93,4 @@ These four additions would let the rest of the sweep happen without overrides:
 ## Consequences
 
 - The remaining sweep is mostly upstream: three small unicron additions and one `dsa` metric. After a unicron release, the 17 waiting raw buttons can move over without overrides, and the baseline drops to the 18 whole surfaces.
-- The ratchet is local to Mailbird until `dsa` has the metric.
+- The ratchet is local to Vale until `dsa` has the metric.

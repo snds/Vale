@@ -4,12 +4,12 @@
 - **Date:** 2026-10-17
 - **Builds on:** [ADR-0058](0058-ds-additions-adopted.md) (the last design-system adoption)
 
-ADR-0058 left two gaps in the design system, each worked around in Mailbird's own code:
+ADR-0058 left two gaps in the design system, each worked around in Vale's own code:
 
 - dialogs set their width, and sometimes their scrolling, by overriding `DialogContent`;
 - three rows that have buttons of their own were still raw `<button>`s.
 
-unicron 0.6 (snds/unicron#14) fills both. unicron 0.7 then judges contrast by what each component paints (APCA first, unicron#27, #30). This moves Mailbird from `@unicron/ui` 0.3.0 and `@unicron/tokens` 0.1.0 to 0.7.1 and 0.5.0.
+unicron 0.6 (snds/unicron#14) fills both. unicron 0.7 then judges contrast by what each component paints (APCA first, unicron#27, #30). This moves Vale from `@unicron/ui` 0.3.0 and `@unicron/tokens` 0.1.0 to 0.7.1 and 0.5.0.
 
 ## Decisions
 
@@ -29,7 +29,7 @@ unicron 0.6 (snds/unicron#14) fills both. unicron 0.7 then judges contrast by wh
 
 ### Area colors as text get their own roles
 
-- **The four area hues (`--vertical-*`) are fills,** tuned for dots, tints, and borders. Mailbird also drew them as text and icons, where they read poorly: amber measured APCA Lc 44 in light mode, and blue 50 in dark.
+- **The four area hues (`--vertical-*`) are fills,** tuned for dots, tints, and borders. Vale also drew them as text and icons, where they read poorly: amber measured APCA Lc 44 in light mode, and blue 50 in dark.
 - **New text roles** (`--vertical-mail-text`, `-calendar-text`, `-contacts-text`, `-notes-text`, and `text-vertical-*-text`) use a step darker in light mode (`600`) and a step lighter in dark (`300`). Every text and icon use moves to them, and so do a note's wiki links (`--c-note-wikilink-text`) and today's label in the calendar (`--c-calendar-today-text`).
 - **Filled chips** (today's date, the Screener's count) use their own pair: white on the `600` fill in light mode, and dark text on the `300` fill in dark. White on the old fill measured Lc 56 in dark mode.
 - **Measured** with unicron's contrast math (`apca-w3`): text on the canvas and the chrome is Lc 79–87, and the chips 81–92. Reading text needs 75.
@@ -37,7 +37,7 @@ unicron 0.6 (snds/unicron#14) fills both. unicron 0.7 then judges contrast by wh
 ### What else 0.4–0.7 brings
 
 - **Higher contrast, everywhere** (unicron #6, #27, #30): muted text, focus rings, field borders (now 3:1), the destructive color, and pressed toggles change. Screens change wherever those show. That's intended, not a regression.
-- **New components Mailbird doesn't use yet,** among them `SecretField` and `CrownJewelSurface`. They're candidates for the locked-notes passphrase and the relay's encryption key.
+- **New components Vale doesn't use yet,** among them `SecretField` and `CrownJewelSurface`. They're candidates for the locked-notes passphrase and the relay's encryption key.
 - **A `beforeContent` slot** for an app that draws its own title bar. The desktop app doesn't yet.
 
 ## Verification
@@ -48,5 +48,5 @@ unicron 0.6 (snds/unicron#14) fills both. unicron 0.7 then judges contrast by wh
 
 ## Consequences
 
-- **16 raw buttons remain,** each a whole surface (calendar cells, the shell's rail) or a pattern that is Mailbird's own, as ADR-0058 lists.
+- **16 raw buttons remain,** each a whole surface (calendar cells, the shell's rail) or a pattern that is Vale's own, as ADR-0058 lists.
 - **Later unicron releases** are the usual move: the two tarball URLs in `apps/web/package.json`, and the tokens override in `pnpm-workspace.yaml`.

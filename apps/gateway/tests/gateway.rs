@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
-use mailbird_gateway::{Config, Gateway, SealedFile, router};
+use vale_gateway::{Config, Gateway, SealedFile, router};
 use pim_app::secrets::SecretStore;
 use serde_json::{Value, json};
 
@@ -23,20 +23,20 @@ async fn gateway_end_to_end() {
     let dir = std::env::temp_dir().join(format!("gateway-test-{}", std::process::id()));
     let web = dir.join("web");
     std::fs::create_dir_all(web.join("assets")).unwrap();
-    std::fs::write(web.join("index.html"), "<!doctype html><html><head><title>Mailbird</title></head></html>").unwrap();
+    std::fs::write(web.join("index.html"), "<!doctype html><html><head><title>Vale</title></head></html>").unwrap();
     std::fs::write(web.join("assets/app.js"), "console.log('hi')").unwrap();
 
     let secrets = SealedFile::open(dir.join("secrets.json"), &key()).unwrap();
     pim_app::secrets::install(Box::new(secrets));
     let state = pim_app::AppState::open(&dir.join("data")).unwrap();
-    let gw = Gateway::new(state, Config { password: PASSWORD.into(), members: mailbird_gateway::Members::open(dir.join("members.json")).unwrap(), web_dir: web.clone(), secure_cookies: false, public_url: Some("https://cal.example".into()) });
+    let gw = Gateway::new(state, Config { password: PASSWORD.into(), members: vale_gateway::Members::open(dir.join("members.json")).unwrap(), web_dir: web.clone(), secure_cookies: false, public_url: Some("https://cal.example".into()) });
     let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", l.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(l, router(gw)).await.unwrap() });
 
     let anon = reqwest::Client::new();
     let http = reqwest::Client::builder().cookie_store(true).build().unwrap();
-    let core = |c: &reqwest::Client, name: &str, args: Value| c.post(format!("{base}/api/core/{name}")).header("X-Mailbird", "1").json(&args).send();
+    let core = |c: &reqwest::Client, name: &str, args: Value| c.post(format!("{base}/api/core/{name}")).header("X-Vale", "1").json(&args).send();
 
     // Not signed in: the page learns it's a gateway; the API refuses.
     let s: Value = anon.get(format!("{base}/api/session")).send().await.unwrap().json().await.unwrap();
@@ -45,9 +45,9 @@ async fn gateway_end_to_end() {
     assert_eq!(anon.get(format!("{base}/api/events")).send().await.unwrap().status(), 401);
 
     // Sign-in: CSRF header required, wrong password refused, right one sets an HttpOnly, SameSite=Strict cookie.
-    assert_eq!(http.post(format!("{base}/api/session")).json(&json!({ "password": PASSWORD })).send().await.unwrap().status(), 403, "no X-Mailbird header");
-    assert_eq!(http.post(format!("{base}/api/session")).header("X-Mailbird", "1").json(&json!({ "password": "wrong" })).send().await.unwrap().status(), 401);
-    let ok = http.post(format!("{base}/api/session")).header("X-Mailbird", "1").json(&json!({ "password": PASSWORD })).send().await.unwrap();
+    assert_eq!(http.post(format!("{base}/api/session")).json(&json!({ "password": PASSWORD })).send().await.unwrap().status(), 403, "no X-Vale header");
+    assert_eq!(http.post(format!("{base}/api/session")).header("X-Vale", "1").json(&json!({ "password": "wrong" })).send().await.unwrap().status(), 401);
+    let ok = http.post(format!("{base}/api/session")).header("X-Vale", "1").json(&json!({ "password": PASSWORD })).send().await.unwrap();
     assert_eq!(ok.status(), 204);
     let cookie = ok.headers()["set-cookie"].to_str().unwrap().to_owned();
     assert!(cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"), "{cookie}");
@@ -99,9 +99,9 @@ async fn gateway_end_to_end() {
     assert_eq!(page.status(), 200);
     let h = page.headers().clone();
     let html = page.text().await.unwrap();
-    assert!(html.contains("<title>Mailbird</title>") && html.contains(mailbird_gateway::GATEWAY_META), "deep links get the marked app page");
+    assert!(html.contains("<title>Vale</title>") && html.contains(vale_gateway::GATEWAY_META), "deep links get the marked app page");
     let root = anon.get(format!("{base}/")).send().await.unwrap().text().await.unwrap();
-    assert!(root.contains(mailbird_gateway::GATEWAY_META), "so does the root");
+    assert!(root.contains(vale_gateway::GATEWAY_META), "so does the root");
     assert_eq!(h["x-frame-options"], "DENY");
     assert_eq!(h["x-content-type-options"], "nosniff");
     assert!(h["content-security-policy"].to_str().unwrap().contains("frame-ancestors 'none'"));
@@ -120,7 +120,7 @@ async fn gateway_end_to_end() {
     let slot = page["slots"][0]["start"].as_i64().unwrap();
     assert_eq!(anon.get(format!("{base}/api/book/{}", "0".repeat(32))).send().await.unwrap().status(), 404, "an unknown link");
     assert_eq!(anon.get(format!("{base}/api/book/not-a-token")).send().await.unwrap().status(), 404);
-    let book = |body: Value| anon.post(format!("{base}/api/book/{token}")).header("X-Mailbird", "1").json(&body).send();
+    let book = |body: Value| anon.post(format!("{base}/api/book/{token}")).header("X-Vale", "1").json(&body).send();
     assert_eq!(anon.post(format!("{base}/api/book/{token}")).json(&json!({})).send().await.unwrap().status(), 403, "booking needs the header too");
     assert_eq!(book(json!({ "start": slot, "name": "Ana", "email": "nope" })).await.unwrap().status(), 400);
     let done: Value = book(json!({ "start": slot, "name": "Ana", "email": "ana@example.com" })).await.unwrap().json().await.unwrap();
@@ -141,21 +141,21 @@ async fn gateway_end_to_end() {
     assert_eq!(anon.get(format!("{base}/api/book/{token}/b/{}", "0".repeat(32))).send().await.unwrap().status(), 404, "a wrong code finds nothing");
     assert_eq!(anon.post(&manage).json(&json!({ "action": "cancel" })).send().await.unwrap().status(), 403, "changes need the header");
     let to = mine["slots"][2]["start"].as_i64().unwrap();
-    let moved: Value = anon.post(&manage).header("X-Mailbird", "1").json(&json!({ "action": "reschedule", "start": to })).send().await.unwrap().json().await.unwrap();
+    let moved: Value = anon.post(&manage).header("X-Vale", "1").json(&json!({ "action": "reschedule", "start": to })).send().await.unwrap().json().await.unwrap();
     assert_eq!(moved["start"].as_i64(), Some(to), "moved");
-    let gone: Value = anon.post(&manage).header("X-Mailbird", "1").json(&json!({ "action": "cancel" })).send().await.unwrap().json().await.unwrap();
+    let gone: Value = anon.post(&manage).header("X-Vale", "1").json(&json!({ "action": "cancel" })).send().await.unwrap().json().await.unwrap();
     assert_eq!(gone["cancelled"].as_bool(), Some(true), "cancelled");
     let occ: Value = core(&http, "list_occurrences", json!({ "from": slot - 1, "to": to + 3600 })).await.unwrap().json().await.unwrap();
     assert!(!occ.as_array().unwrap().iter().any(|o| o["title"] == "Intro call with Ana"), "and gone from the owner's calendar");
 
     // Sign out: the session ends.
-    assert_eq!(http.delete(format!("{base}/api/session")).header("X-Mailbird", "1").send().await.unwrap().status(), 204);
+    assert_eq!(http.delete(format!("{base}/api/session")).header("X-Vale", "1").send().await.unwrap().status(), 204);
     assert_eq!(core(&http, "list_accounts", Value::Null).await.unwrap().status(), 401);
 
     // Too many wrong passwords: the gateway makes you wait.
     let mut last = 0;
     for _ in 0..12 {
-        last = anon.post(format!("{base}/api/session")).header("X-Mailbird", "1").json(&json!({ "password": "guess" })).send().await.unwrap().status().as_u16();
+        last = anon.post(format!("{base}/api/session")).header("X-Vale", "1").json(&json!({ "password": "guess" })).send().await.unwrap().status().as_u16();
     }
     assert_eq!(last, 429);
     let _ = Arc::new(());

@@ -9,7 +9,7 @@ ADR-0057 left 17 raw buttons waiting on the design system. It proposed three add
 - **unicron 0.3.0** (snds/unicron#9) adds `Item` as a button, `Button size="inline"`, and `Chip`.
 - **dsa 0.2.0** (snds/dsa#2) adds the `rawElements` count.
 
-This phase moves Mailbird onto them, and lets dsa do the counting Mailbird's own script did.
+This phase moves Vale onto them, and lets dsa do the counting Vale's own script did.
 
 ## Decisions
 
@@ -24,9 +24,9 @@ This phase moves Mailbird onto them, and lets dsa do the counting Mailbird's own
 | Chips: a note's links, tags, backlinks, and reminder; the quick note's link; contact labels; event reminders | Hand-built pills, with the shared × from ADR-0057 | `Chip` (`outline`, `secondary`, or `muted`), with `ChipAction` for the main action and `ChipRemove` for the × |
 
 - **Icons follow the system.** In rows, an icon is no longer forced to 20px; it takes the text's size (`1.25em`, about 17px at 14px).
-- **Hints follow the system too.** A row's hint is `ItemDescription`, at 14px instead of Mailbird's 12px, so the settings rows, account choices, and Duplicates row are a few pixels taller. That's the system's density for rows. A denser hint would be an `Item` change, not a Mailbird override.
+- **Hints follow the system too.** A row's hint is `ItemDescription`, at 14px instead of Vale's 12px, so the settings rows, account choices, and Duplicates row are a few pixels taller. That's the system's density for rows. A denser hint would be an `Item` change, not a Vale override.
 - **App hues stay as classes.** A planned task's link keeps the calendar's hue, a note's link icon the notes hue, and a due reminder its notes tint. ADR-0048 settled this: app roles live in the app's classes, because the core can't know them.
-- **Test hooks move to `data-role`.** `data-slot` belongs to the library: `Chip` sets `data-slot="chip"`, which takes precedence. So Mailbird's own hooks are now `data-role="note-link"`, `"note-reminder"`, and `"quick-link"`.
+- **Test hooks move to `data-role`.** `data-slot` belongs to the library: `Chip` sets `data-slot="chip"`, which takes precedence. So Vale's own hooks are now `data-role="note-link"`, `"note-reminder"`, and `"quick-link"`.
 
 ### What stays, and why
 
@@ -52,9 +52,9 @@ dsa counts **19** raw buttons. Every one is right as it is, or waits on somethin
   - a contact's upcoming meeting (Join).
 
   A row that is one button can't hold other buttons. These would need a "row with a main action" pattern, where the row's main area is the action and its other buttons sit beside it. That's a candidate for unicron if a second app needs it.
-- **The contact editor's form rows (2):** "Add phone" and "Paste a signature". They're rows in Mailbird's inset form, which is Mailbird's own pattern.
+- **The contact editor's form rows (2):** "Add phone" and "Paste a signature". They're rows in Vale's inset form, which is Vale's own pattern.
 
-Before, Mailbird's script counted 20. dsa counts 19, because dsa reads the code itself. An attachment card's Save button is handed to a `Tooltip` through a `render={…}` that spans several lines, so it belongs to the Tooltip; the script, which matched text, missed that.
+Before, Vale's script counted 20. dsa counts 19, because dsa reads the code itself. An attachment card's Save button is handed to a `Tooltip` through a `render={…}` that spans several lines, so it belongs to the Tooltip; the script, which matched text, missed that.
 
 ### One check, in dsa
 
@@ -76,5 +76,5 @@ Before, Mailbird's script counted 20. dsa counts 19, because dsa reads the code 
 ## Consequences
 
 - **Rows feel the same everywhere.** Hover is a background, selected uses one neutral, and disabled is 50% opacity, whether the row is a contact, a setting, or a choice.
-- **Raw buttons can't come back unnoticed** in Mailbird or in any other app that uses dsa 0.2.0.
+- **Raw buttons can't come back unnoticed** in Vale or in any other app that uses dsa 0.2.0.
 - **A "row with a main action" pattern** would clear the three rows that have their own buttons. It's worth raising when a second app needs one.

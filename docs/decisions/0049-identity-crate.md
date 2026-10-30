@@ -3,11 +3,11 @@
 - **Status:** Accepted; the crate moved out on 2026-10-16 to [`snds/ecosystem-identity`](https://github.com/snds/ecosystem-identity) (Lockdown D34) and `crates/app` consumes it by pinned commit
 - **Date:** 2026-10-16
 - **Builds on:** [ADR-0043](0043-locked-notes.md) (locked notes, Phase 33: the key this crate will take over)
-- **Decided elsewhere:** Lockdown decisions D10–D16 (`snds/lockdown` `docs/plan/decisions.md`) and the identity format spec (`docs/plan/01-identity.md`, v1.2). D10: any app can create the identity, and the first installed owns it until Lockdown adopts it. D11: the recovery kit belongs to the identity, not the app. D12: **Mailbird is the test-bed**: the crate is built in this repository first, then extracted. D13: personas are records, never flags. D15: the neutral identifier (`group.design.snds.identity`, `snds/identity`). D16: one Android signing key.
+- **Decided elsewhere:** Lockdown decisions D10–D16 (`snds/lockdown` `docs/plan/decisions.md`) and the identity format spec (`docs/plan/01-identity.md`, v1.2). D10: any app can create the identity, and the first installed owns it until Lockdown adopts it. D11: the recovery kit belongs to the identity, not the app. D12: **Vale is the test-bed**: the crate is built in this repository first, then extracted. D13: personas are records, never flags. D15: the neutral identifier (`group.design.snds.identity`, `snds/identity`). D16: one Android signing key.
 
 ## Decision
 
-Mailbird gains a second Rust crate, `crates/identity`, package `ecosystem-identity`. It owns the person's identity on disk (profile, personas, devices, key envelopes, consents) in the layout every ecosystem app reads, and it knows nothing about mail or notes. It lives here only because this is the first app that can prove it (D12); it moves out whole when Lockdown starts consuming it.
+Vale gains a second Rust crate, `crates/identity`, package `ecosystem-identity`. It owns the person's identity on disk (profile, personas, devices, key envelopes, consents) in the layout every ecosystem app reads, and it knows nothing about mail or notes. It lives here only because this is the first app that can prove it (D12); it moves out whole when Lockdown starts consuming it.
 
 ### What this PR adds (spec §10 steps 1 and 2)
 
@@ -23,7 +23,7 @@ Mailbird gains a second Rust crate, `crates/identity`, package `ecosystem-identi
 
 ### What the follow-up PR does (spec §10 step 3)
 
-Re-wrap the Phase 33 note-lock key as Mailbird's App Data Key for the persona that owns the notes, on the user's next unlock: `Identity::wrap_app_key(persona, &NotesKey)` once, keep the returned key id in the store's settings, and from then on open the notes with `unwrap_app_key`. The passphrase path in `notes_lock.rs` stays as the standalone lock (D5); the wrap is what puts the notes within reach of the recovery kit (D11). Nothing in `crates/core` changes in this PR.
+Re-wrap the Phase 33 note-lock key as Vale's App Data Key for the persona that owns the notes, on the user's next unlock: `Identity::wrap_app_key(persona, &NotesKey)` once, keep the returned key id in the store's settings, and from then on open the notes with `unwrap_app_key`. The passphrase path in `notes_lock.rs` stays as the standalone lock (D5); the wrap is what puts the notes within reach of the recovery kit (D11). Nothing in `crates/core` changes in this PR.
 
 ### Why here, not its own repository
 
@@ -56,6 +56,6 @@ The handshake between running apps (§6 step 3; §10 step 4), device enrolment o
 
 ## Consequences
 
-- Every new app-level key in Mailbird is wrapped through `wrap_app_key` from now on, or that data stays out of the recovery kit's reach (D11).
+- Every new app-level key in Vale is wrapped through `wrap_app_key` from now on, or that data stays out of the recovery kit's reach (D11).
 - A format change is a change to the records and the schema files together, with the conformance suite as the gate; the manifest and `v` fields are what make an older reader stop rather than guess.
-- The crate's working name and location are temporary by design (D12). Nothing in Mailbird may depend on the path beyond the two workspace lines.
+- The crate's working name and location are temporary by design (D12). Nothing in Vale may depend on the path beyond the two workspace lines.

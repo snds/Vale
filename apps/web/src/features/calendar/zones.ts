@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react"
 
 // A per-viewer display choice, so it lives in this browser only. Storage can
 // be missing (private windows, blocked site data); then it lasts the session.
-const KEY = "mailbird.calendar.secondZone"
+const KEY = "vale.calendar.secondZone"
 let memory: string | null = null
 const listeners = new Set<() => void>()
 const subscribe = (l: () => void) => {
@@ -12,7 +12,8 @@ const subscribe = (l: () => void) => {
 
 function read(): string | null {
   try {
-    return localStorage.getItem(KEY) ?? memory
+    // Saved before the rename (ADR-0071), under the old name.
+    return localStorage.getItem(KEY) ?? localStorage.getItem("mailbird.calendar.secondZone") ?? memory
   } catch {
     return memory
   }

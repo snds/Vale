@@ -19,7 +19,7 @@ const MAX_TITLE: usize = 24;
 #[serde(rename_all = "camelCase")]
 pub struct MenuBarPrefs {
     /// The mini calendar in the menu bar (macOS) or tray (Windows, Linux).
-    /// While it's on, closing the window keeps Mailbird running there.
+    /// While it's on, closing the window keeps Vale running there.
     #[serde(default = "yes")]
     pub enabled: bool,
     /// The next event's name beside the icon: in the macOS menu bar, and on

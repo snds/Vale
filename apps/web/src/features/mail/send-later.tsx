@@ -69,7 +69,7 @@ export function SendLaterMenu({
         open={custom}
         onOpenChange={setCustom}
         title="Send later"
-        description="Mailbird sends it at this time. The desktop app sends it the next time it runs if it's closed then; a gateway sends it on time."
+        description="Vale sends it at this time. The desktop app sends it the next time it runs if it's closed then; a gateway sends it on time."
         action="Schedule"
         onPick={onPick}
       />

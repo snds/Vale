@@ -39,7 +39,7 @@ What to expect while the app is in Testing:
 To ship a build with a client, set these at compile time:
 
 ```sh
-MAILBIRD_GOOGLE_CLIENT_ID=… MAILBIRD_GOOGLE_CLIENT_SECRET=… pnpm tauri build
+VALE_GOOGLE_CLIENT_ID=… VALE_GOOGLE_CLIENT_SECRET=… pnpm tauri build
 ```
 
 A client someone adds in the app always takes precedence over the built-in one.

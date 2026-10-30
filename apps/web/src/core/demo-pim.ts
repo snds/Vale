@@ -175,7 +175,7 @@ export function createDemoPim(emit: (event: CoreEvent, payload?: unknown) => voi
   let n = 0
   const ev = (calendarId: string, title: string, start: number, end: number, extra: Partial<DemoEvent> = {}): DemoEvent => ({
     id: `ev-${++n}`, calendarId, title, location: null, notes: null, start, end, allDay: false, repeat: "none",
-    skipped: [], overrides: {}, until: null, attendees: [], organizer: null, reminders: [], uid: `demo-${n}@mailbird`, travel: null, timeZone: null, ...extra,
+    skipped: [], overrides: {}, until: null, attendees: [], organizer: null, reminders: [], uid: `demo-${n}@vale`, travel: null, timeZone: null, ...extra,
   })
   const priya = { name: "Priya Raman", email: "priya@studio.example" }
   const team = (status: string) => [
@@ -209,7 +209,7 @@ export function createDemoPim(emit: (event: CoreEvent, payload?: unknown) => voi
     ...(new URLSearchParams(globalThis.location?.search ?? "").has("counter")
       ? [
           ev("cal-work", "Studio sync", at(3, 11), at(3, 12), {
-            uid: "sync-1@mailbird",
+            uid: "sync-1@vale",
             organizer: { name: "Me", email: "me@studio.example" },
             attendees: [
               { name: "Me", email: "me@studio.example", status: "accepted" },

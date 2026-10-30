@@ -1,6 +1,6 @@
 # Web gateway
 
-Mailbird in a browser, with your real accounts. The gateway is a small server you run yourself. It does everything the desktop app does: it syncs your accounts, keeps the mail database, and sends mail. It also serves the web app. The browser only shows the app and talks to the gateway ([ADR-0016](../../docs/decisions/0016-web-gateway.md)).
+Vale in a browser, with your real accounts. The gateway is a small server you run yourself. It does everything the desktop app does: it syncs your accounts, keeps the mail database, and sends mail. It also serves the web app. The browser only shows the app and talks to the gateway ([ADR-0016](../../docs/decisions/0016-web-gateway.md)).
 
 Without a gateway, the web app runs as a demo with sample mail.
 
@@ -41,8 +41,8 @@ mail.example.com {
 
 ```sh
 pnpm install && pnpm build
-cargo build --release -p mailbird-gateway
-GATEWAY_PASSWORD=… GATEWAY_KEY=… GATEWAY_WEB=apps/web/dist ./target/release/mailbird-gateway
+cargo build --release -p vale-gateway
+GATEWAY_PASSWORD=… GATEWAY_KEY=… GATEWAY_WEB=apps/web/dist ./target/release/vale-gateway
 ```
 
 ## Settings
@@ -62,7 +62,7 @@ GATEWAY_PASSWORD=… GATEWAY_KEY=… GATEWAY_WEB=apps/web/dist ./target/release/
 Open the gateway's address, sign in, then go to **Accounts**.
 
 - **iCloud, Fastmail, other IMAP, and other JMAP** work from anywhere. Use app-specific passwords, which you can revoke on their own.
-- **Gmail and Outlook** sign in on Google's or Microsoft's page, which then returns to `127.0.0.1` on the computer running Mailbird. Behind a gateway, that's the server. So these only work in a browser on the gateway's own machine. Elsewhere, the buttons say so. A public return address is planned once Mailbird has its own verified Google and Microsoft apps ([ADR-0013](../../docs/decisions/0013-google.md), [ADR-0014](../../docs/decisions/0014-microsoft.md)).
+- **Gmail and Outlook** sign in on Google's or Microsoft's page, which then returns to `127.0.0.1` on the computer running Vale. Behind a gateway, that's the server. So these only work in a browser on the gateway's own machine. Elsewhere, the buttons say so. A public return address is planned once Vale has its own verified Google and Microsoft apps ([ADR-0013](../../docs/decisions/0013-google.md), [ADR-0014](../../docs/decisions/0014-microsoft.md)).
 
 ## A shared inbox
 
@@ -78,7 +78,7 @@ Add people to the gateway's team so they work its mail with you ([ADR-0063](../.
 ## Security
 
 - **Sign-in is rate-limited:** after 10 wrong passwords in 5 minutes, the gateway answers 429 until the window passes. Each wrong guess also waits half a second.
-- **Every call that changes something needs the `X-Mailbird: 1` header.** Browsers won't add it to a request from another site, so it blocks cross-site request forgery even without the cookie rules.
+- **Every call that changes something needs the `X-Vale: 1` header.** Browsers won't add it to a request from another site, so it blocks cross-site request forgery even without the cookie rules.
 - **Every response sets a Content Security Policy,** `X-Frame-Options: DENY`, `nosniff`, and `no-referrer`. HTML mail still renders in its own sandboxed frame with remote images blocked until you load them.
 - **Sessions live in memory** and end after 30 days without use. Restarting the gateway signs every browser out.
 - **Whoever has the password can read all your mail.** Pick a long one, and run the gateway on a machine you trust.
@@ -96,13 +96,13 @@ The browser calls these; you don't need them to use the app.
 | Call | What it does |
 |---|---|
 | `GET /api/session` | `{"gateway":true,"signedIn":…}`, and `me` (`id`, `name`, `role`) when signed in. No session needed. |
-| `POST /api/session` | Signs in with `{"password":…}`, or a team member's `{"email":…,"password":…}`. Needs `X-Mailbird: 1`. |
+| `POST /api/session` | Signs in with `{"password":…}`, or a team member's `{"email":…,"password":…}`. Needs `X-Vale: 1`. |
 | `GET /api/members` | The team, owner first. The owner also sees emails and who hasn't joined. |
 | `POST /api/members` | The owner adds `{"name":…,"email":…}` and gets an invitation code. |
 | `POST /api/members/{id}/invite` · `DELETE /api/members/{id}` | The owner sends a new invitation, or takes someone off. |
 | `POST /api/join` | Opens an invitation: `{"code":…,"password":…}`, and signs in. |
 | `POST /api/here` | Says which conversation you have open (`{"threadId":…}` or `null`); everyone hears `inbox:here`. |
 | `DELETE /api/session` | Signs out. |
-| `POST /api/core/{command}` | Runs one app command with its JSON arguments. Needs a session and `X-Mailbird: 1`. Unknown commands are 404, bad arguments 400. |
+| `POST /api/core/{command}` | Runs one app command with its JSON arguments. Needs a session and `X-Vale: 1`. Unknown commands are 404, bad arguments 400. |
 | `GET /api/events` | The event stream (Server-Sent Events). |
 | `GET /api/attachments/{id}` | Downloads one attachment. |

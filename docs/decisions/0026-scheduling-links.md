@@ -45,7 +45,7 @@ Then it creates an event titled "Intro call with Rui Costa", with a note saying 
 
 - **Tokens are checked for shape** (32 hex characters) before reaching the core. An unknown and a deleted link look the same (404).
 - **Each route calls exactly one command** (`public_booking`, `book_slot`). They never reach the general command route, the event stream, or attachments.
-- **Booking needs the `X-Mailbird` header,** like every other write: another site's form can't book in someone's name.
+- **Booking needs the `X-Vale` header,** like every other write: another site's form can't book in someone's name.
 - **A global limit of 30 booking attempts per 10 minutes** sits on top of the per-link cap.
 - **Responses aren't cached** (`no-store`).
 
@@ -63,7 +63,7 @@ The page is `/book/{token}`, served by the same web app. It skips the sign-in ga
   - Validation (title, length, hours, days, read-only calendar), editing keeps the token, and deleting kills the page.
   - Free times only: inside the hours, two hours out, on the half hour, with a busy event removed.
   - Booking validation (name, email, a time that isn't free, an unknown token), the event and its note, no double booking, weekdays only, the daily cap, and a whole day running to midnight.
-- **Gateway HTTP test (`cargo test -p mailbird-gateway`):** visitors can't list links; the page and an unknown or malformed token; booking needs the header; a bad email; booking; a second booking of the same time refused; the event in the owner's calendar.
+- **Gateway HTTP test (`cargo test -p vale-gateway`):** visitors can't list links; the page and an unknown or malformed token; booking needs the header; a bad email; booking; a second booking of the same time refused; the event in the owner's calendar.
 - **Browser, demo (`phase16`, 15 checks):**
   - Validation; the link listed with its hours, and no Copy in the demo.
   - The preview shows title, length, note, host, and only times inside the hours.

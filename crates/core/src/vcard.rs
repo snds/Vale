@@ -263,7 +263,7 @@ fn photo_line(version: &str, url: &str) -> Result<Option<String>> {
 
 /// A new vCard 3.0, the version every CardDAV server (iCloud included) accepts.
 pub fn new_contact(uid: &str, input: &ContactInput) -> Result<String> {
-    let mut lines = vec![format!("UID:{uid}"), "PRODID:-//Mailbird//EN".to_string()];
+    let mut lines = vec![format!("UID:{uid}"), "PRODID:-//Vale//EN".to_string()];
     lines.extend(input_lines(input)?);
     if let Some(l) = input.photo.as_deref().map(|p| photo_line("3.0", p)).transpose()?.flatten() {
         lines.push(l);

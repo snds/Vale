@@ -54,7 +54,7 @@ The reminder worker remembers how far it has checked (`reminders_checked`): abou
 At launch it looks from that point up to now:
 
 - **What counts:** reminders for events that haven't been going more than an hour. A week back at most. One per occurrence, even with two reminders.
-- **One OS notification:** "Missed reminder: Standup · Starts in 4 min", or "3 reminders while Mailbird was closed".
+- **One OS notification:** "Missed reminder: Standup · Starts in 4 min", or "3 reminders while Vale was closed".
 - **In the app:** the first 5 wait in the app state until the UI asks (`take_missed_reminders`), and each shows as a "Missed:" toast that stays until dismissed. At launch the window isn't listening yet, so an event would be lost. Each is handed over once.
 - **First launch** (no record yet) catches nothing up and starts the live check a minute back, as before.
 

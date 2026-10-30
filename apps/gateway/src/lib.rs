@@ -1,4 +1,4 @@
-//! The web gateway (ADR-0016): the Mailbird web app with real accounts.
+//! The web gateway (ADR-0016): the Vale web app with real accounts.
 //!
 //! Browsers can't speak IMAP or SMTP, so the web build talks to this small
 //! server, which runs the same `pim-app` and `pim-core` as the desktop app:
@@ -348,10 +348,10 @@ fn err(status: StatusCode, msg: impl Into<String>) -> Response {
     (status, Json(json!({ "error": msg.into() }))).into_response()
 }
 
-/// Writes must carry `X-Mailbird: 1`. A form or `fetch` from another site
+/// Writes must carry `X-Vale: 1`. A form or `fetch` from another site
 /// can't add it without a CORS preflight, which the gateway never allows.
 fn csrf_ok(headers: &HeaderMap) -> bool {
-    headers.get("x-mailbird").and_then(|v| v.to_str().ok()) == Some("1")
+    headers.get("x-vale").and_then(|v| v.to_str().ok()) == Some("1")
 }
 
 // ── Routes ──────────────────────────────────────────────────────────────────
@@ -408,7 +408,7 @@ async fn app_page(index: PathBuf) -> Response {
 
 /// Lets the page ask for a session only when it's on a gateway. A static
 /// host (the demo) then makes no API calls, and logs no 404s.
-pub const GATEWAY_META: &str = r#"<meta name="mailbird-gateway" content="1">"#;
+pub const GATEWAY_META: &str = r#"<meta name="vale-gateway" content="1">"#;
 
 async fn get_session(State(gw): State<Gw>, headers: HeaderMap) -> Response {
     // Tells the web app it's on a gateway, and whether to ask for the password.
@@ -448,7 +448,7 @@ fn locked_out(gw: &Gateway) -> bool {
 
 async fn sign_in(State(gw): State<Gw>, headers: HeaderMap, Json(body): Json<SignIn>) -> Response {
     if !csrf_ok(&headers) {
-        return err(StatusCode::FORBIDDEN, "missing the X-Mailbird header");
+        return err(StatusCode::FORBIDDEN, "missing the X-Vale header");
     }
     if locked_out(&gw) {
         return err(StatusCode::TOO_MANY_REQUESTS, "too many wrong passwords — wait a few minutes");
@@ -477,7 +477,7 @@ async fn sign_in(State(gw): State<Gw>, headers: HeaderMap, Json(body): Json<Sign
 
 async fn sign_out(State(gw): State<Gw>, headers: HeaderMap) -> Response {
     if !csrf_ok(&headers) {
-        return err(StatusCode::FORBIDDEN, "missing the X-Mailbird header");
+        return err(StatusCode::FORBIDDEN, "missing the X-Vale header");
     }
     if let Some(token) = cookie(&headers, COOKIE) {
         gw.sessions.lock().expect("sessions lock").retain(|t, _| !same(t, &token));
@@ -490,7 +490,7 @@ async fn sign_out(State(gw): State<Gw>, headers: HeaderMap) -> Response {
 async fn core(State(gw): State<Gw>, UrlPath(name): UrlPath<String>, headers: HeaderMap, body: Bytes) -> Response {
     let Some(who) = gw.session(&headers) else { return err(StatusCode::UNAUTHORIZED, "sign in first") };
     if !csrf_ok(&headers) {
-        return err(StatusCode::FORBIDDEN, "missing the X-Mailbird header");
+        return err(StatusCode::FORBIDDEN, "missing the X-Vale header");
     }
     if !who.owner && !MEMBER_COMMANDS.contains(&name.as_str()) {
         return err(StatusCode::FORBIDDEN, "only the gateway's owner can do that");
@@ -573,7 +573,7 @@ async fn booking_page(State(gw): State<Gw>, UrlPath(token): UrlPath<String>) -> 
 async fn booking(State(gw): State<Gw>, UrlPath(token): UrlPath<String>, headers: HeaderMap, body: Bytes) -> Response {
     // Same rule as the app's writes: another site's form can't book for someone.
     if !csrf_ok(&headers) {
-        return err(StatusCode::FORBIDDEN, "missing the X-Mailbird header");
+        return err(StatusCode::FORBIDDEN, "missing the X-Vale header");
     }
     if !token_ok(&token) {
         return err(StatusCode::NOT_FOUND, "this booking link isn't active");
@@ -602,7 +602,7 @@ async fn managed_booking(State(gw): State<Gw>, UrlPath((token, code)): UrlPath<(
 
 async fn change_booking(State(gw): State<Gw>, UrlPath((token, code)): UrlPath<(String, String)>, headers: HeaderMap, body: Bytes) -> Response {
     if !csrf_ok(&headers) {
-        return err(StatusCode::FORBIDDEN, "missing the X-Mailbird header");
+        return err(StatusCode::FORBIDDEN, "missing the X-Vale header");
     }
     if !token_ok(&token) || !token_ok(&code) {
         return err(StatusCode::NOT_FOUND, "this booking link isn't active");
@@ -689,7 +689,7 @@ async fn list_members(State(gw): State<Gw>, headers: HeaderMap) -> Response {
 fn not_owner(gw: &Gateway, headers: &HeaderMap) -> Option<Response> {
     let Some(who) = gw.session(headers) else { return Some(err(StatusCode::UNAUTHORIZED, "sign in first")) };
     if !csrf_ok(headers) {
-        return Some(err(StatusCode::FORBIDDEN, "missing the X-Mailbird header"));
+        return Some(err(StatusCode::FORBIDDEN, "missing the X-Vale header"));
     }
     (!who.owner).then(|| err(StatusCode::FORBIDDEN, "only the gateway's owner can do that"))
 }
@@ -748,7 +748,7 @@ struct Join {
 /// Opening an invitation: they choose a password and are signed in.
 async fn join(State(gw): State<Gw>, headers: HeaderMap, Json(body): Json<Join>) -> Response {
     if !csrf_ok(&headers) {
-        return err(StatusCode::FORBIDDEN, "missing the X-Mailbird header");
+        return err(StatusCode::FORBIDDEN, "missing the X-Vale header");
     }
     if locked_out(&gw) {
         return err(StatusCode::TOO_MANY_REQUESTS, "too many tries — wait a few minutes");
@@ -779,7 +779,7 @@ struct Here {
 async fn here(State(gw): State<Gw>, headers: HeaderMap, Json(body): Json<Here>) -> Response {
     let Some(who) = gw.session(&headers) else { return err(StatusCode::UNAUTHORIZED, "sign in first") };
     if !csrf_ok(&headers) {
-        return err(StatusCode::FORBIDDEN, "missing the X-Mailbird header");
+        return err(StatusCode::FORBIDDEN, "missing the X-Vale header");
     }
     {
         let mut here = gw.here.lock().expect("here lock");

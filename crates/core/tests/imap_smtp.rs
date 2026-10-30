@@ -186,7 +186,7 @@ async fn full_round_trip() {
     let in_thread: Vec<_> = store.thread(&first.thread_id).unwrap().into_iter().filter(|m| m.summary.mailbox == pim_core::store::SENT).collect();
     assert_eq!(in_thread.len(), 1, "one Sent copy in the conversation");
     assert!(store.sync_cursor(&account, pim_core::store::SENT).unwrap().oldest_uid.is_some(), "and it's the server's");
-    if let Ok(dir) = std::env::var("MAILBIRD_IT_SMTP_OUT") {
+    if let Ok(dir) = std::env::var("VALE_IT_SMTP_OUT") {
         let rcpts = std::fs::read_to_string(format!("{dir}/rcpts.txt")).unwrap();
         assert!(rcpts.lines().any(|l| l == "ana@example.com"), "SMTP sink received it");
     }
@@ -200,7 +200,7 @@ async fn full_round_trip() {
         ..draft.clone()
     };
     net::send(&config(), PASS, &reply).await.unwrap();
-    if let Ok(dir) = std::env::var("MAILBIRD_IT_SMTP_OUT") {
+    if let Ok(dir) = std::env::var("VALE_IT_SMTP_OUT") {
         let newest = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).filter(|e| e.path().extension().is_some_and(|x| x == "eml")).max_by_key(|e| e.metadata().unwrap().modified().unwrap()).unwrap();
         let sent = std::fs::read(newest.path()).unwrap();
         assert!(String::from_utf8_lossy(&sent).contains("text/calendar; method=REPLY"), "the sink got the calendar part");

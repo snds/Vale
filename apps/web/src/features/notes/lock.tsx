@@ -60,7 +60,7 @@ function SetForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => voi
       </DialogHeader>
       <p className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
         <Icon name="warning" tone="destructive" className="mt-0.5 size-4" />
-        <span>If you forget it, your locked notes can't be opened. Nobody can reset it, Mailbird included.</span>
+        <span>If you forget it, your locked notes can't be opened. Nobody can reset it, Vale included.</span>
       </p>
       {/* Labels stay short; help and errors are descriptions, so a field's name is just its name. */}
       <div className="flex flex-col gap-1 text-sm">

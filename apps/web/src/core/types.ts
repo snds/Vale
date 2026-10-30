@@ -408,7 +408,7 @@ export interface ManageLink {
 
 /** The menu-bar mini calendar on the desktop (ADR-0054). */
 export interface MenuBarPrefs {
-  /** The calendar in the menu bar or tray. While it's on, closing the window keeps Mailbird running there. */
+  /** The calendar in the menu bar or tray. While it's on, closing the window keeps Vale running there. */
   enabled: boolean
   /** The next event's name beside the icon (macOS, and Linux panels that show a label). */
   showNext: boolean

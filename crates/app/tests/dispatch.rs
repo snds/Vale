@@ -161,7 +161,7 @@ async fn every_command_routes_and_works() {
     prefs["provider"] = json!("off");
     dispatch(&app, &state, "set_ai_prefs", json!({ "prefs": prefs })).await.unwrap();
     // The menu bar (ADR-0054): on by default, it follows its prefs, and the
-    // host is told; "Open Mailbird" reaches the host with its jump.
+    // host is told; "Open Vale" reaches the host with its jump.
     assert_eq!(json_of(dispatch(&app, &state, "menu_bar_prefs", Value::Null).await.unwrap()), json!({ "enabled": true, "showNext": true }));
     let bar = json_of(dispatch(&app, &state, "menu_bar_state", Value::Null).await.unwrap());
     assert_eq!(bar["enabled"], true);
@@ -574,7 +574,7 @@ async fn the_identity_holds_the_notes_key() {
         let Attach::Attached(id) = Identity::attach(&config.root, APP_ID, &ks, None).unwrap() else { panic!("no identity") };
         let p = id.personas().next().unwrap().persona_id;
         let n = id.app_keys(p, APP_ID).len();
-        assert_eq!(n, id.envelopes().filter(|e| e.purpose == Purpose::AppData).count(), "every app key is labelled Mailbird's");
+        assert_eq!(n, id.envelopes().filter(|e| e.purpose == Purpose::AppData).count(), "every app key is labelled Vale's");
         n
     };
 
@@ -605,7 +605,7 @@ async fn the_identity_holds_the_notes_key() {
     assert!(json_of(dispatch(&app, &state, "open_locked_note", json!({ "id": note["id"] })).await.unwrap())["markdown"].as_str().unwrap().contains("12-34-56"));
 
     // A device restored from the recovery kit remembers no envelope: the
-    // identity's Mailbird keys are searched, and the current one opens.
+    // identity's Vale keys are searched, and the current one opens.
     state.store.lock().unwrap().set_setting("notes.identity", None).unwrap();
     dispatch(&app, &state, "lock_notes_now", Value::Null).await.unwrap();
     assert_eq!(json_of(dispatch(&app, &state, "notes_lock", Value::Null).await.unwrap())["identity"], true, "an identity is here, so it's offered");

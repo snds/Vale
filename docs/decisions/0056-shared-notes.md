@@ -4,7 +4,7 @@
 - **Date:** 2026-10-17
 - **Builds on:** [ADR-0012](0012-notes.md) (notes, Yjs, and the relay), [ADR-0043](0043-locked-notes.md) (locked notes), [ADR-0044](0044-images-in-notes.md) (images in notes)
 
-Notes synced between your own devices, but a note couldn't be shared with someone else. Planning a trip or an agenda with another person meant copying text back and forth. This phase lets you share one note by link. The other person sees it in their own Mailbird, and both of you type into it at once.
+Notes synced between your own devices, but a note couldn't be shared with someone else. Planning a trip or an agenda with another person meant copying text back and forth. This phase lets you share one note by link. The other person sees it in their own Vale, and both of you type into it at once.
 
 ## Decisions
 
@@ -24,7 +24,7 @@ Notes synced between your own devices, but a note couldn't be shared with someon
   `https://notes.example.com/share#…`
 - The part after `#` holds the relay, the share's id, the mode, the note's title, your name, and a **share token**.
 - Browsers never send the part after `#` to a server, so the token only travels where the link itself goes.
-- Opened in a browser, the relay serves a short page that explains how to open the link in Mailbird.
+- Opened in a browser, the relay serves a short page that explains how to open the link in Vale.
 - **The share token is derived, not stored.** It is an HMAC-SHA256 of the share's id under the relay's own token. The relay can check any link without keeping a list of tokens, and a link opens exactly one note and nothing else.
 
 ### What the relay does

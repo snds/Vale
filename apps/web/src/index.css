@@ -1,12 +1,12 @@
 /*
  * The shared design system (unicron): Tailwind, the core tokens, Inter, the
  * Material Symbols font, the dark variant, the base layer, and the
- * primitives' classes. Then Mailbird's own roles (app-extension.css).
+ * primitives' classes. Then Vale's own roles (app-extension.css).
  */
 @import "@unicron/ui/styles";
 @import "./styles/app-extension.css";
 
-/* What only Mailbird adds to the base layer; unicron's sets borders, outlines, and the body colors. */
+/* What only Vale adds to the base layer; unicron's sets borders, outlines, and the body colors. */
 @layer base {
   /* How much of the screen the on-screen keyboard covers (src/lib/keyboard-inset.ts). */
   :root {

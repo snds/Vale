@@ -1,8 +1,8 @@
-//! `mailbird-gateway`: configuration comes from the environment (see README.md).
+//! `vale-gateway`: configuration comes from the environment (see README.md).
 
 use std::path::PathBuf;
 
-use mailbird_gateway::{Config, Gateway, Members, SealedFile, router};
+use vale_gateway::{Config, Gateway, Members, SealedFile, router};
 
 fn env(k: &str) -> Option<String> {
     std::env::var(k).ok().filter(|v| !v.trim().is_empty())

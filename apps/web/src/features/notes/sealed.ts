@@ -30,6 +30,7 @@ export function newKey(): string {
 export const isKey = (k: string) => /^[A-Za-z0-9_-]{43}$/.test(k.trim())
 
 const keyBytes = (k: string) => fromBase64(k.trim().replaceAll("-", "+").replaceAll("_", "/") + "=")
+// Keys derive from this; the name from before the rename, kept: it's in stored or synced data (ADR-0071).
 const SALT = new TextEncoder().encode("mailbird-sealed-v1")
 
 /** The key for one document, from a root key. */

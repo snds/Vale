@@ -102,7 +102,7 @@ impl RelayClient {
 
     /// Checks the address and token, and what the relay can push to.
     pub async fn info(&self) -> Result<RelayInfo> {
-        self.ok(self.req(reqwest::Method::GET, "/v1/info")).await?.json().await.map_err(|_| Error::Network("that address doesn't look like a Mailbird push relay".into()))
+        self.ok(self.req(reqwest::Method::GET, "/v1/info")).await?.json().await.map_err(|_| Error::Network("that address doesn't look like a Vale push relay".into()))
     }
 
     /// Registers (or updates) this device's push target.

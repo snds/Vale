@@ -17,7 +17,7 @@ const MAX_SKETCH: usize = 4 * 1024 * 1024;
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
 
 fn refuse(why: &str) -> Error {
-    Error::Invalid(format!("that isn't a sketch Mailbird can keep ({why})"))
+    Error::Invalid(format!("that isn't a sketch Vale can keep ({why})"))
 }
 
 /// A number, as SVG writes them.
@@ -44,6 +44,7 @@ fn check_attrs(e: &BytesStart, name: &str) -> Result<()> {
             ("svg", "xmlns") => value == SVG_NS,
             ("svg", "viewBox") => value.split_whitespace().count() == 4 && value.split_whitespace().all(numeric),
             ("svg", "width" | "height") => numeric(&value),
+            // Saved sketches carry the name from before the rename (ADR-0071).
             ("metadata", "id") => value == "mailbird-sketch",
             ("g" | "path", "fill" | "stroke") => color(&value),
             ("g" | "path", "stroke-width" | "opacity" | "fill-opacity" | "stroke-opacity") => numeric(&value),

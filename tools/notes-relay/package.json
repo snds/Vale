@@ -2,7 +2,7 @@
   "name": "notes-relay",
   "private": true,
   "version": "0.1.0",
-  "description": "A small, self-hostable Hocuspocus relay for Mailbird notes sync",
+  "description": "A small, self-hostable Hocuspocus relay for Vale notes sync",
   "type": "module",
   "license": "MIT",
   "scripts": {

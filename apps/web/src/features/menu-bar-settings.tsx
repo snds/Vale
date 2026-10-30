@@ -18,7 +18,7 @@ export function MenuBarSettingsSection() {
             Calendar in the menu bar
           </h3>
           <p className="text-xs text-muted-foreground">
-            A small calendar under an icon in the menu bar, or the tray on Windows and Linux: what's next, the month, and quick add. While it's on, closing the window keeps Mailbird running there.
+            A small calendar under an icon in the menu bar, or the tray on Windows and Linux: what's next, the month, and quick add. While it's on, closing the window keeps Vale running there.
           </p>
         </div>
         <Switch

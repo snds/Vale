@@ -3011,62 +3011,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mailbird-gateway"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "futures",
- "log",
- "pim-app",
- "pim-core",
- "reqwest",
- "ring",
- "rustls",
- "serde",
- "serde_json",
- "tokio",
- "tower-http",
-]
-
-[[package]]
-name = "mailbird-push-relay"
-version = "0.1.0"
-dependencies = [
- "async-imap",
- "axum",
- "base64 0.22.1",
- "futures",
- "pim-core",
- "reqwest",
- "ring",
- "rustls",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "mailbird-shell"
-version = "0.1.0"
-dependencies = [
- "keyring",
- "log",
- "pim-app",
- "pim-core",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-log",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tokio",
-]
-
-[[package]]
 name = "markup5ever"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6087,6 +6031,62 @@ dependencies = [
  "js-sys",
  "serde_core",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "vale-gateway"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "futures",
+ "log",
+ "pim-app",
+ "pim-core",
+ "reqwest",
+ "ring",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-http",
+]
+
+[[package]]
+name = "vale-push-relay"
+version = "0.1.0"
+dependencies = [
+ "async-imap",
+ "axum",
+ "base64 0.22.1",
+ "futures",
+ "pim-core",
+ "reqwest",
+ "ring",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "vale-shell"
+version = "0.1.0"
+dependencies = [
+ "keyring",
+ "log",
+ "pim-app",
+ "pim-core",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-log",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tokio",
 ]
 
 [[package]]

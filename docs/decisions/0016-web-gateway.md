@@ -4,7 +4,7 @@
 - **Date:** 2026-10-14
 - **Builds on:** [ADR-0002](0002-shells.md), [ADR-0007](0007-mail-engine.md), [ADR-0015](0015-mobile-groundwork.md)
 
-ADR-0002 planned the web build as "a PWA that talks to a self-hostable gateway running the same `pim-core`". Until now the browser only ran the demo. Browsers can't open raw TCP sockets, so they can't speak IMAP or SMTP themselves. The gateway is that missing server: Mailbird with real accounts, in any browser, on a machine you run.
+ADR-0002 planned the web build as "a PWA that talks to a self-hostable gateway running the same `pim-core`". Until now the browser only ran the demo. Browsers can't open raw TCP sockets, so they can't speak IMAP or SMTP themselves. The gateway is that missing server: Vale with real accounts, in any browser, on a machine you run.
 
 ## Decisions
 
@@ -23,7 +23,7 @@ Why not keep two copies: every command the desktop gains would need a second gat
 
 ### The gateway: a small, single-person server
 
-`apps/gateway` (`mailbird-gateway`) is axum on the same `pim-app`:
+`apps/gateway` (`vale-gateway`) is axum on the same `pim-app`:
 
 | Route | Does |
 |---|---|
@@ -34,7 +34,7 @@ Why not keep two copies: every command the desktop gains would need a second gat
 | `GET /api/attachments/{id}` | Downloads one attachment. |
 | everything else | The built web app, with a single-page fallback. Unknown `/api/*` paths are 404. |
 
-The page the gateway serves carries `<meta name="mailbird-gateway">`. The web app asks for a session only when it sees that mark. On a plain static host (the demo), it makes no API calls at all, so it logs no 404s.
+The page the gateway serves carries `<meta name="vale-gateway">`. The web app asks for a session only when it sees that mark. On a plain static host (the demo), it makes no API calls at all, so it logs no 404s.
 
 - **One password, no user accounts.** The gateway is for one person, like the relay. Multi-user would mean per-user stores, quotas, and admin screens. That's a different product.
 - **Sessions are random 256-bit tokens in memory,** in a cookie marked `HttpOnly`, `SameSite=Strict`, and `Secure` (unless you opt out for plain http on one machine). They end after 30 days without use, or when the gateway restarts.
@@ -42,7 +42,7 @@ The page the gateway serves carries `<meta name="mailbird-gateway">`. The web ap
 
 ### Security
 
-- **CSRF:** every call that changes something needs `X-Mailbird: 1`. Browsers can't add a custom header to a cross-site request without a CORS preflight, and the gateway answers no preflights. The cookie's `SameSite=Strict` is a second layer.
+- **CSRF:** every call that changes something needs `X-Vale: 1`. Browsers can't add a custom header to a cross-site request without a CORS preflight, and the gateway answers no preflights. The cookie's `SameSite=Strict` is a second layer.
 - **Brute force:** 10 wrong passwords in 5 minutes locks sign-in for the rest of the window (429). Each failure waits 500 ms. Passwords compare in constant time.
 - **Headers on every response:** a Content Security Policy (scripts only from the gateway, no framing), `X-Frame-Options: DENY`, `nosniff`, and `no-referrer`. HTML mail still renders in its sandboxed frame. The browser test confirmed the tracker image stays blocked.
 - **Secrets at rest:** account passwords and OAuth tokens are sealed with `GATEWAY_KEY` (AES-256-GCM, a fresh nonce for each value) in `secrets.json`, mode 0600. The data folder is mode 0700.
@@ -65,7 +65,7 @@ A public return address (`https://your-gateway/oauth/callback`) would need a "we
 ## Verification
 
 - **`cargo test -p pim-app`:** every command name routes, and commands emit their events through the host.
-- **`cargo test -p mailbird-gateway`** over real HTTP covers:
+- **`cargo test -p vale-gateway`** over real HTTP covers:
   - session states, the CSRF header, and cookie flags
   - unknown commands and bad arguments
   - an event arriving on the stream after a change

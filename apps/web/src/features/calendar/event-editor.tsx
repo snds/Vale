@@ -20,7 +20,7 @@ import { deviceZone, zoneAbbr, zoneCity, zonedDate, zonedInput, zones } from "./
 function jitsiRoom() {
   const bytes = crypto.getRandomValues(new Uint8Array(9))
   const id = Array.from(bytes, (b) => "abcdefghjkmnpqrstuvwxyz23456789"[b % 31]).join("")
-  return `https://meet.jit.si/Mailbird-${id.slice(0, 3)}-${id.slice(3, 6)}-${id.slice(6)}`
+  return `https://meet.jit.si/Vale-${id.slice(0, 3)}-${id.slice(3, 6)}-${id.slice(6)}`
 }
 
 /** Minutes; how long getting there takes, blocked out before the start. */

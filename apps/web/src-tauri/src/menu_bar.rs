@@ -1,5 +1,5 @@
 //! The menu-bar mini calendar on the desktop (ADR-0054): a tray icon that
-//! opens a small calendar window under it, and keeps Mailbird running when
+//! opens a small calendar window under it, and keeps Vale running when
 //! its window closes. What it says comes from `pim_app::menu_bar`; this only
 //! draws it.
 
@@ -65,10 +65,10 @@ fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<TrayIcon<R>> {
     let menu = Menu::with_items(
         app,
         &[
-            &MenuItem::with_id(app, "open", "Open Mailbird", true, None::<&str>)?,
+            &MenuItem::with_id(app, "open", "Open Vale", true, None::<&str>)?,
             &MenuItem::with_id(app, "new_event", "New event…", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "quit", "Quit Mailbird", true, None::<&str>)?,
+            &MenuItem::with_id(app, "quit", "Quit Vale", true, None::<&str>)?,
         ],
     )?;
     // macOS draws a template icon in the menu bar's own ink, light or dark;
@@ -110,7 +110,7 @@ fn toggle_mini<R: Runtime>(app: &AppHandle<R>, at: Rect) {
     let window = match app.get_webview_window(MINI) {
         Some(w) => w,
         None => match WebviewWindowBuilder::new(app, MINI, WebviewUrl::App("index.html?mini".into()))
-            .title("Mailbird")
+            .title("Vale")
             .inner_size(MINI_SIZE.0, MINI_SIZE.1)
             .decorations(false)
             .resizable(false)

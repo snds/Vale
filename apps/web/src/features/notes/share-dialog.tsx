@@ -23,7 +23,7 @@ export function ShareDialog({ note, open, onOpenChange, onSetUpSync }: { note: N
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Share “{note.title || "New note"}”</DialogTitle>
-          <DialogDescription>People with the link see it in their Mailbird, and edits show up for everyone as they happen.</DialogDescription>
+          <DialogDescription>People with the link see it in their Vale, and edits show up for everyone as they happen.</DialogDescription>
         </DialogHeader>
         {open && <ShareForm note={note} onSetUpSync={onSetUpSync} onDone={() => onOpenChange(false)} />}
       </DialogContent>
@@ -87,7 +87,7 @@ function ShareForm({ note, onSetUpSync, onDone }: { note: NoteSummary; onSetUpSy
     onDone()
     openComposer({
       subject: note.title || "A shared note",
-      body: `I shared a note with you${live?.mode === "view" ? " to read" : ""}: “${note.title || "New note"}”.\n\nOpen it in Mailbird: ${link}\n`,
+      body: `I shared a note with you${live?.mode === "view" ? " to read" : ""}: “${note.title || "New note"}”.\n\nOpen it in Vale: ${link}\n`,
     })
   }
 

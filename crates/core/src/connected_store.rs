@@ -47,7 +47,7 @@ fn birthday_ics(name: &str, birthday: &str) -> Option<(String, Option<i32>)> {
     let next = first.succ_opt()?;
     let summary = name.replace(['\r', '\n'], " ");
     let ics = format!(
-        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Mailbird//Birthdays//EN\r\nBEGIN:VEVENT\r\nUID:birthday\r\nDTSTART;VALUE=DATE:{}\r\nDTEND;VALUE=DATE:{}\r\nRRULE:FREQ=YEARLY\r\nSUMMARY:{summary}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Vale//Birthdays//EN\r\nBEGIN:VEVENT\r\nUID:birthday\r\nDTSTART;VALUE=DATE:{}\r\nDTEND;VALUE=DATE:{}\r\nRRULE:FREQ=YEARLY\r\nSUMMARY:{summary}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
         first.format("%Y%m%d"),
         next.format("%Y%m%d"),
     );

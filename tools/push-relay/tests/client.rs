@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use mailbird_push_relay::{api, crypto, notify, store, watch};
+use vale_push_relay::{api, crypto, notify, store, watch};
 use pim_core::net::push_relay::{PushTarget, RelayClient, account_key};
 use pim_core::{AccountConfig, Error, Provider, Security, ServerConfig};
 

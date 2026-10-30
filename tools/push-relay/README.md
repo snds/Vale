@@ -42,8 +42,8 @@ relay.example.com {
 ### Without Docker
 
 ```sh
-cargo build --release -p mailbird-push-relay
-RELAY_TOKEN=… RELAY_KEY=… ./target/release/mailbird-push-relay
+cargo build --release -p vale-push-relay
+RELAY_TOKEN=… RELAY_KEY=… ./target/release/vale-push-relay
 ```
 
 ## Settings

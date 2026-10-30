@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Mailbird",
+  "productName": "Vale",
   "version": "0.1.0",
-  "identifier": "design.snds.mailbird",
+  "identifier": "design.snds.vale",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Mailbird",
+        "title": "Vale",
         "width": 1280,
         "height": 800,
         "minWidth": 360,

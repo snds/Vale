@@ -81,6 +81,7 @@ export function relayUrlProblem(url: string): string | null {
   return u.protocol === "ws:" ? "Use wss:// — notes never travel unencrypted off this device" : "The address starts with wss://"
 }
 
+// Every document on the relay starts with this; the name from before the rename, kept: it's in stored or synced data (ADR-0071).
 const PREFIX = "mailbird/"
 const CONCURRENCY = 4
 const SYNC_TIMEOUT = 15_000

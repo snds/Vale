@@ -1,4 +1,4 @@
-# Mailbird web gateway on a personal server. See README.md.
+# Vale web gateway on a personal server. See README.md.
 #   cp .env.example .env   # fill in GATEWAY_PASSWORD and GATEWAY_KEY
 #   docker compose up -d
 services:
@@ -6,7 +6,7 @@ services:
     build:
       context: ../..
       dockerfile: apps/gateway/Dockerfile
-    image: mailbird-gateway
+    image: vale-gateway
     restart: unless-stopped
     env_file: .env
     volumes:

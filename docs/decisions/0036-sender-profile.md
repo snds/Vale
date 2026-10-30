@@ -4,7 +4,7 @@
 - **Date:** 2026-10-15
 - **Builds on:** [ADR-0019](0019-connected-calendar.md) (mail and meetings on each contact), [ADR-0027](0027-faces-and-sources.md) (contact photos), [ADR-0035](0035-links-that-keep-up.md) (notes linked to people)
 
-The [competitive analysis](../research/competitive-analysis.md) §3 credits **Superhuman's sender profile in the mail pane**: who someone is, and what you've done together, without leaving the message. Mailbird already had the pieces on each contact's card: photo, title, quick actions, recent mail, meetings, and notes. But reading their mail meant going to Contacts to see any of it. And people who aren't contacts had nothing at all.
+The [competitive analysis](../research/competitive-analysis.md) §3 credits **Superhuman's sender profile in the mail pane**: who someone is, and what you've done together, without leaving the message. Vale already had the pieces on each contact's card: photo, title, quick actions, recent mail, meetings, and notes. But reading their mail meant going to Contacts to see any of it. And people who aren't contacts had nothing at all.
 
 ## Decisions
 

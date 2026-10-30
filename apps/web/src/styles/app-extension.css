@@ -1,12 +1,12 @@
 /*
- * Mailbird's app-extension layer, over the shared core (@unicron/tokens).
+ * Vale's app-extension layer, over the shared core (@unicron/tokens).
  *
- * The core carries the three-tier system Mailbird seeded: global primitives
+ * The core carries the three-tier system Vale seeded: global primitives
  * (--g-*, including the note-card hues), the shadcn semantic contract, and
  * the knobs core primitives read (--c-icon-*, --c-sheet-*). This file holds
- * only what Mailbird understands: which pane is chrome, one hue per app area,
+ * only what Vale understands: which pane is chrome, one hue per app area,
  * what "unread" looks like, tinted note cards, and the --c-* knobs of
- * Mailbird-only components.
+ * Vale-only components.
  *
  * Rules (unicron docs/05-consuming.md): alias tier 1 or tier 2, never a raw
  * value (sketch paper is the one deliberate exception, below); swap only in
@@ -62,7 +62,7 @@
   --sidebar: var(--surface-chrome);
 }
 
-/* ── Tier 3 · Mailbird-only component knobs ─────────────────────────────── */
+/* ── Tier 3 · Vale-only component knobs ─────────────────────────────── */
 :root {
   /* App shell */
   --c-shell-rail-width: 4.5rem;
@@ -142,7 +142,7 @@
   --c-calendar-today-chip-text: var(--g-neutral-0);
 }
 
-/* Mailbird's roles as Tailwind utilities (bg-surface-chrome, text-vertical-mail…). */
+/* Vale's roles as Tailwind utilities (bg-surface-chrome, text-vertical-mail…). */
 @theme inline {
   --color-surface-chrome: var(--surface-chrome);
   --color-surface-canvas: var(--surface-canvas);

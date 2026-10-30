@@ -24,7 +24,7 @@ Phase 4 brings Google. Microsoft Graph follows as Phase 4b and reuses the OAuth 
   - `invalid_grant` (revoked, expired, or the password changed) shows as **Sign in again** on the account.
   - Removing the account revokes the token with Google first.
 - **Clients:** an OAuth client ID is a registration with Google, not a secret we can bundle for everyone yet.
-  - **Built in:** builds may include one at compile time (`MAILBIRD_GOOGLE_CLIENT_ID` / `_SECRET`).
+  - **Built in:** builds may include one at compile time (`VALE_GOOGLE_CLIENT_ID` / `_SECRET`).
   - **Your own:** anyone can paste their own in the app, and that takes precedence over the built-in one. See [google-verification.md](../google-verification.md).
   - **The client secret:** Google requires one for Desktop clients, and says it isn't confidential in an installed app.
 
