@@ -56,7 +56,9 @@ jobs:
   # Real IMAP (Dovecot) + SMTP (aiosmtpd) round trip: sync, flag push, archive
   # move, send, and the Sent copy. See tools/test-mail-servers/.
   mail-integration:
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04 ships Dovecot 2.3; 2.4 (ubuntu-latest from late 2026) rejects
+    # the test config in tools/test-mail-servers/start.sh.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install Dovecot
