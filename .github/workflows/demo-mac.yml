@@ -51,9 +51,11 @@ jobs:
           dmg=$(find target/universal-apple-darwin/release/bundle/dmg -name '*.dmg' | head -1)
           cp "$dmg" Vale-Demo-mac.dmg
           ls -l Vale-Demo-mac.dmg
-          app=$(find target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
-          lipo -archs "$app/Contents/MacOS/"*
-          codesign -dv "$app" 2>&1 | head -5
+          # Tauri removes the loose .app once it's in the dmg: check the one inside.
+          hdiutil attach -nobrowse -readonly -mountpoint /tmp/vale-demo Vale-Demo-mac.dmg
+          lipo -archs "/tmp/vale-demo/Vale Demo.app/Contents/MacOS/"*
+          codesign -dv "/tmp/vale-demo/Vale Demo.app" 2>&1 | head -5
+          hdiutil detach /tmp/vale-demo
       - uses: actions/upload-artifact@v4
         with:
           name: Vale-Demo-mac
