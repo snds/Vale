@@ -120,7 +120,7 @@ pub async fn complete(model: &Model, system: &str, user: &str) -> Result<String>
             if !res.status().is_success() {
                 return Err(status_err(model.provider, res).await);
             }
-            let v: Value = res.json().await.map_err(|e| Error::Network(format!("Anthropic sent an answer Mailbird can't read: {e}")))?;
+            let v: Value = res.json().await.map_err(|e| Error::Network(format!("Anthropic sent an answer Vale can't read: {e}")))?;
             if v["stop_reason"] == "refusal" {
                 return Err(Error::Invalid("The model declined to answer for this conversation.".into()));
             }
@@ -143,7 +143,7 @@ pub async fn complete(model: &Model, system: &str, user: &str) -> Result<String>
             if !res.status().is_success() {
                 return Err(status_err(model.provider, res).await);
             }
-            let v: Value = res.json().await.map_err(|e| Error::Network(format!("{} sent an answer Mailbird can't read: {e}", where_(model.provider))))?;
+            let v: Value = res.json().await.map_err(|e| Error::Network(format!("{} sent an answer Vale can't read: {e}", where_(model.provider))))?;
             v.pointer("/choices/0/message/content").and_then(Value::as_str).map(str::to_string).ok_or_else(|| Error::Network(format!("{} sent an answer without text", where_(model.provider))))
         }
         AiProvider::Off => Err(Error::Invalid("AI is off".into())),
@@ -170,7 +170,7 @@ pub async fn models(provider: AiProvider, url: &str, key: Option<&str>) -> Resul
     if !res.status().is_success() {
         return Err(status_err(provider, res).await);
     }
-    let v: Value = res.json().await.map_err(|e| Error::Network(format!("{} sent a list Mailbird can't read: {e}", where_(provider))))?;
+    let v: Value = res.json().await.map_err(|e| Error::Network(format!("{} sent a list Vale can't read: {e}", where_(provider))))?;
     let mut ids: Vec<String> = v["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str()).map(str::to_string).collect();
     // OpenAI's list mixes in models that can't chat.
     if provider == AiProvider::Compatible {

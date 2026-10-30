@@ -465,7 +465,7 @@ pub fn new_event(uid: &str, input: &EventInput) -> Result<String> {
     lines.extend(describe_lines(input));
     lines.extend(schedule_lines(input)?);
     let body: String = lines.iter().map(|l| format!("{l}\r\n")).collect();
-    let ics = format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Mailbird//EN\r\nCALSCALE:GREGORIAN\r\nBEGIN:VEVENT\r\n{body}END:VEVENT\r\nEND:VCALENDAR\r\n");
+    let ics = format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Vale//EN\r\nCALSCALE:GREGORIAN\r\nBEGIN:VEVENT\r\n{body}END:VEVENT\r\nEND:VCALENDAR\r\n");
     let mut cal = parse(&ics)?;
     if let Some(r) = &input.reminders {
         set_reminders(&mut cal, master_index, r)?;
@@ -924,7 +924,7 @@ mod tests {
 
     #[test]
     fn new_events_round_trip_and_carry_their_time_zone() {
-        let ics = new_event("u1@mailbird", &input("2026-10-14T12:30", "2026-10-14T13:30")).unwrap();
+        let ics = new_event("u1@vale", &input("2026-10-14T12:30", "2026-10-14T13:30")).unwrap();
         assert!(ics.contains("BEGIN:VTIMEZONE"), "TZID needs a VTIMEZONE: {ics}");
         assert!(ics.contains("\r\n"));
         let meta = read_event(&ics, "UTC").unwrap();

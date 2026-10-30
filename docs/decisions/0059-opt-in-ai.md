@@ -4,7 +4,7 @@
 - **Date:** 2026-10-17
 - **Builds on:** [ADR-0016](0016-web-gateway.md) (one command layer, sealed secrets), [ADR-0055](0055-power-settings.md) (how replies quote)
 
-Long threads take a while to catch up on, and many messages need only a short answer. Gmail and Spark offer AI summaries and smart replies, and the competitive review ([research](../research/competitive-analysis.md)) set two conditions for Mailbird's version: it must stay optional, and it must stay private. This phase adds both features on those terms.
+Long threads take a while to catch up on, and many messages need only a short answer. Gmail and Spark offer AI summaries and smart replies, and the competitive review ([research](../research/competitive-analysis.md)) set two conditions for Vale's version: it must stay optional, and it must stay private. This phase adds both features on those terms.
 
 ## Decisions
 
@@ -72,7 +72,7 @@ Long threads take a while to catch up on, and many messages need only a short an
     - Opus 5.5, Sonnet 5.5, and Fable get the server-side fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`).
     - A `refusal` stop is reported as "The model declined to answer for this conversation."
 - `pim_app::ai_commands` adds six commands: `ai_settings`, `set_ai_prefs`, `set_ai_key`, `ai_models`, `summarize_thread`, and `suggest_replies`.
-- Tests point Anthropic's address elsewhere with `MAILBIRD_AI_ANTHROPIC_URL`.
+- Tests point Anthropic's address elsewhere with `VALE_AI_ANTHROPIC_URL`.
 - **No new dependencies.** The calls use the `reqwest` client the other adapters use.
 
 ### Design system

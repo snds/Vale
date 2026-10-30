@@ -1,4 +1,4 @@
-// A small, self-hostable relay for Mailbird notes (ADR-0012).
+// A small, self-hostable relay for Vale notes (ADR-0012).
 //
 // It is a plain Hocuspocus server: devices connect over WebSocket, merge
 // each note's Yjs document, and get each other's edits live. Documents are
@@ -44,10 +44,11 @@ const address = process.env.NOTES_RELAY_ADDRESS ?? "127.0.0.1"
 const data = process.env.NOTES_RELAY_DATA ?? join(process.cwd(), "data")
 await mkdir(data, { recursive: true })
 
-// Only Mailbird's own document names: "mailbird/index", "mailbird/note/<id>",
+// Only Vale's own document names: "mailbird/index", "mailbird/note/<id>",
 // "mailbird/file/<id>" (an image in a note, ADR-0044), and
 // "mailbird/shared/<id>" (a shared note, ADR-0056); each sealed under
 // "mailbird/x/" (ADR-0062); and "mailbird/registry".
+// Document names keep "mailbird/": the name from before the rename, kept: it's in stored or synced data (ADR-0071).
 const NAME = /^mailbird\/(registry|(x\/)?(index|(note|file)\/[A-Za-z0-9-]{1,64}|shared\/[A-Za-z0-9_-]{16,64}(\/files)?))$/
 // A share's own document, and its files beside it (ADR-0061): one link opens both.
 const SHARED = /^mailbird\/(?:x\/)?shared\/([A-Za-z0-9_-]{16,64})(?:\/files)?$/
@@ -235,10 +236,10 @@ const server = new Server({
 })
 
 const SHARE_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Shared with you in Mailbird</title>
+<title>Shared with you in Vale</title>
 <style>body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1.5rem;color:#1a1c1f}@media(prefers-color-scheme:dark){body{background:#111;color:#eee}}</style>
 <h1>Someone shared something with you</h1>
-<p>It opens in Mailbird. A note: in Notes, choose <b>Open a shared note…</b> and paste this page's address. A conversation: in Mail, open <b>Team</b> and choose <b>Open a link…</b>. If the link came in a message in Mailbird, open it from there.</p>`
+<p>It opens in Vale. A note: in Notes, choose <b>Open a shared note…</b> and paste this page's address. A conversation: in Mail, open <b>Team</b> and choose <b>Open a link…</b>. If the link came in a message in Vale, open it from there.</p>`
 
 await server.listen()
 console.log(`Notes relay on ws://${address}:${port} · data in ${data}`)

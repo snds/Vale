@@ -21,7 +21,7 @@ const OCR_FILES: Record<string, string> = {
 
 function ocrFiles(): Plugin {
   return {
-    name: "mailbird-ocr-files",
+    name: "vale-ocr-files",
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const file = OCR_FILES[(req.url ?? "").split("?")[0]!.replace(/^\//, "")]

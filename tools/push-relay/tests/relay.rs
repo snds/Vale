@@ -15,7 +15,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use mailbird_push_relay::{api, crypto, notify, store, watch};
+use vale_push_relay::{api, crypto, notify, store, watch};
 use pim_core::{AccountConfig, JmapConfig, Provider, Security, ServerConfig};
 use ring::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, KeyPair};
 use serde_json::{Value, json};
@@ -162,11 +162,11 @@ async fn relay_end_to_end() {
     let rng = ring::rand::SystemRandom::new();
     let p8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).unwrap();
     let apns_public = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, p8.as_ref(), &rng).unwrap().public_key().as_ref().to_vec();
-    let apns = notify::Apns { key_pkcs8: p8.as_ref().to_vec(), key_id: "KEY123".into(), team_id: "TEAM456".into(), topic: "design.snds.mailbird".into(), url: services.clone(), sandbox_url: services.clone() };
+    let apns = notify::Apns { key_pkcs8: p8.as_ref().to_vec(), key_id: "KEY123".into(), team_id: "TEAM456".into(), topic: "design.snds.vale".into(), url: services.clone(), sandbox_url: services.clone() };
     let rsa = rsa_key();
     let fcm = rsa.as_ref().map(|(pem, _)| notify::Fcm {
-        project_id: "mailbird-test".into(),
-        client_email: "relay@mailbird-test.iam.gserviceaccount.com".into(),
+        project_id: "vale-test".into(),
+        client_email: "relay@vale-test.iam.gserviceaccount.com".into(),
         key_pkcs8: crypto::pem_der(pem).unwrap(),
         token_uri: format!("{services}/fcm-token"),
         url: services.clone(),
@@ -260,7 +260,7 @@ async fn relay_end_to_end() {
     assert_eq!(call(reqwest::Method::POST, &format!("/v1/devices/{iphone}/test")).send().await.unwrap().status(), 204);
     let (path, h, body) = pushes_to(&rx, "/3/device/").pop().unwrap();
     assert_eq!(path, "/3/device/abc123");
-    assert_eq!((h["apns-topic"].as_str(), h["apns-push-type"].as_str(), h["apns-priority"].as_str()), ("design.snds.mailbird", "background", "5"));
+    assert_eq!((h["apns-topic"].as_str(), h["apns-push-type"].as_str(), h["apns-priority"].as_str()), ("design.snds.vale", "background", "5"));
     assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["aps"], json!({ "content-available": 1 }), "wakes the app; shows nothing by itself");
     let jwt = h["authorization"].strip_prefix("bearer ").unwrap();
     let (input, sig) = jwt.rsplit_once('.').unwrap();
@@ -286,7 +286,7 @@ async fn relay_end_to_end() {
         let (input, sig) = assertion.rsplit_once('.').unwrap();
         ring::signature::UnparsedPublicKey::new(&ring::signature::RSA_PKCS1_2048_8192_SHA256, rsa_public).verify(input.as_bytes(), &URL_SAFE_NO_PAD.decode(sig).unwrap()).expect("a valid RS256 signature");
         let (path, h, body) = pushes_to(&rx, "/v1/projects/").pop().unwrap();
-        assert_eq!(path, "/v1/projects/mailbird-test/messages:send");
+        assert_eq!(path, "/v1/projects/vale-test/messages:send");
         assert_eq!(h["authorization"], "Bearer ya29.fake");
         let msg: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(msg["message"]["token"], "fcm-reg-1");

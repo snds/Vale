@@ -10,7 +10,7 @@ ADR-0016 made the gateway one person's: one password, no user accounts. ADR-0060
 
 ### Team members on the gateway
 
-- **The owner adds people.** Settings → **Team members**: their name and email. The owner gets a link to send them; Mailbird sends nothing itself.
+- **The owner adds people.** Settings → **Team members**: their name and email. The owner gets a link to send them; Vale sends nothing itself.
 - **An invitation works once, for 7 days.** Its code is after `#` in the link, so it never reaches a server log. Opening it asks for a password (12+ characters) and signs them in. **New link** makes another, for someone who lost theirs or forgot their password; their old password stops working once they choose a new one.
 - **Signing in:** a team member enters their email and password. The owner leaves the email empty and uses `GATEWAY_PASSWORD`, as before. Wrong guesses share the same limit (10 in 5 minutes).
 - **Kept in `members.json`** in the data folder, mode 0600, beside the mail database. Passwords are PBKDF2-SHA256 hashes (600,000 rounds, OWASP's 2023 figure) with their own salts. Invitations are kept only as hashes of their codes. An unknown email costs as much time as a wrong password, so timing doesn't tell which.
@@ -36,7 +36,7 @@ ADR-0016 made the gateway one person's: one password, no user accounts. ADR-0060
 
 - **Writing a reply together.** Each person replies from the composer, as before. A shared conversation's live reply (ADR-0060) stays the way to draft together.
 - **"Sent by" on replies.** The sent message is the account's; the team's notes and the assignment say who handled it.
-- **Members with their own accounts.** A member works the owner's mailboxes. Someone who wants their own mail runs their own Mailbird.
+- **Members with their own accounts.** A member works the owner's mailboxes. Someone who wants their own mail runs their own Vale.
 
 ## Verification
 

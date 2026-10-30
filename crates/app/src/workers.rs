@@ -554,7 +554,7 @@ fn catch_up_reminders(app: &AppHandle, state: &Shared, until: i64) -> bool {
         }
         many => {
             let titles = many.iter().take(3).map(note_title).collect::<Vec<_>>().join(" · ");
-            let _ = app.notify(&format!("{} reminders while Mailbird was closed", many.len()), &titles);
+            let _ = app.notify(&format!("{} reminders while Vale was closed", many.len()), &titles);
         }
     }
     if let Ok(mut kept) = state.missed_reminders.lock() {

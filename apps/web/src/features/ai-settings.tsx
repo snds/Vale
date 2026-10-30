@@ -9,7 +9,7 @@ import type { AiEndpoint, AiPrefs, AiProvider, AiSettings } from "@/core/types"
 /** What each choice means, in the words the dialog uses. `remote`: the gateway, where "this computer" is the server. */
 function choices(remote: boolean): { value: AiProvider; icon: IconName; title: string; hint: string }[] {
   return [
-    { value: "off", icon: "block", title: "Off", hint: "Mailbird never sends your mail to a model." },
+    { value: "off", icon: "block", title: "Off", hint: "Vale never sends your mail to a model." },
     remote
       ? { value: "local", icon: "dns", title: "On your own server", hint: "Ollama or similar, beside your gateway. Mail stays on your machines." }
       : { value: "local", icon: "computer", title: "On this computer", hint: "Ollama, LM Studio, or similar. Your mail stays on this computer." },
@@ -192,7 +192,7 @@ function KeyField({ provider, saved }: { provider: "anthropic" | "compatible"; s
           </Button>
         </div>
         <FieldDescription>
-          {provider === "anthropic" ? "Make one in the Claude Console, under API keys. " : ""}It's kept in {where}, never in Mailbird's database, and it isn't shown again.
+          {provider === "anthropic" ? "Make one in the Claude Console, under API keys. " : ""}It's kept in {where}, never in Vale's database, and it isn't shown again.
         </FieldDescription>
       </Field>
       {replacing && (

@@ -269,8 +269,8 @@ fn group(d: &str) -> String {
     }
 }
 
-/// `/book/<32 hex>/b/<32 hex>`: a Mailbird booking's own page.
-fn is_mailbird_booking(path: &str) -> bool {
+/// `/book/<32 hex>/b/<32 hex>`: a Vale booking's own page.
+fn is_vale_booking(path: &str) -> bool {
     let hex = |p: &str| p.len() == 32 && p.bytes().all(|b| b.is_ascii_hexdigit());
     let parts: Vec<&str> = path.trim_end_matches('/').split('/').collect();
     matches!(parts.as_slice(), ["", "book", t, "b", c] if hex(t) && hex(c))
@@ -301,9 +301,9 @@ pub fn manage_links<'a>(texts: impl IntoIterator<Item = &'a str>) -> Vec<ManageL
                 Some(("manage", "Acuity"))
             } else if is("doodle.com") && path.starts_with("/meeting/") {
                 Some(("manage", "Doodle"))
-            } else if is_mailbird_booking(&path) {
-                // Another Mailbird's booking page (ADR-0031): self-hosted, so any host.
-                Some(("manage", "Mailbird"))
+            } else if is_vale_booking(&path) {
+                // Another Vale's booking page (ADR-0031): self-hosted, so any host.
+                Some(("manage", "Vale"))
             } else {
                 None
             };
@@ -397,7 +397,7 @@ mod tests {
         assert_eq!(cal.iter().map(|l| l.action.as_str()).collect::<Vec<_>>(), ["manage", "reschedule"]);
         assert!(manage_links(["https://calendly.com/priya/30min", "https://evilcalendly.com/cancellations/x"]).is_empty(), "a booking page or a look-alike isn't a manage link");
         let ours = format!("Need to change it? Pick a new time or cancel: https://cal.example/book/{}/b/{}", "a".repeat(32), "0".repeat(32));
-        assert_eq!(manage_links([ours.as_str()]).iter().map(|l| l.tool.as_str()).collect::<Vec<_>>(), ["Mailbird"], "another Mailbird's booking page");
+        assert_eq!(manage_links([ours.as_str()]).iter().map(|l| l.tool.as_str()).collect::<Vec<_>>(), ["Vale"], "another Vale's booking page");
         assert!(manage_links(["https://cal.example/book/short/b/x"]).is_empty());
 
         // Only call links (and booking tools' manage links) may be opened by the system.

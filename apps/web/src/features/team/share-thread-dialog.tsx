@@ -10,7 +10,7 @@ import { shareToken, shareUrl } from "../notes/share-link"
 
 /**
  * Share a conversation with teammates (ADR-0060): a link through your notes
- * relay. People with it see a copy of the conversation in their Mailbird,
+ * relay. People with it see a copy of the conversation in their Vale,
  * comment beside it, and write the reply with you. You send it.
  */
 export function ShareThreadDialog({ threadId, subject, open, onOpenChange }: { threadId: string; subject: string; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -19,7 +19,7 @@ export function ShareThreadDialog({ threadId, subject, open, onOpenChange }: { t
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Share with teammates</DialogTitle>
-          <DialogDescription>People with the link see “{subject}” in their Mailbird, comment beside it, and write the reply with you. Only you send it.</DialogDescription>
+          <DialogDescription>People with the link see “{subject}” in their Vale, comment beside it, and write the reply with you. Only you send it.</DialogDescription>
         </DialogHeader>
         {open && <ShareThreadForm threadId={threadId} subject={subject} onDone={() => onOpenChange(false)} />}
       </DialogContent>
@@ -90,7 +90,7 @@ function ShareThreadForm({ threadId, subject, onDone }: { threadId: string; subj
                 if (!link) return
                 onDone()
                 // A new message to a teammate, not a reply on the conversation itself.
-                openComposer({ subject: `Can you help with “${subject}”?`, body: `I shared a conversation with you, so we can write the reply together: “${subject}”.\n\nOpen it in Mailbird: ${link}\n` })
+                openComposer({ subject: `Can you help with “${subject}”?`, body: `I shared a conversation with you, so we can write the reply together: “${subject}”.\n\nOpen it in Vale: ${link}\n` })
               }}
             >
               <Icon name="mail" data-icon="inline-start" /> Email it

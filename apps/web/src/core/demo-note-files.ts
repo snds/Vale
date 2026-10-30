@@ -46,7 +46,7 @@ export function createDemoFiles(isLocked: (noteId: string) => boolean, unlocked:
       const m = mime.trim().toLowerCase()
       if (!MIMES.has(m)) throw new Error("notes take JPEG, PNG, WebP, and GIF images")
       // The core keeps only sketches as the app draws them (ADR-0046); the demo refuses the obvious rest.
-      if (m === "image/svg+xml" && /<script|\son\w+=|href|url\(|<!DOCTYPE|<foreignObject/i.test(atob(dataBase64))) throw new Error("that isn't a sketch Mailbird can keep")
+      if (m === "image/svg+xml" && /<script|\son\w+=|href|url\(|<!DOCTYPE|<foreignObject/i.test(atob(dataBase64))) throw new Error("that isn't a sketch Vale can keep")
       if (!dataBase64) throw new Error("that image is empty")
       if (sizeOf(dataBase64) > MAX) throw new Error("that image is over 10 MB")
       if (isLocked(noteId) && !unlocked()) throw new Error("Locked notes are locked. Enter your passphrase to add images.")

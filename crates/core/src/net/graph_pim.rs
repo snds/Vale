@@ -285,7 +285,7 @@ pub fn event_to_ics(e: &Value, device_tz: &str) -> Result<String> {
         let m = e["reminderMinutesBeforeStart"].as_i64().unwrap_or(15);
         body.push_str(&format!("BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\nTRIGGER:-PT{m}M\r\nEND:VALARM\r\n"));
     }
-    let mut ics = format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Mailbird//Outlook//EN\r\nBEGIN:VEVENT\r\n{body}END:VEVENT\r\n");
+    let mut ics = format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Vale//Outlook//EN\r\nBEGIN:VEVENT\r\n{body}END:VEVENT\r\n");
     for x in e["exceptionOccurrences"].as_array().into_iter().flatten() {
         let (Some(original), Some(s)) = (offset_ts(&x["originalStart"]), utc_ts(&x["start"])) else {
             continue;

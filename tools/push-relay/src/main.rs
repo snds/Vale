@@ -1,8 +1,8 @@
-//! `mailbird-push-relay`: configuration comes from the environment (see README.md).
+//! `vale-push-relay`: configuration comes from the environment (see README.md).
 
 use std::sync::Arc;
 
-use mailbird_push_relay::{api, crypto, notify, store, watch};
+use vale_push_relay::{api, crypto, notify, store, watch};
 
 fn env(k: &str) -> Option<String> {
     std::env::var(k).ok().filter(|v| !v.trim().is_empty())

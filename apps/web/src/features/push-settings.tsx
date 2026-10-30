@@ -7,7 +7,7 @@ import { getCoreClient } from "@/core/client"
 import type { PushAccount, PushMode, PushSettings } from "@/core/types"
 import { cn } from "@/lib/utils"
 
-const GUIDE = "https://github.com/snds/Mailbird/blob/main/tools/push-relay/README.md"
+const GUIDE = "https://github.com/snds/Vale/blob/main/tools/push-relay/README.md"
 
 const CHOICES: { mode: PushMode; title: string; text: string }[] = [
   {

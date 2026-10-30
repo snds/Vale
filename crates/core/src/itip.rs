@@ -118,7 +118,7 @@ fn utc(ts: i64) -> String {
 /// One VEVENT's worth of lines as an iTIP message with `method`.
 fn message(method: &str, lines: &[String]) -> Result<String> {
     let body: String = lines.iter().map(|l| format!("{l}\r\n")).collect();
-    let text = format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Mailbird//EN\r\nMETHOD:{method}\r\nBEGIN:VEVENT\r\n{body}END:VEVENT\r\nEND:VCALENDAR\r\n");
+    let text = format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Vale//EN\r\nMETHOD:{method}\r\nBEGIN:VEVENT\r\n{body}END:VEVENT\r\nEND:VCALENDAR\r\n");
     // Round-trip so the result is known-valid and canonically folded.
     Ok(finish(parse(&text)?))
 }
@@ -211,7 +211,7 @@ pub fn set_partstat(ics: &str, me: &[String], status: &str) -> Result<String> {
 /// A METHOD:REPLY for `me`, answering every VEVENT in the invitation.
 pub fn reply(ics: &str, me: &Address, status: &str) -> Result<String> {
     let cal = parse(ics)?;
-    let mut out = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Mailbird//EN\r\nMETHOD:REPLY\r\n");
+    let mut out = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Vale//EN\r\nMETHOD:REPLY\r\n");
     for c in cal.components.iter().filter(|c| c.component_type == ICalendarComponentType::VEvent) {
         let mut lines = vec![format!("UID:{}", c.uid().unwrap_or_default()), format!("DTSTAMP:{}", stamp_now())];
         out.push_str("BEGIN:VEVENT\r\n");

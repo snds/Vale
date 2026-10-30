@@ -24,7 +24,7 @@ pub async fn one_click(url: &str) -> Result<()> {
     let res = http
         .post(url)
         .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .header(reqwest::header::USER_AGENT, "Mailbird")
+        .header(reqwest::header::USER_AGENT, "Vale")
         .body("List-Unsubscribe=One-Click")
         .send()
         .await

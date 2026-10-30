@@ -1,7 +1,7 @@
 //! Browser sign-in (OAuth) for Google and Microsoft, and the OAuth clients it uses.
 //!
 //! Each provider needs the app to be registered with it. Builds can bake in
-//! a client (`MAILBIRD_GOOGLE_CLIENT_ID` / `_SECRET`, `MAILBIRD_MICROSOFT_CLIENT_ID`
+//! a client (`VALE_GOOGLE_CLIENT_ID` / `_SECRET`, `VALE_MICROSOFT_CLIENT_ID`
 //! at compile time); anyone building from source can paste their own instead
 //! (Accounts → Gmail or Outlook → "Use your own OAuth client"). See
 //! docs/google-verification.md and docs/microsoft-setup.md.
@@ -22,8 +22,8 @@ fn setting_key(issuer: OAuthIssuer) -> &'static str {
 
 fn built_in(issuer: OAuthIssuer) -> Option<oauth::Client> {
     let (id, secret) = match issuer {
-        OAuthIssuer::Google => (option_env!("MAILBIRD_GOOGLE_CLIENT_ID"), option_env!("MAILBIRD_GOOGLE_CLIENT_SECRET")),
-        OAuthIssuer::Microsoft => (option_env!("MAILBIRD_MICROSOFT_CLIENT_ID"), None),
+        OAuthIssuer::Google => (option_env!("VALE_GOOGLE_CLIENT_ID"), option_env!("VALE_GOOGLE_CLIENT_SECRET")),
+        OAuthIssuer::Microsoft => (option_env!("VALE_MICROSOFT_CLIENT_ID"), None),
     };
     id.filter(|i| !i.is_empty()).map(|id| oauth::Client { client_id: id.into(), client_secret: secret.map(str::to_owned) })
 }

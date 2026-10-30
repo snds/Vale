@@ -1,5 +1,5 @@
 //! The shared identity (ADR-0051): the locked-notes key, wrapped as
-//! Mailbird's App Data Key under the default persona, so the identity's
+//! Vale's App Data Key under the default persona, so the identity's
 //! recovery kit reaches locked notes.
 //!
 //! The passphrase stays the way in. This only adds a second one: after every
@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use crate::Shared;
 use crate::commands::with_store;
 
-/// This app's id in the identity.
+/// This app's id in the identity: the notes key is wrapped under it, so it's
+/// the name from before the rename, kept: it's in stored or synced data (ADR-0071).
 pub const APP_ID: &str = "mailbird";
 /// Where this device remembers which envelope holds the key. Local only: the
 /// identity itself is the truth, this is a shortcut to it.
@@ -47,7 +48,7 @@ struct Link {
 }
 
 /// The desktop setup: the identity in the place every ecosystem app on this
-/// computer looks for it, this device's keys in Mailbird's own data folder.
+/// computer looks for it, this device's keys in Vale's own data folder.
 /// `None` where the platform has no default (phones pass their shared
 /// container path instead, once the device work lands).
 pub fn desktop_config(data_dir: &std::path::Path) -> Option<IdentityConfig> {
@@ -55,14 +56,14 @@ pub fn desktop_config(data_dir: &std::path::Path) -> Option<IdentityConfig> {
     Some(IdentityConfig { root, keystore: data_dir.join("identity-device.key"), device_name: device_name(hostname::get().ok().and_then(|h| h.into_string().ok())) })
 }
 
-/// "Mailbird on Sean-MBP": each app on a computer is its own device in the
+/// "Vale on Sean-MBP": each app on a computer is its own device in the
 /// identity, so the name says which app and which computer (agreed with
 /// Lockdown, which names its own "Lockdown on …").
 fn device_name(host: Option<String>) -> String {
     let host = host.map(|h| h.trim().trim_end_matches(".local").trim_end_matches(".lan").to_string()).filter(|h| !h.is_empty());
     match host {
-        Some(h) => format!("Mailbird on {h}"),
-        None => "Mailbird".into(),
+        Some(h) => format!("Vale on {h}"),
+        None => "Vale".into(),
     }
 }
 
@@ -88,7 +89,7 @@ fn keystore(cfg: &IdentityConfig) -> Result<FileKeystore, String> {
     FileKeystore::open_or_create(&cfg.keystore).map_err(|e| format!("couldn't open this device's keys: {e}"))
 }
 
-/// The persona Mailbird keeps its key under: the one every identity starts with.
+/// The persona Vale keeps its key under: the one every identity starts with.
 fn persona(identity: &Identity) -> Result<Id, String> {
     identity
         .personas()
@@ -140,7 +141,7 @@ pub fn link_quietly(state: &Shared, key: &NotesKey) {
 }
 
 /// The notes key, from the identity instead of the passphrase. Tries the
-/// envelope this device remembers, then every Mailbird key under every
+/// envelope this device remembers, then every Vale key under every
 /// persona, newest first (a device restored from the kit remembers none),
 /// and keeps the first one that opens this device's notes.
 pub fn unlock_with_identity(state: &Shared) -> Result<NotesKey, String> {
@@ -172,9 +173,9 @@ pub fn unlock_with_identity(state: &Shared) -> Result<NotesKey, String> {
 mod tests {
     #[test]
     fn the_device_is_named_for_the_app_and_the_computer() {
-        assert_eq!(super::device_name(Some("Seans-MacBook-Pro.local".into())), "Mailbird on Seans-MacBook-Pro");
-        assert_eq!(super::device_name(Some("desk".into())), "Mailbird on desk");
-        assert_eq!(super::device_name(Some("  ".into())), "Mailbird");
-        assert_eq!(super::device_name(None), "Mailbird");
+        assert_eq!(super::device_name(Some("Seans-MacBook-Pro.local".into())), "Vale on Seans-MacBook-Pro");
+        assert_eq!(super::device_name(Some("desk".into())), "Vale on desk");
+        assert_eq!(super::device_name(Some("  ".into())), "Vale");
+        assert_eq!(super::device_name(None), "Vale");
     }
 }

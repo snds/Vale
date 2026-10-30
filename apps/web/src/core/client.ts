@@ -648,12 +648,12 @@ export const gatewayMe = () => me
 export const isMember = () => me?.role === "member"
 
 /** Every write carries this header, so another site can't post as you (CSRF). */
-const CSRF = { "X-Mailbird": "1" }
+const CSRF = { "X-Vale": "1" }
 
 /** The gateway's session, or `null` when this page isn't served by a gateway. */
 export async function gatewaySession(): Promise<GatewaySession | null> {
   // The gateway marks the page it serves; anywhere else there's nothing to ask.
-  if (!document.querySelector('meta[name="mailbird-gateway"]')) return null
+  if (!document.querySelector('meta[name="vale-gateway"]')) return null
   try {
     const r = await fetch("/api/session", { credentials: "same-origin", headers: { Accept: "application/json" } })
     if (!r.ok || !r.headers.get("content-type")?.includes("application/json")) return null
@@ -671,7 +671,7 @@ async function gatewayError(r: Response): Promise<Error> {
 }
 
 /** True when a web gateway served this page. */
-export const onGateway = () => !!document.querySelector('meta[name="mailbird-gateway"]')
+export const onGateway = () => !!document.querySelector('meta[name="vale-gateway"]')
 
 /**
  * A scheduling link's page, for a visitor: on a gateway, its public routes
@@ -745,7 +745,7 @@ export async function signOutOfGateway(): Promise<void> {
 }
 
 /** Fired when the gateway says the session ended, so the app shows sign-in. */
-export const SIGNED_OUT = "mailbird:signed-out"
+export const SIGNED_OUT = "vale:signed-out"
 
 function createGatewayClient(): CoreClient {
   const call: Call = async <T,>(name: string, args?: Record<string, unknown>) => {

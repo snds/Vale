@@ -9,7 +9,7 @@ use std::time::Duration;
 use axum::Router;
 use axum::extract::State;
 use axum::routing::post;
-use mailbird_push_relay::{api, crypto, notify, store, watch};
+use vale_push_relay::{api, crypto, notify, store, watch};
 use pim_core::{AccountConfig, Provider, Security, ServerConfig};
 use serde_json::json;
 

@@ -881,7 +881,7 @@ mod tests {
             .unwrap();
         let target = NoteTarget { kind: NoteLinkKind::Event, id: ev.occurrence.event_id.clone() };
         let link = s.note_link_for(&target).unwrap().unwrap();
-        assert!(link.key.ends_with("@mailbird"));
+        assert!(link.key.ends_with("@vale"));
         assert_eq!(link.label, "Design crit");
         let n = s.create_note(&NoteInput { markdown: "Crit notes".into(), links: vec![link.clone(), link], ..Default::default() }).unwrap();
         assert_eq!(n.summary.links.len(), 1, "duplicate links collapse");
@@ -1121,7 +1121,7 @@ mod tests {
         assert!(files[2].contents.contains("archived: true"));
 
         let other = Store::open_in_memory().unwrap();
-        let picked: Vec<ImportFile> = files.iter().map(|f| ImportFile { path: format!("Mailbird notes/{}", f.path), contents: f.contents.clone(), modified: None, data_base64: f.data_base64.clone() }).collect();
+        let picked: Vec<ImportFile> = files.iter().map(|f| ImportFile { path: format!("Vale notes/{}", f.path), contents: f.contents.clone(), modified: None, data_base64: f.data_base64.clone() }).collect();
         assert_eq!(other.import_notes(&picked).unwrap().imported, 4);
         let back = other.notes(&NoteQuery { search: Some("Lisbon".into()), ..Default::default() }).unwrap();
         let n = &back[0];

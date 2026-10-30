@@ -15,6 +15,7 @@ pub mod sender_commands;
 pub mod dispatch;
 pub mod host;
 pub mod identity;
+pub mod legacy;
 pub mod menu_bar;
 pub mod notes_commands;
 pub mod oauth_commands;

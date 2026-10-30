@@ -11,7 +11,7 @@ Microsoft renames these screens often. The steps say what each one is for, so yo
 
 1. **Open App registrations** in the [Microsoft Entra admin center](https://entra.microsoft.com/) → Applications → App registrations → **New registration**.
    - A free personal Microsoft account works. Microsoft creates a directory for you on first visit.
-2. **Name:** anything, for example "Mailbird (personal)".
+2. **Name:** anything, for example "Vale (personal)".
 3. **Supported account types:** **Accounts in any organizational directory and personal Microsoft accounts**.
 4. **Redirect URI:**
    - **Platform:** Public client/native (mobile & desktop).
@@ -37,7 +37,7 @@ What to expect:
 ### Bake a registration into a build
 
 ```sh
-MAILBIRD_MICROSOFT_CLIENT_ID=… pnpm tauri build
+VALE_MICROSOFT_CLIENT_ID=… pnpm tauri build
 ```
 
 A registration someone adds in the app always takes precedence over the built-in one.

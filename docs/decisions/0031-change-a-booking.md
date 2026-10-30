@@ -19,7 +19,7 @@ Booking mints a 32-character random code (as unguessable as the link's own token
 ### Where the booker gets the link
 
 - **On the confirmation page,** always: "Change or cancel this booking", with Copy link.
-- **In the invitation's description,** when the gateway knows its own public address (`GATEWAY_PUBLIC_URL`). The booking is then like a Calendly one in the booker's calendar, and Phase 20's parser shows Reschedule and Cancel for it (as "Mailbird", on any https host).
+- **In the invitation's description,** when the gateway knows its own public address (`GATEWAY_PUBLIC_URL`). The booking is then like a Calendly one in the booker's calendar, and Phase 20's parser shows Reschedule and Cancel for it (as "Vale", on any https host).
 - **The address comes from configuration, never from the request.** A booker could otherwise book with someone else's email and point the real host's invitation at a site of their choosing. Without `GATEWAY_PUBLIC_URL`, invitations carry no link; the confirmation page still does.
 
 ### What the page does
@@ -48,8 +48,8 @@ In the owner's **Preview**, the confirmation has **See their page**, which opens
   - A move moves the event and frees the old time; only free slots are taken.
   - Cancel deletes the event and stays cancelled. A host-deleted event reads as cancelled.
   - The change JSON shape (`{"action":"reschedule","start":…}`).
-  - Phase 20's parser reads another Mailbird's booking link.
-- **Gateway (`cargo test -p mailbird-gateway`):**
+  - Phase 20's parser reads another Vale's booking link.
+- **Gateway (`cargo test -p vale-gateway`):**
   - The public routes: the invitation carries `GATEWAY_PUBLIC_URL`'s address.
   - A wrong code gets 404, and a change without the header gets 403.
   - Reschedule, then cancel, and the event leaves the owner's calendar.

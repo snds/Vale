@@ -1,4 +1,4 @@
-//! A self-hosted push relay for Mailbird (ADR-0015).
+//! A self-hosted push relay for Vale (ADR-0015).
 //!
 //! Phones can't hold a mail connection open in the background, so this
 //! small server does it for them: it watches each mailbox (IMAP IDLE, JMAP

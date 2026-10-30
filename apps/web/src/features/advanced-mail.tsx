@@ -76,7 +76,7 @@ function AdvancedMail() {
         <Toggle
           id="request-receipts"
           title="Ask for a read receipt on everything I send"
-          hint="Whether one comes back is up to the other person's app. You can still change it per message, in the composer. Mailbird never sends receipts for mail you read."
+          hint="Whether one comes back is up to the other person's app. You can still change it per message, in the composer. Vale never sends receipts for mail you read."
           checked={prefs.requestReceipts}
           onChange={(requestReceipts) => change({ requestReceipts })}
         />

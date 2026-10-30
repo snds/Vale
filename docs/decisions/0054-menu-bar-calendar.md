@@ -22,7 +22,7 @@ Fantastical and Itsycal earned their place by answering "what's next?" without o
   - the month, with a dot on every day that has something;
   - the picked day's events (a click opens the event in the app);
   - quick add ("Coffee with Marcus today 4pm"), the same field as in Calendar.
-- **Right-click** gives Open Mailbird, New event…, and Quit Mailbird.
+- **Right-click** gives Open Vale, New event…, and Quit Vale.
 
 ### What "next" means
 
@@ -31,10 +31,10 @@ Fantastical and Itsycal earned their place by answering "what's next?" without o
 - **Relative words** ("in 25 min", "in 2 h 5 min", "now"). They need no clock format or time zone, and they read the same in every locale. The menu bar is brought up to date every 30 seconds.
 - **One rule, written twice:** `pim_app::menu_bar::next_up` for the menu bar, and `nextUp` in the web panel. The Rust tests and the browser suite check the same cases, so the two can't drift silently.
 
-### Closing the window keeps Mailbird running
+### Closing the window keeps Vale running
 
-- **While the menu-bar calendar is on, closing the main window hides it.** Mailbird stays in the menu bar or tray, so the calendar and reminders keep working. This is how menu-bar calendars behave, and it's spelled out under the switch in Settings.
-- **Getting back:** click the Dock icon (macOS), choose Open Mailbird from the tray menu, or click an event in the mini calendar. Quit is in the tray menu, and the usual quit shortcut still works.
+- **While the menu-bar calendar is on, closing the main window hides it.** Vale stays in the menu bar or tray, so the calendar and reminders keep working. This is how menu-bar calendars behave, and it's spelled out under the switch in Settings.
+- **Getting back:** click the Dock icon (macOS), choose Open Vale from the tray menu, or click an event in the mini calendar. Quit is in the tray menu, and the usual quit shortcut still works.
 - **Safety:** closing only hides the window once the tray icon actually exists. A Linux desktop without a tray never ends up with a hidden window and no way back.
 
 ### Where the logic lives
@@ -63,7 +63,7 @@ Fantastical and Itsycal earned their place by answering "what's next?" without o
 - **Browser** (`phase42`, 22 checks):
   - **The mini calendar:** today's date, next up "in 10 min", "Now" during the event, the next event within 5 minutes, tomorrow's first event late at night, and "Nothing else" on a quiet evening.
   - **Using it:** Join, picking a day, and quick add.
-  - **Opening the app:** an event opens on that event, Open Mailbird opens the app, and New event… opens the editor.
+  - **Opening the app:** an event opens on that event, Open Vale opens the app, and New event… opens the editor.
   - **Settings:** both switches, and the second hides with the first.
   - **Also:** dark mode, and no console errors.
 - **Regression:** all earlier browser suites pass. `tsc -b`, `oxlint`, and `vite build` are clean. The ratchet is unchanged at 241 / 2 / 0 / 0.
@@ -79,8 +79,8 @@ These need a desktop session, which the cloud sandbox doesn't have:
 | 3 | A click opens the window under the icon (above it with a bottom taskbar), on the right monitor | ☐ | ☐ | ☐ |
 | 4 | Clicking away closes it; clicking the icon again toggles it | ☐ | ☐ | ☐ |
 | 5 | An event in the mini window opens the main window on that event | ☐ | ☐ | ☐ |
-| 6 | Right-click: Open Mailbird, New event…, Quit Mailbird | ☐ | ☐ | ☐ |
-| 7 | Closing the main window keeps Mailbird in the menu bar or tray; reminders still fire | ☐ | ☐ | ☐ |
+| 6 | Right-click: Open Vale, New event…, Quit Vale | ☐ | ☐ | ☐ |
+| 7 | Closing the main window keeps Vale in the menu bar or tray; reminders still fire | ☐ | ☐ | ☐ |
 | 8 | The Dock icon brings the window back | ☐ | n/a | n/a |
 | 9 | Turning the switch off removes the icon, and closing the window quits again | ☐ | ☐ | ☐ |
 | 10 | Without a tray (plain GNOME), nothing breaks, and closing the window quits | n/a | n/a | ☐ |

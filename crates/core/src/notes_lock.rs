@@ -21,6 +21,7 @@ use crate::{Error, NoteDetail, Result, now};
 
 const LOCK_KEY: &str = "notes.lock";
 /// What the check value seals, to tell a right passphrase from a wrong one.
+/// Sealed under the passphrase to check it; the name from before the rename, kept: it's in stored or synced data (ADR-0071).
 const CHECK: &[u8] = b"mailbird notes lock v1";
 /// OWASP's 2023 figure for PBKDF2-HMAC-SHA256. Tests use far fewer.
 const ITERATIONS: u32 = if cfg!(test) { 1_000 } else { 600_000 };

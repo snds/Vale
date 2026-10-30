@@ -9,8 +9,8 @@ import { displayName } from "./format"
 
 /** What will happen, said before it happens: one request, a message, or a web page. */
 function plan(u: Unsubscribe): string {
-  if (u.oneClick) return "Mailbird asks the sender to remove you, in one request. Nothing opens and no message is sent."
-  if (u.mailto) return `Mailbird sends an unsubscribe message to ${u.mailto.replace(/^mailto:/i, "").split("?")[0]} from this account.`
+  if (u.oneClick) return "Vale asks the sender to remove you, in one request. Nothing opens and no message is sent."
+  if (u.mailto) return `Vale sends an unsubscribe message to ${u.mailto.replace(/^mailto:/i, "").split("?")[0]} from this account.`
   return "The sender's unsubscribe page opens in your browser."
 }
 

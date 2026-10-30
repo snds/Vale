@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use futures::StreamExt;
-use mailbird_gateway::{Config, Gateway, Members, SealedFile, router};
+use vale_gateway::{Config, Gateway, Members, SealedFile, router};
 use serde_json::{Value, json};
 
 const PASSWORD: &str = "gateway-password-for-tests";
@@ -38,8 +38,8 @@ async fn a_team_shares_the_inbox() {
 
     let client = || reqwest::Client::builder().cookie_store(true).build().unwrap();
     let (owner, ana, stranger) = (client(), client(), client());
-    let post = |c: &reqwest::Client, path: &str, body: Value| c.post(format!("{base}{path}")).header("X-Mailbird", "1").json(&body).send();
-    let core = |c: &reqwest::Client, name: &str, args: Value| c.post(format!("{base}/api/core/{name}")).header("X-Mailbird", "1").json(&args).send();
+    let post = |c: &reqwest::Client, path: &str, body: Value| c.post(format!("{base}{path}")).header("X-Vale", "1").json(&body).send();
+    let core = |c: &reqwest::Client, name: &str, args: Value| c.post(format!("{base}/api/core/{name}")).header("X-Vale", "1").json(&args).send();
 
     assert_eq!(post(&owner, "/api/session", json!({ "password": PASSWORD })).await.unwrap().status(), 204);
     let me: Value = owner.get(format!("{base}/api/session")).send().await.unwrap().json().await.unwrap();
@@ -97,7 +97,7 @@ async fn a_team_shares_the_inbox() {
     }
 
     // Removed: signed out everywhere, and her conversation goes back to nobody.
-    assert_eq!(owner.delete(format!("{base}/api/members/{ana_id}")).header("X-Mailbird", "1").send().await.unwrap().status(), 204);
+    assert_eq!(owner.delete(format!("{base}/api/members/{ana_id}")).header("X-Vale", "1").send().await.unwrap().status(), 204);
     assert_eq!(core(&ana, "list_messages", json!({ "query": { "lane": "inbox" } })).await.unwrap().status(), 401);
     assert_eq!(core(&ana2, "list_messages", json!({ "query": { "lane": "inbox" } })).await.unwrap().status(), 401);
     let t: Value = core(&owner, "thread_team", json!({ "threadId": thread_id })).await.unwrap().json().await.unwrap();

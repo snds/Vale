@@ -17,7 +17,7 @@ unicron now publishes versioned releases (Changesets), and the ADR-0048 promotio
 
 ## Decision
 
-Mailbird installs the two packages from unicron's GitHub release tarballs:
+Vale installs the two packages from unicron's GitHub release tarballs:
 
 | Package | Version | Source |
 |---|---|---|
@@ -29,11 +29,11 @@ Mailbird installs the two packages from unicron's GitHub release tarballs:
 - **Moving to a new release** is a two-URL change: the version in `apps/web/package.json`, and the tokens override if tokens moved too. Then `pnpm install`, and the screens and ratchet checks below.
 - **The submodule is gone:** `vendor/unicron`, `.gitmodules`, the `submodules: true` on six CI checkouts, the `vendor` copies in the gateway's Dockerfile, and the `deps:build` step before `dev`, `build`, and `typecheck`. The packages arrive already built.
 - **The shadcn transform moved to unicron.** `tools/shadcn-material` here was a copy of the tool that writes unicron's primitives; unicron owns it now (`pnpm regen`). With no unicron source in this repo, the copy had nothing to write to.
-- **Unchanged:** `@import "@unicron/ui/styles"` in `index.css`, Mailbird's own roles in `styles/app-extension.css`, and the `dsa` ratchet. Its `vendor/**` exclude is dropped, because nothing lives there now.
+- **Unchanged:** `@import "@unicron/ui/styles"` in `index.css`, Vale's own roles in `styles/app-extension.css`, and the `dsa` ratchet. Its `vendor/**` exclude is dropped, because nothing lives there now.
 
 ### Tradeoffs
 
-- **A fix in unicron reaches Mailbird a release later,** not a commit later. That's the point: the app moves when the system says a change is ready, and the version says how big it is.
+- **A fix in unicron reaches Vale a release later,** not a commit later. That's the point: the app moves when the system says a change is ready, and the version says how big it is.
 - **Trying an unreleased unicron change** now means a local link (`pnpm link`) instead of checking out a branch in `vendor/`. That's a developer step, never committed.
 - **Tarballs, not a registry.** GitHub releases need no account or token to install, which keeps the repo public-friendly. If unicron moves to a registry later, only the two URLs change.
 

@@ -6,7 +6,7 @@
 #
 #   sudo apt-get install -y dovecot-imapd && pip install aiosmtpd
 #   sudo tools/test-mail-servers/start.sh
-#   MAILBIRD_IT_SMTP_OUT=/tmp/mbtest/smtp-out cargo test -p pim-core --test imap_smtp -- --ignored
+#   VALE_IT_SMTP_OUT=/tmp/mbtest/smtp-out cargo test -p pim-core --test imap_smtp -- --ignored
 set -euo pipefail
 
 # Keep BASE short: Dovecot's unix sockets fail on paths over ~100 characters.

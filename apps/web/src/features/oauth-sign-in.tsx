@@ -27,7 +27,7 @@ interface ProviderCopy {
   docs: string
 }
 
-const DOCS = "https://github.com/snds/Mailbird/blob/main/docs"
+const DOCS = "https://github.com/snds/Vale/blob/main/docs"
 
 const COPY: Record<OAuthIssuer, ProviderCopy> = {
   google: {

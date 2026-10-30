@@ -1,7 +1,7 @@
 [package]
-name = "mailbird-gateway"
+name = "vale-gateway"
 version = "0.1.0"
-description = "Self-hosted web gateway: the Mailbird web app with real accounts, on the same core as the desktop app"
+description = "Self-hosted web gateway: the Vale web app with real accounts, on the same core as the desktop app"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

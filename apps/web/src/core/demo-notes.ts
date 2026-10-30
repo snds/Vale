@@ -167,7 +167,7 @@ export function createDemoNotes(emit: (e: CoreEvent, payload?: unknown) => void,
   let prefs: NotesPrefs = { sortChecked: true, grid: false, readImageText: true }
   let relay: RelayConfig | null = null
   try {
-    const saved = localStorage.getItem("mailbird.demo.relay")
+    const saved = localStorage.getItem("vale.demo.relay")
     relay = saved ? (JSON.parse(saved) as RelayConfig) : null
   } catch {
     relay = null
@@ -642,8 +642,8 @@ export function createDemoNotes(emit: (e: CoreEvent, payload?: unknown) => void,
       if (r?.key && !/^[A-Za-z0-9_-]{43}$/.test(r.key.trim())) throw new Error("That encryption key isn't complete. Copy it again from a device that has it.")
       relay = r && { ...r, key: r.key?.trim() || null }
       try {
-        if (r) localStorage.setItem("mailbird.demo.relay", JSON.stringify(r))
-        else localStorage.removeItem("mailbird.demo.relay")
+        if (r) localStorage.setItem("vale.demo.relay", JSON.stringify(r))
+        else localStorage.removeItem("vale.demo.relay")
       } catch {
         // Private windows: the setting lasts this session only.
       }

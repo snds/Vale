@@ -4,16 +4,16 @@
 - **Date:** 2026-10-17
 - **Builds on:** [ADR-0056](0056-shared-notes.md) (shared notes by link), [ADR-0012](0012-notes.md) (the notes relay and Yjs)
 
-Some mail needs more than one person: a client question someone else knows the answer to, or an invitation the whole team should agree on. Today that means forwarding the thread and collecting replies elsewhere. Spark Teams and Front put the conversation in one place. This phase does that for Mailbird, on its own terms.
+Some mail needs more than one person: a client question someone else knows the answer to, or an invitation the whole team should agree on. Today that means forwarding the thread and collecting replies elsewhere. Spark Teams and Front put the conversation in one place. This phase does that for Vale, on its own terms.
 
 ## Decisions
 
 ### Share one conversation by link, not a team inbox
 
-- **Share with teammates** in a conversation's toolbar makes a link. People with it see the conversation in their own Mailbird, comment beside it, and write the reply with you, live. **You send it**, from your account.
+- **Share with teammates** in a conversation's toolbar makes a link. People with it see the conversation in their own Vale, comment beside it, and write the reply with you, live. **You send it**, from your account.
 - **Why a link, and not team members on the gateway:**
   - It builds on the shared-note links of [ADR-0056](0056-shared-notes.md): the same relay, the same kind of token, the same way of stopping.
-  - It works for teammates on any Mailbird, with or without a relay or gateway of their own.
+  - It works for teammates on any Vale, with or without a relay or gateway of their own.
   - It needs no accounts, roles, or sign-in system.
 - **The trade-off:** it's per conversation, not a shared team inbox, and anyone holding the link can join. A gateway with team members (accounts, roles, a shared inbox) stays possible later. It would reuse this phase's comments and shared reply.
 

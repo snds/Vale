@@ -20,7 +20,7 @@ The 28 pattern candidates were mostly the same signal seen from another angle. d
 
 Each promotion follows unicron's own rule (`docs/04-patterns.md`). A one-family repeat becomes a **variant**. A component is only for something with **its own behavior**.
 
-| Repeat in Mailbird | Promoted as | Why |
+| Repeat in Vale | Promoted as | Why |
 |---|---|---|
 | 13 tooltip triggers, rebuilt as 3 local wrappers (`ToolbarButton`, `ToolButton`, `Mark`) | **`IconButton`**, a component | It has its own behavior: one `label` is both the accessible name and the tooltip, so they can't drift apart. `render` swaps in a `Toggle`, or nests the IconButton in a menu trigger. |
 | 18 `rounded-full` overrides on `Button`, in every filter row | **`Button shape="pill"`** | A chip is a shape, not a new control. Text pills get `px-3`, because the round ends eat into the padding. |

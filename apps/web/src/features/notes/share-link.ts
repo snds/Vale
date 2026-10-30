@@ -3,17 +3,17 @@ import { fromBase64, toBase64 } from "@/lib/base64"
 
 /**
  * Share links (ADR-0056). A link is the owner's relay, as https, at
- * `/share`, with everything Mailbird needs after the `#`:
+ * `/share`, with everything Vale needs after the `#`:
  *
  *   https://notes.example.com/share#<base64url JSON>
  *
  * Browsers never send the part after `#`, so the token in it only travels
  * where the link itself goes. Opened in a browser, the relay's `/share` page
- * explains how to open it in Mailbird.
+ * explains how to open it in Vale.
  */
 export interface ShareLink {
   v: 1
-  /** The owner's relay, as Mailbird connects to it (wss://…). */
+  /** The owner's relay, as Vale connects to it (wss://…). */
   relay: string
   id: string
   mode: ShareMode

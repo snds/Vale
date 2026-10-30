@@ -7,7 +7,7 @@
 
 ## Decision
 
-`crates/identity` gains the local handshake of spec §6 step 3 behind a transport trait, and enforces 04-security §4's rule that Argon2id parameters never go down across loads. Two small API changes asked for by Mailbird's step-3 work (the app label on app keys, and retiring an envelope) ride along. Nothing outside `crates/identity/` and this file changes.
+`crates/identity` gains the local handshake of spec §6 step 3 behind a transport trait, and enforces 04-security §4's rule that Argon2id parameters never go down across loads. Two small API changes asked for by Vale's step-3 work (the app label on app keys, and retiring an envelope) ride along. Nothing outside `crates/identity/` and this file changes.
 
 ### What this adds
 
@@ -57,5 +57,5 @@ QR device enrolment between two devices (spec §8 row 2: the same `Hello`/`Reque
 ## Consequences
 
 - An app that keeps the `Head` across runs now also keeps the parameters it accepted; the shell that persists the head persists both, since it is one value.
-- Mailbird's step-3 consumer wraps its note-lock key with `wrap_app_key(persona, "mailbird", &key)` and lists it with `app_keys`; another app cannot open or re-label it.
+- Vale's step-3 consumer wraps its note-lock key with `wrap_app_key(persona, "vale", &key)` and lists it with `app_keys`; another app cannot open or re-label it.
 - The Unix transport is the reference for the three platform channels still to come (XPC, bound service, named pipe): each is one `PeerTransport` plus one `PeerVerifier`; the protocol and the store side do not change.
