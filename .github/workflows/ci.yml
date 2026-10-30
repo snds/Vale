@@ -108,14 +108,15 @@ jobs:
           echo "Stalwart release: $tag"
           gh release view "$tag" -R stalwartlabs/stalwart --json assets -q '.assets[].name'
           mkdir -p /tmp/stalwart-dl /tmp/mbjmap/bin
-          gh release download "$tag" -R stalwartlabs/stalwart -D /tmp/stalwart-dl \
-            -p '*x86_64-unknown-linux-gnu.tar.gz'
-          ls -l /tmp/stalwart-dl
-          # Prefer the plain build over FoundationDB variants.
-          archive=$(ls /tmp/stalwart-dl/*.tar.gz | grep -v -i foundation | head -1)
-          tar -xzf "$archive" -C /tmp/stalwart-dl
-          bin=$(find /tmp/stalwart-dl -type f -name 'stalwart*' ! -name '*.tar.gz' -perm -u+x | head -1)
-          cp "$bin" /tmp/mbjmap/bin/stalwart
+          asset=stalwart-x86_64-unknown-linux-gnu.tar.gz
+          gh release download "$tag" -R stalwartlabs/stalwart -D /tmp/stalwart-dl -p "$asset"
+          tar -tzvf "/tmp/stalwart-dl/$asset"
+          tar -xzf "/tmp/stalwart-dl/$asset" -C /tmp/stalwart-dl
+          # The archive holds the server binary, named stalwart (else its one file).
+          bin=$(find /tmp/stalwart-dl -type f -name stalwart | head -1)
+          [ -n "$bin" ] || bin=$(find /tmp/stalwart-dl -type f ! -name '*.tar.gz' | head -1)
+          test -n "$bin" || { echo "no stalwart binary in $asset"; exit 1; }
+          install -m 0755 "$bin" /tmp/mbjmap/bin/stalwart
           /tmp/mbjmap/bin/stalwart --version || true
       - name: Start Stalwart
         run: tools/test-mail-servers/start-jmap.sh
