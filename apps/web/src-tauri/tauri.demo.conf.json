@@ -1,0 +1,26 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Vale Demo",
+  "identifier": "design.snds.vale.demo",
+  "build": {
+    "beforeBuildCommand": "pnpm build:demo"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Vale Demo",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 360,
+        "minHeight": 600,
+        "resizable": true
+      }
+    ]
+  },
+  "bundle": {
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "11.0"
+    }
+  }
+}

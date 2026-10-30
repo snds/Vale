@@ -398,7 +398,14 @@ export type CoreEvent = "mail:changed" | "outbox:changed" | "accounts:changed" |
 /** What the mini calendar asks the main window to open (ADR-0054): an event, or a new one. */
 export type AppJump = { kind: "event"; id: string; start: number } | { kind: "newEvent" }
 
-export const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+/**
+ * The demo desktop app (`pnpm build:demo`): the desktop shell around the
+ * sample-mail demo, with no accounts and no sign-in. It behaves as the web
+ * demo does, so the page treats it as not Tauri.
+ */
+export const DEMO_APP = import.meta.env.VITE_DEMO_APP === "1"
+
+export const isTauri = () => !DEMO_APP && typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 
 /** Calls one core command by name (Rust's snake_case) with camelCase arguments. */
 type Call = <T>(name: string, args?: Record<string, unknown>) => Promise<T>
@@ -799,7 +806,9 @@ let clientPromise: Promise<CoreClient> | null = null
 
 /** The desktop or phone app's own core, a web gateway's, or the sample-mail demo. */
 export function getCoreClient(): Promise<CoreClient> {
-  clientPromise ??= isTauri()
+  clientPromise ??= DEMO_APP
+    ? import("./demo").then((m) => m.createDemoClient())
+    : isTauri()
     ? createTauriClient()
     : gatewaySession().then((s) => (s ? createGatewayClient() : import("./demo").then((m) => m.createDemoClient())))
   return clientPromise

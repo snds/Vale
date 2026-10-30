@@ -1,0 +1,81 @@
+# The demo app for Mac (ADR-0072): the desktop app around the sample-mail
+# demo, with no accounts and no sign-in, for trying the UI. One universal dmg
+# (Apple silicon and Intel). Each push to main replaces the "demo-mac"
+# pre-release; pull requests only check that it builds.
+name: Demo app (Mac)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "crates/**"
+      - "Cargo.lock"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/demo-mac.yml"
+  pull_request:
+    paths:
+      - "apps/web/src-tauri/**"
+      - "apps/web/package.json"
+      - ".github/workflows/demo-mac.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: demo-mac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Vale Demo
+        working-directory: apps/web
+        run: pnpm tauri build --config src-tauri/tauri.demo.conf.json --target universal-apple-darwin --bundles dmg
+      - name: Check and name the dmg
+        run: |
+          set -euo pipefail
+          dmg=$(find target/universal-apple-darwin/release/bundle/dmg -name '*.dmg' | head -1)
+          cp "$dmg" Vale-Demo-mac.dmg
+          ls -l Vale-Demo-mac.dmg
+          app=$(find target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          lipo -archs "$app/Contents/MacOS/"*
+          codesign -dv "$app" 2>&1 | head -5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vale-Demo-mac
+          path: Vale-Demo-mac.dmg
+      - name: Publish the demo-mac pre-release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete demo-mac --yes --cleanup-tag || true
+          gh release create demo-mac Vale-Demo-mac.dmg --prerelease --target "$GITHUB_SHA" \
+            --title "Vale Demo for Mac" --notes "$(cat <<'NOTES'
+          The Vale desktop app on sample mail, calendar, contacts and notes. No accounts, no sign-in. A bar on every screen says it's the demo; **Reset demo data** starts it fresh.
+
+          **Install:** open the dmg and drag **Vale Demo** to Applications.
+
+          **First open:** the app isn't signed with an Apple certificate yet, so macOS stops it once.
+          - macOS 15 or later: open it, choose **Done**, then System Settings → Privacy & Security → **Open Anyway**.
+          - macOS 14 or earlier: Control-click the app, choose **Open**, then **Open**.
+          - Or in Terminal: `xattr -dr com.apple.quarantine "/Applications/Vale Demo.app"`
+
+          It runs on its own (`design.snds.vale.demo`), apart from a real install's data and keychain. Built from ${{ github.sha }}.
+          NOTES
+          )"
