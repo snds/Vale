@@ -44,6 +44,8 @@ pnpm tauri dev              # desktop shell (needs the Tauri prerequisites for y
 
 **Web vs. desktop.** On its own, the web app runs on sample mail, so you can try every flow. For real accounts in a browser, run the [web gateway](apps/gateway/README.md) on a machine you own: it syncs your accounts with the same code as the desktop app and serves the web app (`docker compose up -d` in `apps/gateway`).
 
+**The demo app for Mac.** To try the desktop app without accounts, download **Vale Demo** from the [`demo-mac` pre-release](https://github.com/snds/Vale/releases/tag/demo-mac). It's rebuilt on every push to `main` and opens straight on sample data ([ADR-0072](docs/decisions/0072-demo-app-for-mac.md)). It isn't signed with an Apple certificate yet; the release notes say how to open it. To build it yourself on a Mac: `cd apps/web && pnpm tauri build --config src-tauri/tauri.demo.conf.json`.
+
 **Mail integration tests (Linux).** These run real round trips against IMAP + SMTP and against JMAP:
 
 ```bash

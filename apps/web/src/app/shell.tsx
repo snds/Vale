@@ -3,9 +3,10 @@ import type { ReactNode } from "react"
 import { Icon, Button, Tooltip, TooltipContent, TooltipTrigger } from "@unicron/ui"
 import { cn } from "@/lib/utils"
 
+import { DemoBar } from "./demo-bar"
 import { useUi } from "./ui-store"
 
-import { isMember } from "@/core/client"
+import { DEMO_APP, isMember } from "@/core/client"
 
 import { VERTICALS, type Vertical, type VerticalId } from "./verticals"
 
@@ -32,6 +33,7 @@ export function AppShell({ active, onNavigate, onCreate, onSettings, children }:
     <div className="flex h-dvh overflow-hidden bg-surface-canvas">
       <NavRail active={active} onNavigate={onNavigate} onCreate={onCreate} onSettings={onSettings} current={current} />
       <main className="flex min-w-0 flex-1 flex-col pb-[calc(var(--c-shell-tabbar-height)+env(safe-area-inset-bottom))] md:pb-0">
+        {DEMO_APP && <DemoBar />}
         {children}
       </main>
       <Fab vertical={current} onClick={onCreate} />
