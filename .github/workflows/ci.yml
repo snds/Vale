@@ -95,6 +95,28 @@ jobs:
         with:
           path: /tmp/mbjmap/bin
           key: stalwart-bin-${{ runner.os }}-${{ hashFiles('tools/test-mail-servers/start-jmap.sh') }}
+      # Stalwart can't be built from source: its git dependency
+      # stalwartlabs/opentelemetry-rust is gone. Use its prebuilt release,
+      # the version start-jmap.sh was written for (0.16.26), else the newest 0.16.
+      - name: Fetch Stalwart
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tags=$(gh release list -R stalwartlabs/stalwart --limit 100 --json tagName -q '.[].tagName')
+          tag=$(echo "$tags" | grep -x 'v0\.16\.26' || echo "$tags" | grep -m1 '^v0\.16\.')
+          echo "Stalwart release: $tag"
+          gh release view "$tag" -R stalwartlabs/stalwart --json assets -q '.assets[].name'
+          mkdir -p /tmp/stalwart-dl /tmp/mbjmap/bin
+          gh release download "$tag" -R stalwartlabs/stalwart -D /tmp/stalwart-dl \
+            -p '*x86_64-unknown-linux-gnu.tar.gz'
+          ls -l /tmp/stalwart-dl
+          # Prefer the plain build over FoundationDB variants.
+          archive=$(ls /tmp/stalwart-dl/*.tar.gz | grep -v -i foundation | head -1)
+          tar -xzf "$archive" -C /tmp/stalwart-dl
+          bin=$(find /tmp/stalwart-dl -type f -name 'stalwart*' ! -name '*.tar.gz' -perm -u+x | head -1)
+          cp "$bin" /tmp/mbjmap/bin/stalwart
+          /tmp/mbjmap/bin/stalwart --version || true
       - name: Start Stalwart
         run: tools/test-mail-servers/start-jmap.sh
         timeout-minutes: 45
