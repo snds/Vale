@@ -57,6 +57,48 @@ export const mail: DemoScenarios = {
     void client.saveSplit(null, { name: "Travel", senders: ["@ferry.example"], subject: null, hasAttachments: false, accountId: null, exclusive: false })
   },
   /**
+   * The token audit as a conversation of five (ADR-0092; brief M4): two more turns after Priya's sheet, the newest
+   * unread. The older ones show as rows, the newest and the unread open.
+   */
+  "thread-5": ({ state }) => {
+    const priya = state.messages.filter((m) => m.threadId === "t-audit").sort((a, b) => b.date - a.date)[0]
+    const mine = state.messages.find((m) => m.threadId === "t-audit" && m.mailbox === "Sent")
+    if (!priya || !mine) return
+    const t = nowSecs()
+    priya.seen = true
+    const turns = [
+      { from: mine, body: "Thursday works. Can you add a column for which component reads each alias?", ago: 14 * 60 },
+      { from: priya, body: "Added it. Eleven components read the three flat surfaces, most of them in the list pane.\n\nI'll book the room for 10:00.\n\nPriya", ago: 4 * 60 },
+    ]
+    turns.forEach((x, i) => {
+      const id = `demo-audit-${i + 4}`
+      state.messages.push({ ...x.from, id, messageId: `${id}@demo.example`, preview: x.body.replace(/\s+/g, " ").slice(0, 160), bodyText: x.body, date: t - x.ago, sortAt: t - x.ago, seen: x.from === mine, flagged: false, files: {} })
+    })
+  },
+  /** AI summaries and replies set up with a model on this computer (ADR-0059), as Settings would: the conversation offers them. */
+  "ai-on": ({ client }) => {
+    void client.setAiPrefs({ provider: "local", local: { url: "http://localhost:11434/v1", model: "llama3.2" }, anthropicModel: "claude-opus-5-5", compatible: { url: "https://api.openai.com/v1", model: "" } })
+  },
+  /** With `ai-on`: the model never answers, so the summary and the replies stay loading. */
+  "ai-slow": ({ wrap }) => {
+    wrap("summarizeThread", () => () => new Promise(() => {}))
+    wrap("suggestReplies", () => () => new Promise(() => {}))
+  },
+  /** With `ai-on`: the model server cannot be reached. */
+  "ai-fails": ({ wrap }) => {
+    const refuse = () => Promise.reject(new Error("The model server at localhost:11434 didn't answer."))
+    wrap("summarizeThread", () => refuse)
+    wrap("suggestReplies", () => refuse)
+  },
+  /** Opening the token audit takes as long as a slow server: the conversation stays loading. */
+  "thread-slow": ({ wrap }) => {
+    wrap("getThread", (original) => (id) => (id === "t-audit" ? new Promise(() => {}) : original(id)))
+  },
+  /** The token audit was deleted on another device: its row is still listed, and opening it finds nothing. */
+  "thread-gone": ({ wrap }) => {
+    wrap("getThread", (original) => (id) => (id === "t-audit" ? Promise.reject(new Error("that conversation is no longer here")) : original(id)))
+  },
+  /**
    * Three first-time senders in the Screener (brief M3). Use with the `?screener` address, which turns the Screener on
    * and brings the first; this adds two more, written to no one, within the last half hour.
    */

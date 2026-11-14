@@ -10,6 +10,7 @@ import { pendingJump, useUi } from "@/app/ui-store"
 import { vertical } from "@/app/verticals"
 import { Icon, Button, EmptyState, formatListCount, type PageHeadSwipe } from "@unicron/ui"
 import { LoadState } from "@/components/load-state"
+import { leaveThen } from "@/lib/leave-guard"
 import { MasterDetail } from "@/components/master-detail"
 import { ScreenHead } from "@/components/page"
 import { VirtualList } from "@/components/virtual-list"
@@ -91,7 +92,8 @@ export function MailView() {
   const list = useMemo(() => pages?.pages.flat() ?? [], [pages])
   const loadMore = () => hasNextPage && !isFetchingNextPage && void fetchNextPage()
   const row = list.find((m) => m.threadId === selectedId) ?? selected ?? undefined
-  const select = (id: string | null) => setSelected(id ? (list.find((m) => m.threadId === id) ?? null) : null)
+  // A reply typed in the open conversation asks before another row or Back drops it (ADR-0092).
+  const select = (id: string | null) => leaveThen(() => setSelected(id ? (list.find((m) => m.threadId === id) ?? null) : null))
 
   // Opening a conversation reads it — once, so "Mark unread" sticks. Advanced
   // settings can wait 3 seconds, so a glance doesn't count, or leave it to you (ADR-0055).
@@ -188,7 +190,7 @@ export function MailView() {
   return (
     <MasterDetail
       section="Mail"
-      onBack={() => (tab === "team" ? setTeamOpen(null) : setSelected(null))}
+      onBack={() => (tab === "team" ? setTeamOpen(null) : leaveThen(() => setSelected(null)))}
       onRoot={() => {
         useUi.getState().showMailTab("inbox")
         setTeamOpen(null)
@@ -268,7 +270,7 @@ export function MailView() {
                     lane={lane}
                     now={now}
                     selected={m.threadId === selectedId}
-                    onOpen={() => setSelected(m)}
+                    onOpen={() => leaveThen(() => setSelected(m))}
                     account={multiAccount && !accountId ? accounts.find((a) => a.id === m.accountId)?.displayName : undefined}
                     swipes={swipes}
                     screening={tab === "screener"}

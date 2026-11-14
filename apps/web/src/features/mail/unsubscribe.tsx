@@ -19,18 +19,38 @@ const DONE: Record<UnsubscribeMethod, string> = {
   web: "Opened the sender's unsubscribe page",
 }
 
-/** Shown on mail from a list that says how to leave it (List-Unsubscribe). */
-export function UnsubscribeAction({ message, onArchive }: { message: MessageDetail; onArchive: () => void }) {
-  const [open, setOpen] = useState(false)
+/**
+ * Shown on mail from a list that says how to leave it (List-Unsubscribe). The question can also be
+ * opened from elsewhere (the conversation's More menu, ADR-0092): pass `open` and `onOpenChange`,
+ * and `button={false}` where the button stands somewhere else.
+ */
+export function UnsubscribeAction({
+  message,
+  onArchive,
+  open: openProp,
+  onOpenChange,
+  button = true,
+}: {
+  message: MessageDetail
+  onArchive: () => void
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  button?: boolean
+}) {
+  const [own, setOwn] = useState(false)
+  const open = openProp ?? own
+  const setOpen = (next: boolean) => (onOpenChange ? onOpenChange(next) : setOwn(next))
   const unsubscribe = useMailAction<string>((c, id) => c.unsubscribe(id))
   const u = message.unsubscribe
   if (!u) return null
   const sender = displayName(message.from)
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        Unsubscribe
-      </Button>
+      {button && (
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          Unsubscribe
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent size="md">
           <DialogHeader>

@@ -3,7 +3,11 @@ import { area, button, closeForm, tabBar, discardQuestion, ensure, formatBar, fo
 import { settings } from "./settings.mjs"
 
 /** Opens a conversation in the Inbox list by its subject. */
-export const conversation = (app, subject) => press(app, app.page.getByRole("list", { name: "Inbox" }).getByRole("button", { name: subject }).first())
+export const conversation = async (app, subject) => {
+  await press(app, app.page.getByRole("list", { name: "Inbox" }).getByRole("button", { name: subject }).first())
+  // The pointer leaves the row it pressed: once the conversation is pushed over the list, a message row stands there.
+  await app.page.mouse.move(0, 0)
+}
 /** Opens a lane (Unread, Starred, Snoozed…) from Mail's folders: the sidebar, or the page head's sheet or popover. */
 export const lane = async (app, name) => {
   await pick(app, name)
@@ -36,11 +40,45 @@ const visibleBoxes = async (list) => {
 /** The bars at the phone's foot: the bottom row, a strip above it, a toast in the strip's slot. */
 const bars = async (page) => 1 + ((await page.locator('[data-slot="accessory"]:not([data-compact]):visible').count()) ? 1 : 0) + (await visibleBoxes(page.locator("[data-sonner-toast]"))).filter((b) => b.y > 422).length
 const strip = (page) => page.locator('[data-slot="accessory"]')
-/** Archives a conversation from its own action bar: a finished action, so a toast with Undo. */
+/** The open conversation: the detail column beside the list, or the screen pushed over it. */
+const reader = (page) => page.getByRole("region", { name: "Mail: what is open" })
+/** The reply field pinned at the conversation's foot (a phone's bottom row). */
+const replyField = (page) => page.getByRole("textbox", { name: /^Reply to / })
+/** A conversation's own action by name: in the toolbar on a desktop, in the top bar on a phone (ADR-0092). */
+const action = (app, name) =>
+  (app.phone ? app.page.locator('[data-slot="app-frame-top-row"]') : app.page.getByRole("toolbar", { name: "Conversation" })).getByRole("button", { name, exact: true })
+/** Opens the conversation's More: a menu on a desktop, a sheet on a phone. Returns it. */
+const more = async (app) => {
+  await press(app, action(app, "More"))
+  return app.page.getByRole(app.phone ? "dialog" : "menu", { name: "More" })
+}
+/** A row of a menu that is a menu on a desktop and a sheet on a phone (unicron's AdaptiveMenu). */
+const row = (app, within, name) => within.getByRole(app.phone ? "button" : "menuitem", { name, exact: typeof name === "string" })
+/** More, then one of its rows. */
+const moreItem = async (app, name) => press(app, row(app, await more(app), name))
+/** The snooze times: the toolbar's Snooze on a desktop; More's Snooze… on a phone. */
+const snoozeMenu = async (app) => {
+  if (app.phone) await moreItem(app, "Snooze…")
+  else await press(app, action(app, "Snooze"))
+  return app.page.getByRole(app.phone ? "dialog" : "menu", { name: "Snooze until" })
+}
+/** Opens a conversation and asks for its summary from More; `ready` waits for the points. */
+const summarize = async (app, subject, ready = true) => {
+  await conversation(app, subject)
+  await moreItem(app, "Summarize")
+  if (ready) await reader(app.page).locator('[data-slot="summary-block-lines"]').first().waitFor()
+  await app.page.mouse.move(0, 0)
+}
+/** Every toast that is up leaves (an UNDO pressed takes its own toast away, so there may be none). */
+const toastsGone = async ({ page }) => {
+  await page.mouse.move(0, 0)
+  for (const t of await page.locator("[data-sonner-toast]").all()) await t.waitFor({ state: "detached", timeout: 15_000 }).catch(() => {})
+}
+/** Archives a conversation from its own action: a finished action, so a toast with Undo. */
 const archive = async (app, subject) => {
   await conversation(app, subject)
   // The conversation's own action: Mail's folders have an Archive too, in the sidebar (ADR-0084).
-  await app.page.getByRole("region", { name: "Mail: what is open" }).getByRole("button", { name: "Archive", exact: true }).click()
+  await action(app, "Archive").click()
 }
 
 /** A conversation's row in a mail list, by its subject: the swipe row around the message row. */
@@ -143,45 +181,201 @@ export const scenes = [
       await app.settle()
     },
   },
-  { name: "mail-conversation", run: (app) => conversation(app, /Token audit/) }, // three messages, and the sender beside them
-  { name: "mail-invitation", run: (app) => conversation(app, /Invitation: Design crit/) },
-  { name: "mail-attachments", run: (app) => conversation(app, /Your booking is confirmed/) },
-  { name: "mail-html", run: (app) => conversation(app, /Design Systems Weekly/) }, // an HTML message, remote images held back
   {
-    name: "mail-sender",
-    sizes: ["phone"], // from tablet up, the sender's panel sits beside the conversation
-    run: async (app) => {
-      await conversation(app, /Token audit/)
-      await press(app, app.page.getByRole("button", { name: /^About / }))
+    // Desktop / 01's detail column, Mobile / 02 (ADR-0092; brief M4): a thread of three. The meta line with the
+    // toolbar beside it on a desktop, the title, the messages as rows and rules, the reply field at the foot.
+    name: "mail-conversation",
+    sizes: ["desktop", "phone", "medium"],
+    run: (app) => conversation(app, /Token audit/),
+    assert: async (app) => {
+      const { page } = app
+      const meta = await reader(page).locator('[data-slot="meta-list"]').innerText()
+      for (const label of ["FROM", "MESSAGES", "LATEST"]) ensure(meta.toUpperCase().includes(label), `the meta line has no ${label}`)
+      ensure(/\b03\b/.test(meta), "the meta line does not count the thread's three messages")
+      ensure((await reader(page).getByRole("region", { name: /^Message from / }).count()) === 3, "the thread does not show its three messages")
+      ensure(await replyField(page).isVisible(), "no reply field")
+      ensure((await replyField(page).getAttribute("placeholder")) === "Reply to Priya", "the reply field does not say whom it answers")
+      ensure((await page.locator('[data-slot="composer"]:visible').count()) === 1, "more than one Composer on the screen")
+      if (app.phone) {
+        for (const name of ["Back", "Archive", "More"]) ensure(await button(page, name).isVisible(), `the top bar has no ${name}`)
+        ensure(!(await page.getByRole("toolbar", { name: "Conversation" }).count()), "a phone shows the desktop toolbar")
+      } else {
+        const bar = page.getByRole("toolbar", { name: "Conversation" })
+        for (const name of ["Archive", "Snooze", "Unstar", "Mark unread", "More"]) ensure(await bar.getByRole("button", { name, exact: true }).isVisible(), `the toolbar has no ${name}`)
+        // One Tab stop: the arrow keys move along it.
+        ensure((await bar.locator('button:not([tabindex="-1"])').count()) === 1, "the toolbar is more than one Tab stop")
+      }
     },
   },
   {
-    name: "mail-summary", // opt-in AI (ADR-0059): the demo answers for a model on this computer
+    // The drawn frames' content, on the demo's own mail: one message with a file, summarized (AI set up, and asked).
+    name: "mail-conversation-drawn",
+    sizes: ["desktop"],
+    sean: { kind: "drawn", area: "mail", screen: "inbox-message" },
+    scenario: "ai-on",
+    run: (app) => summarize(app, /Your booking is confirmed/),
+  },
+  {
+    name: "mail-conversation-drawn-phone",
+    sizes: ["phone"],
+    sean: { kind: "drawn", area: "mail", screen: "message" },
+    scenario: "ai-on",
+    run: (app) => summarize(app, /Your booking is confirmed/),
+  },
+  {
+    // A conversation of five (brief M4): the older read ones as rows that open, the newest (and anything unread) open.
+    // Enter on a row opens it and again closes it; each message is a region named for its sender.
+    name: "mail-thread-5",
+    scenario: "thread-5",
+    sean: { kind: "undrawn", area: "mail", screen: "thread" },
     run: async (app) => {
-      await settings(app, "AI summaries and replies")
-      await press(app, app.page.getByRole("radio", { name: /On this computer/ }))
-      await app.page.getByRole("combobox", { name: "Model" }).selectOption("llama3.2")
-      await area(app, "Mail")
+      const { page } = app
       await conversation(app, /Token audit/)
-      await press(app, button(app.page, "Summarize"))
+      const messages = reader(page).getByRole("region", { name: /^Message from / })
+      ensure((await messages.count()) === 5, `the thread shows ${await messages.count()} messages, not five`)
+      const toggles = (state) => messages.locator(`[aria-expanded="${state}"]`)
+      const closed = toggles(false)
+      // Four are read; the newest is unread.
+      ensure((await closed.count()) === 4, `${await closed.count()} messages start closed, not the four older read ones`)
+      ensure((await toggles(true).count()) === 1, "the newest does not start open")
+      const meta = await reader(page).locator('[data-slot="meta-list"]').innerText()
+      ensure(/\b05\b/.test(meta), "the meta line does not count five messages")
+      await closed.first().focus()
+      await page.keyboard.press("Enter")
+      await app.settle()
+      ensure((await toggles(true).count()) === 2, "Enter did not open a closed message")
+      await toggles(true).first().focus()
+      await page.keyboard.press("Enter")
+      await app.settle()
+      ensure((await toggles(false).count()) === 4, "Enter did not close the open message again")
+      await page.evaluate(() => document.activeElement?.blur())
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // Opening takes a moment: a title bar and three lines (brief 4.0), never the agent's motion.
+    name: "mail-conversation-loading",
+    scenario: "thread-slow",
+    loading: true,
+    run: (app) => conversation(app, /Token audit/),
+    assert: async ({ page }) => ensure(await reader(page).getByRole("status", { name: "Opening the conversation" }).isVisible(), "no loading lines while the conversation opens"),
+  },
+  {
+    // A conversation deleted on another device: its row is still listed, and it says so when opened.
+    name: "mail-conversation-gone",
+    scenario: "thread-gone",
+    run: (app) => conversation(app, /Token audit/),
+    assert: async ({ page }) => ensure(await reader(page).getByText("That conversation is gone.").isVisible(), "a conversation that is gone does not say so"),
+  },
+  { name: "mail-invitation", run: (app) => conversation(app, /Invitation: Design crit/) },
+  {
+    // Files as chips (brief M4): press one to see it, Save saves it ("Saved {name}").
+    name: "mail-attachments",
+    run: async (app) => {
+      await conversation(app, /Your booking is confirmed/)
+      const files = reader(app.page).getByRole("group", { name: "Attachments" })
+      ensure((await files.locator('[data-slot="file-chip"]').count()) === 2, "the message does not show its two files")
+      await press(app, files.getByRole("button", { name: "Save booking-confirmation.pdf", exact: true }))
+      await app.page.locator("[data-sonner-toast]").filter({ hasText: "Saved booking-confirmation.pdf" }).waitFor()
+      await toastGone(app)
+    },
+  },
+  {
+    // An HTML message in its sandboxed frame, set in the app's type and ink; its script never ran.
+    name: "mail-html",
+    run: (app) => conversation(app, /Design Systems Weekly/),
+    assert: async ({ page }) => {
+      const body = page.frameLocator('iframe[title="Message body"]').locator("body")
+      ensure(/Variable fonts in production/.test(await body.innerText()), "the HTML message did not render")
+      ensure(!/pwned/.test(await body.innerText()), "the message's script ran")
+    },
+  },
+  {
+    // Remote images held back until asked (ADR-0055): a compact info banner over that body, with LOAD IMAGES.
+    name: "mail-blocked-images",
+    run: (app) => conversation(app, /Design Systems Weekly/),
+    assert: async ({ page }) => {
+      const banner = reader(page).locator('[data-slot="banner"]').filter({ hasText: "Remote images are blocked." })
+      ensure(await banner.isVisible(), "no notice that remote images are blocked")
+      ensure(await banner.getByRole("button", { name: "Load images", exact: true }).isVisible(), "the notice has no Load images")
+      ensure(!(await page.frameLocator('iframe[title="Message body"]').locator('img[src^="http"]').count()), "a remote image is in the frame before it was asked for")
+    },
+  },
+  {
+    name: "mail-sender",
+    sizes: ["phone"], // the sender's panel, from the FROM value
+    run: async (app) => {
+      await conversation(app, /Token audit/)
+      await press(app, app.page.getByRole("button", { name: "About Priya Raman", exact: true }))
+    },
+    assert: async ({ page }) => ensure(await page.getByRole("dialog", { name: "About Priya Raman" }).isVisible(), "FROM did not open the sender's panel"),
+  },
+  {
+    // Opt-in AI (ADR-0059; brief M5): asked for from More; SUMMARY // NN POINTS, the points, the model, the caveat.
+    name: "mail-summary",
+    scenario: "ai-on",
+    sean: { kind: "undrawn", area: "mail", screen: "summary" },
+    run: (app) => summarize(app, /Token audit/),
+    assert: async ({ page }) => {
+      const block = reader(page).locator('[data-slot="summary-block"]').first()
+      const text = await block.innerText()
+      ensure(/SUMMARY\s*\/\/\s*03 POINTS/.test(text), "the summary's overline does not count its points")
+      ensure(text.includes("It can be wrong. Check what matters."), "the summary does not say it can be wrong")
+      ensure(/llama3\.2/i.test(text), "the summary does not say which model wrote it")
+      for (const name of ["Copy", "Close"]) ensure(await block.getByRole("button", { name, exact: true }).isVisible(), `the summary has no ${name}`)
+      ensure(await reader(page).getByRole("button", { name: "Suggest replies", exact: true }).isVisible(), "no Suggest replies with AI set up")
+    },
+  },
+  {
+    // While the model writes: skeleton lines with the agent's own motion.
+    name: "mail-summary-loading",
+    scenario: ["ai-on", "ai-slow"],
+    loading: true,
+    run: (app) => summarize(app, /Token audit/, false),
+    assert: async ({ page }) => ensure((await reader(page).locator('[data-slot="summary-block"]').getAttribute("aria-busy")) === "true", "the summary is not busy while it loads"),
+  },
+  {
+    // The model cannot be reached: one critical line, TRY AGAIN and OPEN SETTINGS.
+    name: "mail-summary-error",
+    scenario: ["ai-on", "ai-fails"],
+    run: (app) => summarize(app, /Token audit/, false),
+    assert: async ({ page }) => {
+      const block = reader(page).locator('[data-slot="summary-block"]')
+      ensure(/didn.t answer/.test(await block.innerText()), "the failed summary does not say why")
+      for (const name of ["Try again", "Open settings"]) ensure(await block.getByRole("button", { name, exact: true }).isVisible(), `the failed summary has no ${name}`)
+    },
+  },
+  {
+    // Suggested replies (brief M5): REPLIES // 03, rows to press; a pick fills the reply field and sends nothing.
+    name: "mail-summary-replies",
+    scenario: "ai-on",
+    run: async (app) => {
+      const { page } = app
+      await conversation(app, /Token audit/)
+      await press(app, reader(page).getByRole("button", { name: "Suggest replies", exact: true }))
+      const block = reader(page).locator('[data-slot="summary-block"]')
+      await block.getByRole("list", { name: "Suggested replies" }).waitFor()
+      ensure(/REPLIES\s*\/\/\s*03/.test(await block.innerText()), "the replies' overline does not count them")
+      await press(app, block.getByRole("button", { name: /^Thanks, Priya\. That works for me\./ }))
+      ensure((await replyField(page).inputValue()) === "Thanks, Priya. That works for me.", "picking a reply did not fill the reply field")
+      ensure(!(await strip(page).count()) && !(await page.getByText(/^Sending/i).count()), "picking a reply sent something")
     },
   },
   {
     name: "mail-snooze-menu",
     run: async (app) => {
       await conversation(app, /Token audit/)
-      await press(app, button(app.page, "Snooze"))
+      await snoozeMenu(app)
     },
     // The presets, then any date and time (ADR-0088; brief M8).
-    assert: async ({ page }) => ensure(await page.getByRole("menuitem", { name: "Pick date and time…" }).isVisible(), "the snooze menu has no custom time"),
+    assert: async (app) => ensure(await row(app, app.page.getByRole(app.phone ? "dialog" : "menu", { name: "Snooze until" }), "Pick date and time…").isVisible(), "the snooze menu has no custom time"),
   },
   {
     // Snooze until any date and time: the shared picker, titled for the job, with its one primary.
     name: "mail-snooze-time",
     run: async (app) => {
       await conversation(app, /Token audit/)
-      await press(app, button(app.page, "Snooze"))
-      await press(app, app.page.getByRole("menuitem", { name: "Pick date and time…" }))
+      await press(app, row(app, await snoozeMenu(app), "Pick date and time…"))
       const picker = app.page.getByRole("dialog", { name: "Snooze" })
       // Tomorrow, at the hour it opens on: the conversation leaves the inbox until then.
       await press(app, picker.getByRole("gridcell", { name: /^Friday, November 13/ }))
@@ -191,8 +385,7 @@ export const scenes = [
       await toastGone(app)
       // The picture: the picker again, on another conversation.
       await conversation(app, /Cabin weekend/)
-      await press(app, button(app.page, "Snooze"))
-      await press(app, app.page.getByRole("menuitem", { name: "Pick date and time…" }))
+      await press(app, row(app, await snoozeMenu(app), "Pick date and time…"))
       await app.page.mouse.move(0, 0)
     },
     assert: async ({ page }) => ensure(await page.getByRole("dialog", { name: "Snooze" }).getByRole("button", { name: "Snooze", exact: true }).isVisible(), "the snooze picker has no Snooze button"),
@@ -250,31 +443,212 @@ export const scenes = [
     },
   },
   {
+    // The viewer (brief M4): viewer 960, a full sheet on a phone. TXT // 63 B, the name, close; one secondary SAVE.
     name: "mail-attachment-preview",
+    sean: { kind: "undrawn", area: "mail", screen: "attachment-preview" },
     run: async (app) => {
       await conversation(app, /Your booking is confirmed/)
-      await press(app, app.page.getByRole("button", { name: /what-to-bring\.txt/ }).first())
+      await press(app, reader(app.page).getByRole("button", { name: /what-to-bring\.txt/ }).first())
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async (app) => {
+      const viewer = app.page.getByRole("dialog", { name: "what-to-bring.txt" })
+      ensure(/TXT\s*\/\/\s*\d+ B/.test(await viewer.innerText()), "the viewer's overline is not TYPE // SIZE")
+      ensure(/Passports/.test(await viewer.innerText()), "the viewer does not show the file")
+      ensure(await viewer.getByRole("button", { name: "Save", exact: true }).isVisible(), "the viewer has no Save")
+      if (!app.phone) ensure(Math.round((await viewer.boundingBox()).width) === 960, `the viewer is ${Math.round((await viewer.boundingBox()).width)} wide, not 960`)
     },
   },
   {
     name: "mail-unsubscribe",
     run: async (app) => {
       await conversation(app, /Design Systems Weekly/)
-      await press(app, button(app.page, "Unsubscribe"))
+      await moreItem(app, "Unsubscribe…")
     },
+    assert: async ({ page }) => ensure(await page.getByRole("dialog", { name: /^Unsubscribe from / }).isVisible(), "More's Unsubscribe… did not ask"),
   },
   {
     name: "mail-share",
     run: async (app) => {
       await conversation(app, /Token audit/)
-      await press(app, button(app.page, "Share with teammates"))
+      await moreItem(app, "Share with teammates…")
     },
   },
   {
+    // The reply field (brief M4): a reply sent in place goes through the outbox like any other, so the
+    // sending strip (a phone) or the status line (wider) shows it with UNDO, and the field empties.
     name: "mail-reply",
+    sizes: ["desktop", "phone", "medium"],
+    run: async (app) => {
+      const { page } = app
+      await conversation(app, /Token audit/)
+      await replyField(page).fill("Thursday at 10 works. I'll bring the sheet.")
+      await press(app, page.locator('[data-slot="composer-send"]:visible'))
+      await page.getByRole("button", { name: "Undo", exact: true }).first().waitFor()
+      await page.mouse.move(0, 0)
+    },
+    assert: async (app) => {
+      const { page } = app
+      ensure((await replyField(page).inputValue()) === "", "the reply field kept the text after Send")
+      if (app.phone) ensure(/SENDING/.test(await strip(page).first().innerText()), "the sending strip did not appear")
+      else ensure(/SENDING/i.test(await page.locator('[data-slot="app-frame-status-line"]').innerText()), "the status line does not say it is sending")
+    },
+  },
+  {
+    // Expand (the reply field's second leading action) opens the full message with the words carried over.
+    name: "mail-reply-expand",
+    run: async (app) => {
+      const { page } = app
+      await conversation(app, /Token audit/)
+      await replyField(page).fill("Thursday at 10 works.")
+      await press(app, page.getByRole("button", { name: "Expand", exact: true }))
+      const form = page.getByRole("dialog", { name: /Re: Token audit/ })
+      ensure(/Thursday at 10 works\./.test(await form.getByRole("textbox", { name: "Message" }).innerText()), "Expand did not carry the words into the message")
+      ensure(/priya@studio\.example|Priya Raman/.test(await form.innerText()), "Expand did not address the reply")
+      ensure((await replyField(page).count()) === 0 || (await replyField(page).inputValue()) === "", "the words stayed in the reply field too")
+    },
+  },
+  {
+    // More (brief M4) on a desktop's toolbar and a phone's top bar; a phone's sheet starts with Star, Snooze and Mark unread.
+    name: "mail-more-menu",
+    sean: { kind: "undrawn", area: "mail", screen: "more-menu" },
     run: async (app) => {
       await conversation(app, /Token audit/)
-      await press(app, button(app.page, "Reply"))
+      await more(app)
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async (app) => {
+      const menu = app.page.getByRole(app.phone ? "dialog" : "menu", { name: "More" })
+      const rows = ["Reply in full", "Forward", "Remind me if no reply…", "Share with teammates…", "About Priya Raman", "Quick note about this", "Screen out sender", "Block sender", "New split for studio.example"]
+      // The token audit is starred, so a phone's sheet offers Unstar.
+      for (const name of app.phone ? ["Unstar", "Snooze…", "Mark unread", ...rows] : rows)
+        ensure(await row(app, menu, name).count(), `More has no ${name}`)
+      ensure(!(await row(app, menu, "Summarize").count()), "Summarize is offered with AI not set up")
+      ensure(!(await row(app, menu, "Unsubscribe…").count()), "Unsubscribe… is offered where the sender offers none")
+      ensure(await menu.getByRole(app.phone ? "radio" : "menuitemradio", { name: "Always in People" }).count(), "More has no category choice for the sender")
+    },
+  },
+  {
+    // Each of More's rows does its job (brief M4).
+    name: "mail-more-actions",
+    scenario: "ai-on",
+    run: async (app) => {
+      const { page } = app
+      const toast = (text) => page.locator("[data-sonner-toast]").filter({ hasText: text }).first()
+      const dialog = (name) => page.getByRole("dialog", { name })
+      const closeDialog = async () => {
+        await page.keyboard.press("Escape")
+        await app.settle()
+      }
+      await conversation(app, /Token audit/)
+      // Reply in full and Forward open the message form, addressed and quoted.
+      await moreItem(app, "Reply in full")
+      ensure(await dialog(/Re: Token audit/).isVisible(), "Reply in full did not open the reply")
+      await closeForm(app)
+      await moreItem(app, "Forward")
+      ensure(await dialog(/Fwd: Re: Token audit/).isVisible(), "Forward did not open the forward")
+      await closeForm(app)
+      // Remind me if no reply…: its own times; picking one sets the reminder, and the menu then offers to cancel it.
+      await moreItem(app, "Remind me if no reply…")
+      await press(app, row(app, page.getByRole(app.phone ? "dialog" : "menu", { name: "Remind me if no reply" }), /^Tomorrow/))
+      await toast(/comes back tomorrow/).waitFor()
+      ensure(/REMINDER .* IF NO REPLY/.test(await reader(page).innerText()), "the title's line does not say a reminder is set")
+      await moreItem(app, "Cancel reminder")
+      await toast("Cancelled the reminder").waitFor()
+      // Summarize asks the model.
+      await moreItem(app, "Summarize")
+      await reader(page).locator('[data-slot="summary-block"]').first().waitFor()
+      // Share, About, Quick note: each opens its layer.
+      await moreItem(app, "Share with teammates…")
+      ensure(await page.getByRole("dialog").filter({ hasText: /teammates/i }).first().isVisible(), "Share with teammates… opened nothing")
+      await closeDialog()
+      await moreItem(app, "About Priya Raman")
+      ensure(await dialog("About Priya Raman").isVisible(), "About did not open the sender's panel")
+      await closeDialog()
+      await moreItem(app, "Quick note about this")
+      ensure(await page.getByRole("dialog").filter({ hasText: /Token audit/ }).first().isVisible(), "Quick note about this opened nothing")
+      await closeDialog()
+      // The sender: a category, a split, screening out.
+      await press(app, (await more(app)).getByRole(app.phone ? "radio" : "menuitemradio", { name: "Always in Updates" }))
+      await toast("Mail from Priya Raman goes to Updates").waitFor()
+      await press(app, toast("Mail from Priya Raman goes to Updates").getByRole("button", { name: "Undo", exact: true }))
+      await moreItem(app, "New split for studio.example")
+      const split = dialog("New split")
+      ensure(await split.isVisible(), "New split did not open the split form")
+      ensure((await split.getByRole("textbox", { name: "Name" }).inputValue()) === "Studio", "the split form is not filled in")
+      await closeDialog()
+      // Screening out and blocking archive the sender's mail, and Undo leaves it archived: each on a sender of its own.
+      if (app.phone) await press(app, button(page, "Back"))
+      await conversation(app, /Photos from the trip/)
+      await moreItem(app, "Screen out sender")
+      await toast("Screened out Ana Duarte").waitFor()
+      ensure(!(await reader(page).getByRole("heading", { name: "Photos from the trip" }).count()), "Screen out sender left the conversation open")
+      await press(app, toast("Screened out Ana Duarte").getByRole("button", { name: "Undo", exact: true }))
+      await toastsGone(app)
+      // Block asks first; BLOCK blocks, closes the conversation, and its toast can take it back.
+      await conversation(app, /Cabin weekend/)
+      await moreItem(app, "Block sender")
+      const question = dialog("Block Marcus Lee?")
+      await press(app, question.getByRole("button", { name: "Block", exact: true }))
+      await toast("Blocked Marcus Lee").waitFor()
+      ensure(!(await reader(page).getByRole("heading", { name: /Cabin weekend/ }).count()), "Block sender left the conversation open")
+      await press(app, toast("Blocked Marcus Lee").getByRole("button", { name: "Undo", exact: true }))
+      await toastsGone(app)
+      // Unsubscribe… where the sender offers it.
+      await conversation(app, /Design Systems Weekly/)
+      await moreItem(app, "Unsubscribe…")
+      ensure(await dialog(/^Unsubscribe from /).isVisible(), "Unsubscribe… did not ask")
+      await closeDialog()
+    },
+  },
+  {
+    // Block sender asks (brief X6): "Block {name}?", what happens, BLOCK; focus starts on Cancel.
+    name: "mail-block-sender",
+    run: async (app) => {
+      await conversation(app, /Token audit/)
+      await moreItem(app, "Block sender")
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      const question = page.getByRole("dialog", { name: "Block Priya Raman?" })
+      ensure(/Their mail goes straight to the archive\./.test(await question.innerText()), "the question does not say what blocking does")
+      ensure(await question.getByRole("button", { name: "Block", exact: true }).isVisible(), "the question's yes is not Block")
+      ensure((await page.evaluate(() => document.activeElement?.textContent?.trim())) === "Cancel", "focus does not start on Cancel")
+    },
+  },
+  {
+    // The Screener's notice in the conversation's notice slot (brief M3): NEW SENDER, the question, LET IN and
+    // SCREEN OUT. LET IN keeps the conversation open; SCREEN OUT closes it. Both toast with UNDO.
+    name: "mail-screener-notice",
+    path: "/?screener",
+    scenario: "screener-waiting",
+    run: async (app) => {
+      const { page } = app
+      const toast = (text) => page.locator("[data-sonner-toast]").filter({ hasText: text }).first()
+      const open = async () => {
+        await lane(app, "Screener")
+        await press(app, page.getByRole("list", { name: "Screener", exact: true }).getByRole("button", { name: /Quick question about your studio/ }).first())
+      }
+      const notice = () => reader(page).getByRole("region", { name: "New sender" })
+      await open()
+      ensure(/Let Riley Growth.s mail into your inbox\?/.test(await notice().innerText()), "the notice does not ask the question")
+      await press(app, notice().getByRole("button", { name: "Let in", exact: true }))
+      await toast("Riley Growth can reach your inbox").waitFor()
+      ensure(await reader(page).getByRole("heading", { name: "Quick question about your studio" }).isVisible(), "Let in closed the conversation")
+      await press(app, toast("Riley Growth can reach your inbox").getByRole("button", { name: "Undo", exact: true }))
+      await toastsGone(app)
+      if (app.phone) await press(app, button(page, "Back"))
+      await open()
+      await press(app, notice().getByRole("button", { name: "Screen out", exact: true }))
+      await toast("Screened out Riley Growth").waitFor()
+      ensure(!(await reader(page).getByRole("region", { name: "New sender" }).count()), "Screen out left the conversation open")
+      await press(app, toast("Screened out Riley Growth").getByRole("button", { name: "Undo", exact: true }))
+      await toastsGone(app)
+      // The picture: the notice, as the conversation opens.
+      await page.reload()
+      await app.settle()
+      await open()
+      await page.mouse.move(0, 0)
     },
   },
   {
@@ -802,8 +1176,7 @@ export const scenes = [
     sean: { kind: "undrawn", area: "mail", screen: "lane-snoozed" },
     run: async (app) => {
       await conversation(app, /Cabin weekend/)
-      await press(app, button(app.page, "Snooze"))
-      await app.page.getByRole("menuitem", { name: /^Tomorrow/ }).click()
+      await row(app, await snoozeMenu(app), /^Tomorrow/).click()
       await toastGone(app)
       await lane(app, "Snoozed")
     },
