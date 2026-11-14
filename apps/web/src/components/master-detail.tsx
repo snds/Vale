@@ -25,6 +25,8 @@ interface MasterDetailProps {
   detailTint?: string
   /** What opens in the detail is a place of its own (a Settings section), so its history entry is the place's. */
   detailIsPlace?: boolean
+  /** What the detail column shows while nothing is open, in place of "Nothing open." (Desktop / 04's snoozed mail). Never pushed. */
+  idle?: ReactNode
 }
 
 /**
@@ -35,7 +37,7 @@ interface MasterDetailProps {
  * phone's top bar, or the status line's leading slot at medium width.
  * With `listFills`, the list has the room until something opens.
  */
-export function MasterDetail({ section, header, list, detail, onBack, onRoot, pick, listFills = false, detailTint, detailIsPlace = false }: MasterDetailProps) {
+export function MasterDetail({ section, header, list, detail, onBack, onRoot, pick, listFills = false, detailTint, detailIsPlace = false, idle }: MasterDetailProps) {
   const frame = useAppFrame()
   const hasDetail = !!detail
   // Pushed over the list (compact and medium): Back closes it and returns to the list where it was (ADR-0084).
@@ -72,9 +74,7 @@ export function MasterDetail({ section, header, list, detail, onBack, onRoot, pi
               {detail}
             </div>
           ) : (
-            <AppFrameInset>
-              <EmptyState size="sm" overline={section} title="Nothing open." body={pick} />
-            </AppFrameInset>
+            <AppFrameInset>{idle ?? <EmptyState size="sm" overline={section} title="Nothing open." body={pick} />}</AppFrameInset>
           )}
         </AppFrameDetail>
       )}

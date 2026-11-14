@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import { factTime, usePlaceStrip, useRefresh, useScreenFact, useScreenPlace } from "@/app/screen"
 import { checkMail, useStatus } from "@/app/live-status"
@@ -7,14 +8,14 @@ import { useSectionBanner, type SectionBanner } from "@/app/section-banner"
 import { SectionSwitcher } from "@/app/section-switcher"
 import { pendingJump, useUi } from "@/app/ui-store"
 import { vertical } from "@/app/verticals"
-import { Icon, Avatar, AvatarFallback, AvatarImage, Button, Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle, Skeleton, type PageHeadSwipe } from "@unicron/ui"
-import { EntryRow } from "@/components/list-row"
+import { Icon, Button, EmptyState, type PageHeadSwipe } from "@unicron/ui"
+import { LoadState } from "@/components/load-state"
 import { MasterDetail } from "@/components/master-detail"
 import { ScreenHead } from "@/components/page"
 import { VirtualList } from "@/components/virtual-list"
-import { useCore, useInboxOverview, useMailPrefs, useMe, useMessagePages, useContactPhotos, useSwipeActions, useThread } from "@/core/queries"
-import type { Lane, MessageSummary } from "@/core/types"
-import { shortTime } from "@/lib/time"
+import { getCoreClient } from "@/core/client"
+import { useCore, useInboxOverview, useMailPrefs, useMe, useMessagePages, useSwipeActions, useThread } from "@/core/queries"
+import type { Category, Lane, MessageSummary } from "@/core/types"
 
 import { useTriage } from "./actions"
 import { useNowSecs } from "@/hooks/use-now"
@@ -24,12 +25,13 @@ import { ConversationView } from "./conversation-view"
 import { CATEGORIES, LANES } from "./lanes"
 import { MailNav } from "./mail-nav"
 import { useSenderActions } from "./sender-actions"
-import { displayName, initials } from "./format"
 import { ScheduledList } from "./scheduled-list"
 import { TeamList, TeamThreadView } from "../team/team-view"
 import { BundleRow, SplitChips } from "./splits"
-import { RowSwipe } from "./swipe-row"
-import { PRIMARY, useMailVerbs } from "./vocabulary"
+import { LaneConversation, LoadingRows, SnoozedBeside } from "./lane-list"
+import { rowTime } from "./row-time"
+import { useSnoozed } from "./use-snoozed"
+import { useMailVerbs } from "./vocabulary"
 import { useMailPlace } from "./use-mail-place"
 import { useMailShortcuts } from "./use-shortcuts"
 
@@ -66,7 +68,7 @@ export function MailView() {
   const { data: core } = useCore()
   // All of the inbox (no chip) folds newsletters into the bundle row. Searching a lane is Search's (ADR-0085).
   const bundling = tab === "inbox" && !category && !split
-  const { data: pages, isPending, hasNextPage, isFetchingNextPage, fetchNextPage } = useMessagePages({
+  const { data: pages, isPending, error: readError, refetch, isRefetching, hasNextPage, isFetchingNextPage, fetchNextPage } = useMessagePages({
     lane,
     accountId,
     search: null,
@@ -109,7 +111,9 @@ export function MailView() {
 
   const multiAccount = accounts.length > 1
   const laneInfo = LANES.find((l) => l.id === tab)!
-  const emptyText = tab === "inbox" && category ? CATEGORIES.find((c) => c.id === category)!.empty : laneInfo.empty
+  // An empty Inbox says when snoozed mail comes back (Mobile / 06), and a desktop lists it beside (Desktop / 04).
+  const snoozed = useSnoozed(accountId)
+  const inboxZero = tab === "inbox" && !category && !split
 
   // What the shell says about this screen (ADR-0083): the place, the newest
   // conversation for the phone's scrolled strip, and when mail last arrived.
@@ -136,14 +140,31 @@ export function MailView() {
   // and "Inbox, Personal. Change folder or account." on the small title it collapses to.
   const switching = useSectionSwitcher(`${accountName ? `${accountName}. ` : ""}${multiAccount ? "Change folder or account." : "Change folder."}`, multiAccount ? stepAccount : undefined)
 
-  // An account that stopped syncing is Mail's banner (ADR-0086; Mobile / 07, Desktop / 05): the first one, in the server's words.
+  // An account that stopped syncing is Mail's banner (ADR-0086, ADR-0090; Mobile / 07, Desktop / 05): the first one,
+  // in the server's words, with when its mail stops. An account signed in with the provider signs in again from the
+  // banner, through the core's reauth; any other opens Accounts, where its password is.
   const failing = accounts.find((a) => a.lastError)
-  const failingName = failing?.displayName
-  const failingError = failing?.lastError
-  const syncBanner = useMemo<SectionBanner | null>(
-    () => (failingName && failingError ? { title: `${failingName} account stopped syncing`, body: failingError, action: { label: "Open Accounts", onClick: () => useUi.getState().openSettings("accounts") } } : null),
-    [failingName, failingError],
-  )
+  const stops = failing?.lastSync ? factTime(failing.lastSync) : null
+  const qc = useQueryClient()
+  const reauth = useMutation({
+    mutationFn: async (id: string) => (await getCoreClient()).reauthOAuthAccount(id),
+    onSuccess: () => void qc.invalidateQueries(),
+  })
+  const reauthError = reauth.error ? reauth.error.message : null
+  const syncBanner = useMemo<SectionBanner | null>(() => {
+    if (!failing?.lastError) return null
+    const signIn = !!failing.oauth
+    return {
+      title: `${failing.displayName} account stopped syncing`,
+      // A failed sign-in says so in the server's words, beside the button (cross-app decisions §9).
+      body: reauthError ?? [failing.lastError, stops && `${failing.displayName} mail stops at ${stops}.`].filter(Boolean).join(" "),
+      action: signIn
+        ? { label: "Sign in", loading: reauth.isPending, onClick: () => reauth.mutate(failing.id) }
+        : { label: "Open accounts", onClick: () => useUi.getState().openSettings("accounts") },
+    }
+    // reauth.mutate is stable; the banner changes only with what it says.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [failing?.id, failing?.displayName, failing?.lastError, failing?.oauth, stops, reauthError, reauth.isPending])
   useSectionBanner("mail", syncBanner)
 
   useMailShortcuts({
@@ -159,7 +180,6 @@ export function MailView() {
   return (
     <MasterDetail
       section="Mail"
-      pick={vertical("mail").pick}
       onBack={() => (tab === "team" ? setTeamOpen(null) : setSelected(null))}
       onRoot={() => {
         useUi.getState().showMailTab("inbox")
@@ -186,7 +206,7 @@ export function MailView() {
               <SectionSwitcher state={switching} overline={["Mail", accountName].filter(Boolean).join(" // ")} title="Folders">
                 <MailNav layer more={switching.sheet} />
               </SectionSwitcher>
-              {tab === "inbox" && (
+              {tab === "inbox" && accounts.length > 0 && (
                 <div role="group" aria-label="Show" className="no-scrollbar flex gap-1.5 overflow-x-auto">
                   {[{ id: null, label: "All" } as const, ...CATEGORIES].map((c) => (
                     <Button
@@ -215,70 +235,65 @@ export function MailView() {
           <ScheduledList />
         ) : tab === "team" ? (
           <TeamList />
-        ) : isPending ? (
-          <ListSkeleton />
-        ) : accounts.length === 0 ? (
-          <Empty size="sm" className="py-16">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <Icon name="at" />
-              </EmptyMedia>
-              <EmptyTitle>Add your first account</EmptyTitle>
-              <EmptyDescription>Gmail, Outlook, iCloud, Fastmail, or any IMAP account.</EmptyDescription>
-            </EmptyHeader>
-            <Button onClick={startFirstRun}>
-              <Icon name="add" data-icon="inline-start" /> Add account
-            </Button>
-          </Empty>
-        ) : list.length === 0 && bundling && overview?.bundle ? (
-          <BundleRow accountId={accountId} onOpen={() => (setCategory("newsletters"), setSelected(null))} />
-        ) : list.length === 0 ? (
-          <Empty size="sm" className="py-16">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <Icon name="checkmark--double" />
-              </EmptyMedia>
-              <EmptyTitle>{emptyText}</EmptyTitle>
-            </EmptyHeader>
-          </Empty>
-        ) : (
-          <>
-          {bundling && <BundleRow accountId={accountId} onOpen={() => (setCategory("newsletters"), setSelected(null))} />}
-          <VirtualList
-            items={list}
-            itemKey={(m) => m.threadId}
-            estimate={76}
-            onEnd={loadMore}
-            label={laneInfo.label}
-            render={(m) => (
-              <RowSwipe
-                // Your mapping (ADR-0025); Apple Mail's until changed: right toggles read, left archives.
-                // In the Screener: right lets the sender in, left screens them out.
-                {...(tab === "screener"
-                  ? {
-                      start: { icon: "user--admin", label: "Let in", tone: PRIMARY, onCommit: () => senderActions.decide(m.from, "allowed") },
-                      end: { icon: "user--minus", label: "Screen out", tone: "bg-critical-fill text-critical-on-fill", onCommit: () => senderActions.decide(m.from, "screened_out") },
-                    }
-                  : {
-                      start: verb(swipes.right, m),
-                      startLong: verb(swipes.rightLong, m),
-                      end: verb(swipes.left, m),
-                      endLong: verb(swipes.leftLong, m),
-                    })}
-              >
-                <MessageRow
-                  message={m}
-                  lane={lane}
-                  now={now}
-                  selected={m.threadId === selectedId}
-                  onSelect={() => setSelected(m)}
-                  account={multiAccount && !accountId ? accounts.find((a) => a.id === m.accountId)?.displayName : undefined}
-                />
-              </RowSwipe>
-            )}
+        ) : accounts.length === 0 && !isPending ? (
+          <EmptyState
+            overline="Mail"
+            title="Add your first account."
+            body="Gmail, Outlook, iCloud, Fastmail or any IMAP account."
+            actionLabel="Add account"
+            onAction={startFirstRun}
           />
-          </>
+        ) : isPending ? (
+          <LoadingRows count={5} label={`Loading ${laneInfo.label}`} />
+        ) : (
+          <LoadState place={laneInfo.label} overline={laneInfo.label} error={readError} hasData={list.length > 0} onRetry={() => void refetch()} retrying={isRefetching}>
+            {bundling && <BundleRow accountId={accountId} onOpen={() => (setCategory("newsletters"), setSelected(null))} />}
+            {list.length === 0 && !(bundling && overview?.bundle) ? (
+              inboxZero ? (
+                <EmptyState
+                  overline={`Inbox zero // ${rowTime(now, new Date(now * 1000))}`}
+                  title="Nothing left today."
+                  body={snoozed[0]?.snoozedUntil ? `Snoozed mail comes back ${comesBack(snoozed[0].snoozedUntil, now)}.` : undefined}
+                  actionLabel="Open archive"
+                  onAction={() => useUi.getState().setMailTab("archive")}
+                />
+              ) : (
+                <EmptyState {...emptyCopy(tab === "inbox" ? category : null, laneInfo.label, tab)} />
+              )
+            ) : (
+              <VirtualList
+                items={list}
+                itemKey={(m) => m.threadId}
+                // The rows' own heights (brief M1): 120 with a two-line preview, 100 with one or none.
+                estimate={(m) => (m.preview.length > 48 ? 120 : 100)}
+                onEnd={loadMore}
+                label={laneInfo.label}
+                render={(m) => (
+                  <LaneConversation
+                    message={m}
+                    lane={lane}
+                    now={now}
+                    selected={m.threadId === selectedId}
+                    onOpen={() => setSelected(m)}
+                    account={multiAccount && !accountId ? accounts.find((a) => a.id === m.accountId)?.displayName : undefined}
+                    swipes={swipes}
+                    screening={tab === "screener"}
+                    triage={triage}
+                    senders={senderActions}
+                    verb={verb}
+                  />
+                )}
+              />
+            )}
+            {isFetchingNextPage && <LoadingRows count={3} label={`Loading more of ${laneInfo.label}`} />}
+          </LoadState>
         )
+      }
+      pick={failing && stops ? `${failing.displayName} mail stops at ${stops}. Pick a conversation to see it here.` : vertical("mail").pick}
+      idle={
+        inboxZero && list.length === 0 && !isPending && accounts.length > 0 ? (
+          <SnoozedBeside accountId={accountId} now={now} selectedId={selectedId} onOpen={setSelected} />
+        ) : undefined
       }
       detail={
         tab === "team" ? (
@@ -311,98 +326,32 @@ function syncedAt(accounts: { lastSync: number | null }[]) {
   return factTime(Math.min(...accounts.map((a) => a.lastSync!)))
 }
 
-function MessageRow({
-  message: m,
-  lane,
-  now,
-  selected,
-  onSelect,
-  account,
-}: {
-  message: MessageSummary
-  lane: Lane
-  now: number
-  selected: boolean
-  onSelect: () => void
-  account?: string
-}) {
-  // A face for senders you have a card for (ADR-0027); initials otherwise.
-  const { data: photos } = useContactPhotos()
-  // Your own mail says who it went to.
-  const sentTo = m.mailbox === "Sent" ? m.sentTo : null
-  const face = sentTo ? undefined : photos?.[m.from.email.trim().toLowerCase()]
-  // A follow-up that came due brings your own message back to the inbox.
-  const nudged = lane === "inbox" && m.followUpAt != null && m.followUpAt <= now
-  const meta =
-    lane === "snoozed" && m.snoozedUntil ? (
-      <span className="inline-flex items-center gap-1">
-        <Icon name="time" size={14} />
-        {shortTime(m.snoozedUntil)}
-      </span>
-    ) : lane === "waiting" && m.followUpAt ? (
-      <span className="inline-flex items-center gap-1">
-        <Icon name="notification" size={14} />
-        {shortTime(m.followUpAt)}
-      </span>
-    ) : (
-      shortTime(nudged ? Math.max(m.followUpAt!, m.sortAt) : m.sortAt)
-    )
-  return (
-    <EntryRow
-        selected={selected}
-        onSelect={onSelect}
-        emphasized={!m.seen}
-        leading={
-          <Avatar className="mt-0.5">
-            {face && <AvatarImage src={face} alt="" />}
-            <AvatarFallback>{sentTo ? initials({ name: sentTo, email: sentTo }) : initials(m.from)}</AvatarFallback>
-          </Avatar>
-        }
-        title={
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate">{sentTo ? `To ${sentTo}` : displayName(m.from)}</span>
-            {m.threadCount > 1 && (
-              <span className="shrink-0 text-xs font-normal text-muted-foreground" aria-label={`${m.threadCount} messages`}>
-                {m.threadCount}
-              </span>
-            )}
-          </span>
-        }
-        meta={meta}
-        supporting={
-          <>
-            {nudged && (
-              <span className="mr-1.5 inline-flex items-center gap-1 rounded-md bg-accent px-1.5 text-xs font-medium text-foreground">
-                <Icon name="notification--filled" size={14} /> No reply yet
-              </span>
-            )}
-            <span className="text-foreground">{m.subject || "(no subject)"}</span>
-            {m.preview && <> — {m.preview}</>}
-          </>
-        }
-        trailing={
-          <span className="mt-0.5 flex shrink-0 flex-col items-end gap-1">
-            {m.flagged && <Icon name="star--filled" size="sm" label="Starred" />}
-            {m.hasAttachments && <Icon name="attachment" tone="muted" size="sm" label="Has attachments" />}
-            {account && <span className="text-[11px] text-muted-foreground">{account}</span>}
-          </span>
-        }
-      />
-  )
+/** "at 8:00 AM tomorrow": when snoozed mail comes back, as a sentence says it, in the device's format. */
+function comesBack(at: number, now: number) {
+  const d = new Date(at * 1000)
+  const today = new Date(now * 1000)
+  const days = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / 86_400_000)
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+  if (days <= 0) return `at ${time}`
+  if (days === 1) return `at ${time} tomorrow`
+  return `at ${time} on ${d.toLocaleDateString(undefined, days < 7 ? { weekday: "long" } : { weekday: "long", month: "long", day: "numeric" })}`
 }
 
-function ListSkeleton() {
-  return (
-    <div className="flex flex-col gap-4 px-4 py-3" aria-busy>
-      {Array.from({ length: 6 }, (_, i) => (
-        <div key={i} className="flex gap-3">
-          <Skeleton className="size-8 rounded-full" />
-          <div className="flex flex-1 flex-col gap-2">
-            <Skeleton className="h-4 w-1/3" />
-            <Skeleton className="h-4 w-full" />
-          </div>
-        </div>
-      ))}
-    </div>
-  )
+/** A lane's empty state, in brief 5.2's words: `{NAME} // 00`, a title, a line at most. */
+function emptyCopy(category: Category | null, label: string, tab: string): { overline: string; title: string; body?: string } {
+  if (category) {
+    const c = CATEGORIES.find((x) => x.id === category)!
+    return { overline: `${c.label} // 00`, title: c.empty }
+  }
+  const copy: Record<string, { title: string; body?: string }> = {
+    inbox: { title: "Nothing here." },
+    unread: { title: "Nothing unread." },
+    starred: { title: "Nothing starred.", body: "Star mail to keep it close." },
+    snoozed: { title: "Nothing snoozed.", body: "Snoozed mail waits here until it's time." },
+    waiting: { title: "Not waiting on anyone.", body: "Set a reminder when you send." },
+    archive: { title: "Nothing archived." },
+    screener: { title: "No new senders.", body: "First-time senders wait here." },
+    mine: { title: "Nothing is yours.", body: "Conversations you take show up here." },
+  }
+  return { overline: `${label} // 00`, ...(copy[tab] ?? { title: "Nothing here." }) }
 }

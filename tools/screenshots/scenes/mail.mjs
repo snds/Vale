@@ -1,11 +1,16 @@
 // Mail: the lanes, a conversation, reading and writing. Search is in search.mjs.
-import { area, button, closeForm, discardQuestion, ensure, formatBar, formLayer, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, switcher, switcherLayer, toastGone } from "./helpers.mjs"
+import { area, button, closeForm, tabBar, discardQuestion, ensure, formatBar, formLayer, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, switcher, switcherLayer, toastGone } from "./helpers.mjs"
 import { settings } from "./settings.mjs"
 
 /** Opens a conversation in the Inbox list by its subject. */
 export const conversation = (app, subject) => press(app, app.page.getByRole("list", { name: "Inbox" }).getByRole("button", { name: subject }).first())
 /** Opens a lane (Unread, Starred, Snoozed…) from Mail's folders: the sidebar, or the page head's sheet or popover. */
-export const lane = (app, name) => pick(app, name)
+export const lane = async (app, name) => {
+  await pick(app, name)
+  // The press lands where a row now stands: the pointer leaves it, so no hover is in the picture by chance.
+  await app.page.mouse.move(0, 0)
+  await app.settle()
+}
 /** Opens a new message; returns its dialog. */
 export const compose = async (app) => {
   await press(app, button(app.page, "Compose"))
@@ -38,8 +43,98 @@ const archive = async (app, subject) => {
   await app.page.getByRole("region", { name: "Mail: what is open" }).getByRole("button", { name: "Archive", exact: true }).click()
 }
 
+/** A conversation's row in a mail list, by its subject: the swipe row around the message row. */
+const rowOf = (page, subject, list = "Inbox") =>
+  page.getByRole("list", { name: list, exact: true }).getByRole("listitem").filter({ has: page.getByRole("button", { name: subject }) }).first().locator('[data-slot="swipe-row"]')
+/** The tiles a row shows open, by their words. */
+const tiles = async (row) => (await row.locator('[data-slot="swipe-action"]').allInnerTexts()).map((t) => t.trim())
+/** The row's overflow button: its name is its word, then the row's. */
+const moreOf = (row) => row.getByRole("button", { name: /^More actions/ })
+const menu = (page) => page.getByRole("menu").last()
+
+/**
+ * Drags a row sideways (dx) or down (dy) as a finger does on a phone (Chromium's touch input, so the
+ * browser scrolls and makes pointer events as it does for a real touch), or with the mouse on a desktop.
+ * A left drag starts near the row's end, a right one 64 px in: clear of the screen's back edge.
+ */
+const drag = async (app, row, dx, dy = 0) => {
+  const { page } = app
+  const box = await row.boundingBox()
+  const x0 = Math.round(dx < 0 ? box.x + box.width - 48 : dx > 0 ? box.x + 64 : box.x + box.width / 2)
+  const y0 = Math.round(box.y + box.height / 2)
+  const steps = 12
+  const at = (i) => [Math.round(x0 + (dx * i) / steps), Math.round(y0 + (dy * i) / steps)]
+  if (app.touch) {
+    const cdp = await page.context().newCDPSession(page)
+    const touch = (type, x, y) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 1 }] })
+    await touch("touchStart", x0, y0)
+    for (let i = 1; i <= steps; i++) await touch("touchMove", ...at(i))
+    await touch("touchEnd")
+    await cdp.detach()
+  } else {
+    await page.mouse.move(x0, y0)
+    await page.mouse.down()
+    for (let i = 1; i <= steps; i++) await page.mouse.move(...at(i))
+    await page.mouse.up()
+  }
+  await page.waitForTimeout(200)
+  await app.settle()
+}
+
+/** A press somewhere that is not the row: an open row closes on it. */
+const pressOutside = async (app) => {
+  await app.page.evaluate(() => document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })))
+  await app.settle()
+}
+
 export const scenes = [
-  { name: "mail-inbox" },
+  {
+    // Mobile / 01 and Desktop / 01's list (ADR-0090; brief M1): message rows with no face, the time as the
+    // frames write it, the account with All chosen, and the overflow button always there on touch.
+    name: "mail-inbox",
+    sean: { kind: "drawn", area: "mail", screen: "inbox" },
+    assert: async (app) => {
+      const { page } = app
+      const list = page.getByRole("list", { name: "Inbox", exact: true })
+      ensure(!(await list.locator('[data-slot="avatar"], [data-slot="initial-tile"]').count()), "a row shows a face (Q8: rows have none)")
+      for (const t of await list.locator('[data-slot="list-row-time"]').allInnerTexts()) ensure(/^(WORK|PERSONAL) \/\/ (\d\d:\d\d|[A-Z]{3}|\d\d\.\d\d)$/.test(t.trim()), `a row's time reads "${t.trim()}", not as the frames write it`)
+      ensure((await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()).trim() === "INBOX // ALL ACCOUNTS", "the overline is not INBOX // ALL ACCOUNTS")
+      const more = list.getByRole("button", { name: /^More actions/ }).first()
+      if (app.touch) ensure(await more.evaluate((el) => getComputedStyle(el.closest('[data-slot="list-row-menu"]')).opacity === "1"), "the overflow button is hidden on touch")
+    },
+  },
+  {
+    // What a row tells without opening it (brief M1), all from the demo's own data: the thread's count, a star,
+    // an attachment, the account, and NO REPLY YET on your own mail once its reminder came due.
+    name: "mail-row-facts",
+    sizes: ["desktop", "phone"],
+    scenario: "no-reply-yet",
+    assert: async ({ page }) => {
+      const list = page.getByRole("list", { name: "Inbox", exact: true })
+      const rows = list.locator('[data-slot="list-row"]')
+      ensure(await rows.filter({ has: page.locator('[data-slot="list-row-count"]', { hasText: /^0[2-9]$/ }) }).count(), "no row shows its thread's count")
+      ensure(await rows.filter({ has: page.getByRole("img", { name: "Starred" }) }).count(), "no row shows a star")
+      ensure(await rows.filter({ has: page.getByRole("img", { name: "Has attachments" }) }).count(), "no row shows an attachment")
+      ensure(await rows.filter({ has: page.locator('[data-slot="list-row-time"]', { hasText: /^Work \/\// }) }).count(), "no row names its account")
+      const nudged = rows.filter({ has: page.locator('[data-slot="badge"]', { hasText: /no reply yet/i }) })
+      ensure((await nudged.count()) === 1, `${await nudged.count()} rows say No reply yet, not one`)
+      ensure(/^To /.test((await nudged.locator('[data-slot="list-row-sender"]').innerText()).trim()), "the row with No reply yet does not say who it went to")
+    },
+    // Remind me in 3 days, from the row's menu: the reminder moves on, so the row goes back to Waiting.
+    run: async (app) => {
+      const { page } = app
+      const row = page.getByRole("list", { name: "Inbox", exact: true }).locator('[data-slot="list-row"]').filter({ has: page.locator('[data-slot="badge"]') }).first()
+      await row.locator('[data-slot="list-row-main"]').focus()
+      await page.keyboard.press("Shift+F10")
+      await press(app, menu(page).getByRole("menuitem", { name: "Remind me in 3 days", exact: true }))
+      await page.locator("[data-sonner-toast]").filter({ hasText: "If nobody replies, this comes back in 3 days" }).waitFor()
+      ensure(!(await page.getByRole("list", { name: "Inbox", exact: true }).locator('[data-slot="badge"]').count()), "Remind me in 3 days left the row in the Inbox with No reply yet")
+      await toastGone(app)
+      // The picture: the Inbox with the reminder come due again, as the scenario starts.
+      await page.reload()
+      await app.settle()
+    },
+  },
   { name: "mail-conversation", run: (app) => conversation(app, /Token audit/) }, // three messages, and the sender beside them
   { name: "mail-invitation", run: (app) => conversation(app, /Invitation: Design crit/) },
   { name: "mail-attachments", run: (app) => conversation(app, /Your booking is confirmed/) },
@@ -468,10 +563,11 @@ export const scenes = [
       await lane(app, "Screener")
     },
   },
-  { name: "mail-unread", run: (app) => lane(app, "Unread") },
-  { name: "mail-starred", run: (app) => lane(app, "Starred") },
+  { name: "mail-unread", sean: { kind: "undrawn", area: "mail", screen: "lane-unread" }, run: (app) => lane(app, "Unread") },
+  { name: "mail-starred", sean: { kind: "undrawn", area: "mail", screen: "lane-starred" }, run: (app) => lane(app, "Starred") },
   {
     name: "mail-snoozed", // nothing is snoozed in the sample data, so the scene snoozes one conversation
+    sean: { kind: "undrawn", area: "mail", screen: "lane-snoozed" },
     run: async (app) => {
       await conversation(app, /Cabin weekend/)
       await press(app, button(app.page, "Snooze"))
@@ -479,8 +575,10 @@ export const scenes = [
       await toastGone(app)
       await lane(app, "Snoozed")
     },
+    // The lane says when each row comes back, after the glyph that says why.
+    assert: async ({ page }) => ensure(/^PERSONAL\s*\/\/\s*FRI 08:00$/.test((await page.getByRole("list", { name: "Snoozed" }).locator('[data-slot="list-row-time"]').first().innerText()).trim()), "a snoozed row does not say when it comes back"),
   },
-  { name: "mail-waiting", run: (app) => lane(app, "Waiting") },
+  { name: "mail-waiting", sean: { kind: "undrawn", area: "mail", screen: "lane-waiting" }, run: (app) => lane(app, "Waiting") },
   { name: "mail-scheduled", run: (app) => lane(app, "Scheduled") }, // empty in the sample data: a lane's empty state
   { name: "mail-team", run: (app) => lane(app, "Team") },
   {
@@ -490,7 +588,265 @@ export const scenes = [
       await press(app, app.page.getByRole("button", { name: "Open a link…" }).first())
     },
   },
-  { name: "mail-archive", run: (app) => lane(app, "Archive") },
+  { name: "mail-archive", sean: { kind: "undrawn", area: "mail", screen: "lane-archive" }, run: (app) => lane(app, "Archive") },
+  {
+    // Mobile / 07 and Desktop / 05 (ADR-0090): the account that stopped syncing, in the server's words and with when its
+    // mail stops; OPEN ACCOUNTS for an account with a password. On a desktop its sidebar row is critical and the detail
+    // column's nothing-open line names it.
+    name: "mail-sync-error",
+    scenario: "sync-error",
+    sean: { kind: "drawn", area: "mail", screen: "sync-error" },
+    assert: async (app) => {
+      const { page } = app
+      const banner = page.locator('[data-slot="banner"]:visible').first()
+      ensure(/Work account stopped syncing/.test(await banner.innerText()), "the banner does not name the account")
+      ensure(/refused the sign-in.*Work mail stops at 08:36\./s.test(await banner.innerText()), "the banner does not give the server's words and when Work's mail stops")
+      ensure(await banner.getByRole("button", { name: "Open accounts", exact: true }).isVisible(), "the banner has no Open accounts")
+      ensure(!(await banner.getByRole("button", { name: "Sign in", exact: true }).count()), "a password account offers Sign in")
+      ensure(await page.getByRole("list", { name: "Inbox", exact: true }).getByRole("listitem").first().isVisible(), "the list did not carry on under the banner")
+      // The detail column stands beside the list only at the full width.
+      if (app.size === "desktop") ensure(await page.getByRole("region", { name: "Mail: nothing open" }).getByText("Work mail stops at 08:36.").isVisible(), "the detail column does not name the stopped account")
+    },
+  },
+  {
+    // An account signed in with its provider: SIGN IN, through the core's reauth. The demo cannot sign in, so its
+    // refusal shows in the banner, beside the button (cross-app decisions §9).
+    name: "mail-sync-error-sign-in",
+    sizes: ["desktop", "phone"],
+    scenario: "sync-error-sign-in",
+    run: async (app) => {
+      const banner = app.page.locator('[data-slot="banner"]:visible').first()
+      ensure(!(await banner.getByRole("button", { name: "Open accounts", exact: true }).count()), "an account signed in with its provider offers Open accounts")
+      await press(app, banner.getByRole("button", { name: "Sign in", exact: true }))
+      ensure(/Signing in again needs the desktop app\./.test(await banner.innerText()), "a failed sign-in does not say why beside the button")
+    },
+  },
+  {
+    // Mobile / 06 and Desktop / 04: INBOX ZERO with the time, the snoozed sentence (the handled count is not
+    // there: W1), OPEN ARCHIVE; on a desktop the snoozed mail beside, in the order it comes back.
+    name: "mail-inbox-zero",
+    scenario: "inbox-zero",
+    sean: { kind: "drawn", area: "mail", screen: "inbox-zero" },
+    assert: async (app) => {
+      const { page } = app
+      const empty = page.getByRole("region", { name: "Mail", exact: true }).locator('[data-slot="empty"]')
+      const words = await empty.innerText()
+      ensure(/INBOX ZERO \/\/ 09:16/.test(words) && /Nothing left today\./.test(words), "the empty Inbox is not INBOX ZERO // 09:16, Nothing left today.")
+      ensure(/Snoozed mail comes back at 8:00\sAM tomorrow\./.test(words), "the empty Inbox does not say when snoozed mail comes back")
+      ensure(!/handled/.test(words), "the empty Inbox counts handled mail, which the core does not know (W1)")
+      ensure(await empty.getByRole("button", { name: "Open archive", exact: true }).isVisible(), "the empty Inbox has no Open archive")
+      if (app.size === "desktop") {
+        const beside = page.getByRole("region", { name: "Mail: nothing open" })
+        ensure(/SNOOZED \/\/ BACK AT FRI 08:00\s*02/.test(await beside.innerText()), "the detail column does not list the snoozed mail")
+        ensure((await beside.getByRole("listitem").count()) === 2, "the detail column does not list both snoozed conversations")
+      }
+    },
+  },
+  {
+    // States / 04: five skeleton rows, two bars 20 apart, while the lane's first read is out, and the check for new
+    // mail the person asked for as live status (the phone's strip, the desktop's status line).
+    name: "mail-loading",
+    scenario: ["slow", "syncing"],
+    loading: true,
+    sean: { kind: "drawn", area: "mail", screen: "loading" },
+    run: async (app) => {
+      const { page } = app
+      if (app.phone) await press(app, tabBar(page).getByRole("tab", { name: "Mail", exact: true }))
+      else await press(app, page.locator('[data-slot="app-frame-status-line"]').getByRole("button", { name: "Check again", exact: true }))
+      await page.mouse.move(0, 0)
+      await app.settle()
+    },
+    assert: async ({ page, phone }) => {
+      const live = phone ? page.locator('[data-slot="accessory"]:visible').first() : page.locator('[data-slot="app-frame-status-line"]')
+      ensure(/syncing|checking/i.test(await live.innerText()), "the check the person asked for does not show as live status")
+      const rows = page.getByRole("region", { name: "Mail", exact: true }).locator('[data-slot="skeleton"][data-variant="row"]')
+      ensure((await rows.count()) === 5, `the list shows ${await rows.count()} skeleton rows, not five`)
+      const bars = await rows.first().locator('[data-slot="skeleton-bar"]').evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))
+      ensure(bars.length === 2 && Math.round(bars[1].top - bars[0].bottom) === 20, "a skeleton row is not two bars 20 apart")
+    },
+  },
+  {
+    // No account yet: one way on, to the first run.
+    name: "mail-no-account",
+    scenario: "no-account",
+    sean: { kind: "undrawn", area: "mail", screen: "no-account" },
+    assert: async ({ page }) => {
+      const empty = page.getByRole("region", { name: "Mail", exact: true }).locator('[data-slot="empty"]')
+      ensure(/Add your first account\./.test(await empty.innerText()), "Mail with no account does not ask for one")
+      ensure(await empty.getByRole("button", { name: "Add account", exact: true }).isVisible(), "Mail with no account has no Add account")
+    },
+  },
+  {
+    // States / 01, trailing: the person's slots as the drawn tiles, STAR, SNOOZE and ARCHIVE (the full swipe's, in
+    // the identity fill). The swipes-drawn scenario sets the two slots the core leaves at Nothing (Q4).
+    name: "mail-swipe-left",
+    scenario: "swipes-drawn",
+    sean: { kind: "drawn", area: "mail", screen: "swipe-actions" },
+    run: async (app) => {
+      const row = rowOf(app.page, /Design crit/)
+      await drag(app, row, -200)
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      const row = rowOf(page, /Design crit/)
+      ensure((await row.getAttribute("data-open")) === "trailing", "the row did not stay open on its trailing tiles")
+      const words = await tiles(row)
+      ensure(JSON.stringify(words) === JSON.stringify(["STAR", "SNOOZE", "ARCHIVE"]), `the tiles read ${JSON.stringify(words)}, not STAR, SNOOZE, ARCHIVE`)
+      ensure((await row.locator('[data-slot="swipe-action"]').last().getAttribute("data-tone")) === "primary", "ARCHIVE, the full swipe's tile, is not the primary one")
+    },
+  },
+  {
+    // States / 01, leading: READ, started clear of the screen's back edge.
+    name: "mail-swipe-right",
+    scenario: "swipes-drawn",
+    sean: { kind: "drawn", area: "mail", screen: "swipe-actions-leading" },
+    run: async (app) => {
+      await drag(app, rowOf(app.page, /Your booking is confirmed/), 100)
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      const row = rowOf(page, /Your booking is confirmed/)
+      ensure((await row.getAttribute("data-open")) === "leading", "the row did not stay open on its leading tile")
+      ensure(JSON.stringify(await tiles(row)) === JSON.stringify(["READ"]), "the leading tile is not READ")
+    },
+  },
+  {
+    // The swipe's rules, with a finger (ADR-0090; contract 6.4): the default slots show ARCHIVE alone; a vertical drag
+    // scrolls and opens nothing; a full swipe archives, and UNDO brings the conversation back.
+    name: "mail-swipe-checks",
+    sizes: ["phone"],
+    run: async (app) => {
+      const { page } = app
+      const list = page.getByRole("list", { name: "Inbox", exact: true })
+      const scroller = page.getByRole("region", { name: "Mail", exact: true })
+      // The core's own defaults: READ leading, ARCHIVE trailing, the other two slots Nothing, so no tile for them.
+      let row = rowOf(page, /Token audit/)
+      await drag(app, row, -200)
+      ensure(JSON.stringify(await tiles(row)) === JSON.stringify(["ARCHIVE"]), `the default trailing tiles read ${JSON.stringify(await tiles(row))}, not ARCHIVE alone`)
+      await pressOutside(app)
+      await drag(app, row, 100)
+      ensure(JSON.stringify(await tiles(row)) === JSON.stringify(["READ"]), `the leading tile reads ${JSON.stringify(await tiles(row))}, not READ`)
+      // A press outside an open row closes it.
+      await pressOutside(app)
+      ensure(!(await list.locator('[data-slot="swipe-row"][data-open]').count()), "a press outside the open row did not close it")
+      // A vertical drag scrolls the list and opens nothing.
+      const before = await scroller.evaluate((el) => el.scrollTop)
+      await drag(app, rowOf(page, /Cabin weekend/), 0, -260)
+      ensure(!(await list.locator('[data-slot="swipe-row"][data-open]').count()), "a vertical drag opened a row")
+      ensure(!(await page.getByRole("button", { name: "Back", exact: true }).count()), "a vertical drag opened a conversation")
+      ensure((await scroller.evaluate((el) => el.scrollTop)) > before, "a vertical drag did not scroll the list")
+      await scroller.evaluate((el) => el.scrollTo(0, 0))
+      await app.settle()
+      // A full swipe runs ARCHIVE, the outermost tile; the toast names the conversation, and UNDO brings it back.
+      row = rowOf(page, /Token audit/)
+      await drag(app, row, -320)
+      const toast = page.locator("[data-sonner-toast]").filter({ hasText: "Archived Re: Token audit" })
+      await toast.waitFor()
+      ensure(!(await list.getByRole("button", { name: /Token audit/ }).count()), "a full swipe did not archive the conversation")
+      await press(app, toast.getByRole("button", { name: "Undo", exact: true }))
+      await list.getByRole("button", { name: /Token audit/ }).first().waitFor()
+      await app.settle()
+    },
+  },
+  {
+    // The Screener's pair: LET IN leads, SCREEN OUT trails and never runs on a full swipe: the row opens and stops.
+    name: "mail-screener-swipe",
+    sizes: ["phone"],
+    // The demo's first-time sender, waiting in the Screener (it is on).
+    path: "/?screener",
+    run: async (app) => {
+      const { page } = app
+      await lane(app, "Screener")
+      const first = page.getByRole("list", { name: "Screener", exact: true }).getByRole("listitem").first()
+      const subject = (await first.locator('[data-slot="list-row-subject"]').innerText()).trim()
+      const row = first.locator('[data-slot="swipe-row"]')
+      await drag(app, row, -330)
+      ensure((await row.getAttribute("data-open")) === "trailing", "a full swipe on SCREEN OUT did not leave the row open")
+      ensure(JSON.stringify(await tiles(row)) === JSON.stringify(["SCREEN OUT"]), `the Screener's trailing tile reads ${JSON.stringify(await tiles(row))}`)
+      await page.waitForTimeout(400)
+      ensure(!(await page.locator("[data-sonner-toast]").filter({ hasText: /Screened out/ }).count()), "a full swipe screened the sender out")
+      ensure(await page.getByRole("list", { name: "Screener", exact: true }).getByText(subject).count(), "the row left the Screener on a full swipe")
+      await pressOutside(app)
+      await drag(app, row, 100)
+      ensure(JSON.stringify(await tiles(row)) === JSON.stringify(["LET IN"]), "the Screener's leading tile is not LET IN")
+    },
+  },
+  {
+    // A row's actions without a gesture (cross-app decisions §10; brief M1): the overflow button, and Shift+F10 on the
+    // focused row. Each works: Star, Mark read, Snooze, Remind, Always in Newsletters, Archive with its Undo, and the
+    // picker for any date and time. The picture: the menu open on a row.
+    name: "mail-row-menu",
+    sean: { kind: "undrawn", area: "mail", screen: "row-menu" },
+    run: async (app) => {
+      const { page } = app
+      const list = page.getByRole("list", { name: "Inbox", exact: true })
+      const toast = (text) => page.locator("[data-sonner-toast]").filter({ hasText: text })
+      const openMenu = async (subject, { keys = false } = {}) => {
+        const row = rowOf(page, subject)
+        if (keys) {
+          await row.locator('[data-slot="list-row-main"]').focus()
+          await page.keyboard.press("Shift+F10")
+        } else await row.hover().then(() => moreOf(row).click())
+        await menu(page).waitFor()
+        await app.settle()
+        return menu(page)
+      }
+      const item = (m, name) => m.getByRole("menuitem", { name, exact: true })
+      // The items: the swipe slots' first (READ or UNREAD, ARCHIVE), then the rest.
+      let m = await openMenu(/Token audit/)
+      const names = (await m.getByRole("menuitem").allInnerTexts()).map((t) => t.trim())
+      for (const want of ["Read", "Archive", "Snooze until", "Remind me in 3 days", "Always in Newsletters"]) ensure(names.includes(want), `the row's menu has no ${want}: ${JSON.stringify(names)}`)
+      ensure(names.filter((n) => n === "Star" || n === "Unstar").length === 1, `the row's menu has no single Star or Unstar: ${JSON.stringify(names)}`)
+      ensure(names.filter((n) => n === "Archive").length === 1 && !names.includes("Mark read"), "the row's menu lists an action twice")
+      // Unstar from the menu (the row is starred), then Star again from the keys.
+      await press(app, item(m, "Unstar").or(item(m, "Star")).first())
+      const starred = () => rowOf(page, /Token audit/).getByRole("img", { name: "Starred" }).count()
+      const was = await starred()
+      m = await openMenu(/Token audit/, { keys: true })
+      await press(app, item(m, was ? "Unstar" : "Star"))
+      ensure((await starred()) !== was, "Star from Shift+F10 did not change the star")
+      // Read from the keys: the unread square goes.
+      m = await openMenu(/Token audit/, { keys: true })
+      await press(app, item(m, "Read"))
+      ensure(!(await rowOf(page, /Token audit/).locator('[data-slot="list-row-unread"]').count()), "Read did not mark the conversation read")
+      // Always in Newsletters says it is done (Remind me in 3 days is checked in mail-row-facts, on your own mail).
+      m = await openMenu(/Your booking is confirmed/, { keys: true })
+      await press(app, item(m, "Always in Newsletters"))
+      await toast("goes to Newsletters").waitFor()
+      // Snooze until ▸ Tomorrow from the keys: the conversation leaves, the toast names it, and Undo brings it back.
+      m = await openMenu(/Cabin weekend/, { keys: true })
+      await item(m, "Snooze until").click()
+      await press(app, page.getByRole("menuitem", { name: /^Tomorrow/ }))
+      await toast("Snoozed Re: Cabin weekend").waitFor()
+      ensure(!(await list.getByRole("button", { name: /Cabin weekend/ }).count()), "Snooze did not take the conversation out of the Inbox")
+      await press(app, toast("Snoozed Re: Cabin weekend").getByRole("button", { name: "Undo", exact: true }))
+      await list.getByRole("button", { name: /Cabin weekend/ }).first().waitFor()
+      // Pick date and time…: the shared picker, titled Snooze; Esc puts it away and focus returns to the row.
+      m = await openMenu(/Cabin weekend/)
+      await item(m, "Snooze until").click()
+      await press(app, page.getByRole("menuitem", { name: "Pick date and time…" }))
+      const picker = page.getByRole("dialog", { name: "Snooze" })
+      ensure(await picker.getByRole("button", { name: "Snooze", exact: true }).isVisible(), "Pick date and time… did not open the picker")
+      await page.keyboard.press("Escape")
+      await app.settle()
+      ensure(!(await picker.count()), "Esc did not close the picker")
+      ensure(await rowOf(page, /Cabin weekend/).locator('[data-slot="list-row-main"]').evaluate((el) => el === document.activeElement), "focus did not return to the row")
+      // Archive from the keys, and its Undo.
+      m = await openMenu(/Cabin weekend/, { keys: true })
+      await press(app, item(m, "Archive"))
+      await toast("Archived Re: Cabin weekend").waitFor()
+      ensure(!(await list.getByRole("button", { name: /Cabin weekend/ }).count()), "Archive did not take the conversation out of the Inbox")
+      await press(app, toast("Archived Re: Cabin weekend").getByRole("button", { name: "Undo", exact: true }))
+      await list.getByRole("button", { name: /Cabin weekend/ }).first().waitFor()
+      for (const t of await page.locator("[data-sonner-toast]").all()) await t.waitFor({ state: "detached", timeout: 15_000 }).catch(() => {})
+      await page.mouse.move(0, 0)
+      await app.settle()
+      // The picture: the Inbox as it starts, with the menu open from a row's overflow button.
+      await page.reload()
+      await app.settle()
+      await openMenu(/Token audit/)
+    },
+  },
   {
     // Mobile / 05: Mail's folders and accounts (ADR-0084). A sheet from the page head on a phone, a
     // popover at medium width, the sidebar's groups on a desktop. The rows are the core's lanes.

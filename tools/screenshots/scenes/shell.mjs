@@ -459,7 +459,7 @@ export const scenes = [
       const banner = page.locator('[data-role="section-banner"]:visible')
       ensure((await banner.count()) === 1, `Mail shows ${await banner.count()} banners, not one`)
       ensure(/Work account stopped syncing/.test(await banner.innerText()), "the banner does not name the account")
-      ensure(await banner.getByRole("button", { name: "Open Accounts", exact: true }).isVisible(), "the banner has no way to fix it")
+      ensure(await banner.getByRole("button", { name: "Open accounts", exact: true }).isVisible(), "the banner has no way to fix it")
       ensure(!(await page.locator('[data-tone="needs-you"]').count()), "a sync error is yellow")
       if (app.phone) {
         ensure(!(await strip(page).isVisible()), "a sync error shows as a strip on a phone")
