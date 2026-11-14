@@ -141,14 +141,45 @@ jobs:
       - run: mkdir -p apps/web/dist && touch apps/web/dist/index.html
       - run: cargo check -p vale-shell
 
+  # Whether this run exercises the desktop release path. A push to main
+  # always does. A pull request does only when it touches that path: the
+  # Tauri folder, a lock file, or this workflow.
+  release-plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A pull request is checked out as its merge commit: HEAD^1 is the base.
+          fetch-depth: 2
+          persist-credentials: false
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          run=true
+          if [ "$EVENT" = pull_request ]; then
+            git diff --name-only HEAD^1 HEAD > changed.txt
+            grep -Ex 'apps/web/src-tauri/.*|Cargo\.lock|pnpm-lock\.yaml|\.github/workflows/ci\.yml' changed.txt || run=false
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "::notice::desktop release path runs: $run"
+
   # Publishes each push to main as the rolling `vale-main` pre-release on
   # snds/releases, signed with Vale's update key (ADR-0076), through the
   # update kit's reusable workflow (pinned; its README → Releasing). Without
   # the secrets it's a dry run that builds and says which secret is missing;
-  # it never fails a push for one. Pull requests don't run it.
+  # it never fails a push for one. A pull request that touches the release
+  # path (see release-plan) runs it too, always as a dry run: the kit signs
+  # with a throwaway key made in the job, reads no real key, publishes
+  # nothing, and keeps the would-be `latest.json` as the `latest-json` artifact.
   release-main:
-    if: github.event_name == 'push'
-    needs: [web, shell]
+    if: needs.release-plan.outputs.run == 'true'
+    needs: [web, shell, release-plan]
     permissions:
       contents: read
     uses: snds/app-updates/.github/workflows/release-main.yml@2a2a63f0f9a48c2e60e454307df237805fc14b20
