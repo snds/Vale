@@ -1,27 +1,30 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 
 import { useRefresh, useScreenFact, useScreenPlace } from "@/app/screen"
+import { useSectionBanner, type SectionBanner } from "@/app/section-banner"
 import { useSectionSwitcher } from "@/app/places"
 import { SectionSwitcher } from "@/app/section-switcher"
 import { pendingJump, useUi } from "@/app/ui-store"
-import { vertical } from "@/app/verticals"
 
-import { Icon, formatNavCount, Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@unicron/ui"
-import { EntryRow } from "@/components/list-row"
+import { EmptyState, FilterChip, FilterChipGroup, formatNavCount, SectionHeader, Skeleton, useAppFrame } from "@unicron/ui"
+import { LoadState } from "@/components/load-state"
 import { MasterDetail } from "@/components/master-detail"
 import { ScreenHead } from "@/components/page"
-import { useAccounts, useCollections, useContacts, useDeletedContacts, useDuplicates } from "@/core/queries"
+import { useAccounts, useCollections, useContacts, useDuplicates } from "@/core/queries"
 import type { ContactSummary } from "@/core/types"
 
 import { ContactDetailPane } from "./contact-detail"
 import { ContactsNav } from "./contacts-nav"
 import { DuplicatesPane } from "./duplicates"
-import { PersonAvatar } from "./person"
+import { PersonRow } from "./person-row"
 import { RecentlyDeletedPane } from "./recently-deleted"
 import { closeRestoreContacts, useRestoreContacts } from "./open-restore"
 import { RestoreContactsDialog } from "./restore"
 import { SmartGroupEditor } from "./smart-groups"
 import { contactsPlaceName, useContactsPlace } from "./use-contacts-place"
+
+/** Nothing open beside the list (brief P2; decisions §9). */
+const PICK = "Pick a contact to see it here."
 
 /** Section letter for the A–Z list (accents fold: "Élodie" files under E). */
 const letter = (c: ContactSummary) => {
@@ -29,6 +32,32 @@ const letter = (c: ContactSummary) => {
   const first = (c.fullName === c.org ? words[0] : words.at(-1))?.[0] ?? "#"
   const base = first.normalize("NFD").replace(/\p{M}/gu, "").toUpperCase()
   return /[A-Z]/.test(base) ? base : "#"
+}
+
+/** The labels the people in a list carry, each with how many carry it, by name. */
+function labelsIn(list: ContactSummary[]) {
+  const counts = new Map<string, { name: string; count: number }>()
+  for (const c of list) {
+    for (const l of new Set(c.labels.map((x) => x.toLowerCase()))) {
+      const name = c.labels.find((x) => x.toLowerCase() === l)!
+      counts.set(l, { name: counts.get(l)?.name ?? name, count: (counts.get(l)?.count ?? 0) + 1 })
+    }
+  }
+  return [...counts.values()].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+}
+
+/** Three rows while the list arrives (brief 4.0). */
+function ListSkeleton() {
+  return (
+    <div className="flex flex-col gap-8 pt-4" aria-hidden data-slot="contacts-loading">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="grid h-12 gap-2">
+          <Skeleton />
+          <Skeleton />
+        </div>
+      ))}
+    </div>
+  )
 }
 
 export function ContactsView() {
@@ -59,31 +88,49 @@ export function ContactsView() {
   const active = place.kind === "label" ? place.name : null
   const activeGroup = place.kind === "group" ? at.group : null
   const tool = place.kind === "duplicates" || place.kind === "deleted"
+  // Inside a smart group, one of its labels narrows it (brief P1); ALL is none.
+  const [chip, setChip] = useState<string | null>(null)
   // Another place, picked in the nav: the card that was open belongs to the one left behind.
   const placeKey = JSON.stringify(place)
   const [placeSeen, setPlaceSeen] = useState(placeKey)
   if (placeSeen !== placeKey) {
     setPlaceSeen(placeKey)
     setOpen(open?.keep ? { id: open.id } : null)
+    setChip(null)
   }
   const restoring = useRestoreContacts((s) => s.openedAt)
-  const { data: contacts = [], isPending, refetch } = useContacts("", active, activeGroup?.id ?? null)
+  // A phone's list runs edge to edge: its letter headers take the rows' 16 px.
+  const phone = useAppFrame().phone
+  const { data: contacts = [], isPending, error, refetch, isRefetching } = useContacts("", active, activeGroup?.id ?? null)
   const { data: dupes = [] } = useDuplicates()
-  // Source badges (ADR-0027): with more than one address book showing, each
+  // Source names (ADR-0027): with more than one address book showing, each
   // row says where that card lives, so you edit the copy you mean.
   const { data: books = [] } = useCollections("contacts")
   const { data: accounts = [] } = useAccounts()
   const shown = books.filter((b) => !b.hidden && b.id !== "birthdays")
   const sourceOf = (bookId: string) => {
-    if (shown.length < 2) return null
+    if (shown.length < 2) return undefined
     const b = books.find((x) => x.id === bookId)
-    return accounts.find((a) => a.id === b?.accountId)?.displayName ?? b?.name ?? null
+    return accounts.find((a) => a.id === b?.accountId)?.displayName ?? b?.name ?? undefined
   }
-  const { data: gone = [] } = useDeletedContacts()
+
+  // An account's address books that did not sync: Contacts' one banner (brief X4, channel 4).
+  const failing = accounts.find((a) => a.davError)
+  const banner = useMemo<SectionBanner | null>(
+    () =>
+      failing
+        ? { title: `${failing.displayName} contacts didn't sync`, body: failing.davError ?? undefined, action: { label: "Open Accounts", onClick: () => useUi.getState().openSettings("accounts") } }
+        : null,
+    [failing],
+  )
+  useSectionBanner("contacts", banner)
+
+  const chips = activeGroup ? labelsIn(contacts) : []
+  const narrowed = chip && chips.some((l) => l.name === chip) ? contacts.filter((c) => c.labels.some((l) => l.toLowerCase() === chip.toLowerCase())) : contacts
 
   // The core sorts by family name; group consecutive rows by that letter.
   const sections: { letter: string; items: ContactSummary[] }[] = []
-  for (const c of contacts) {
+  for (const c of narrowed) {
     const l = letter(c)
     if (sections.at(-1)?.letter === l) sections.at(-1)!.items.push(c)
     else sections.push({ letter: l, items: [c] })
@@ -108,7 +155,7 @@ export function ContactsView() {
       <>
         <MasterDetail
           section="Contacts"
-          pick={vertical("contacts").pick}
+          pick={PICK}
           listFills
           onBack={() => setPlace({ kind: "all" })}
           header={
@@ -137,83 +184,72 @@ export function ContactsView() {
     )
   }
 
+  // The head (brief P1): CONTACTS // 008 and "People"; a label or a group by its name and its count.
+  const name = active ?? activeGroup?.name ?? null
+  const overline = `${name ?? "Contacts"} // ${isPending ? "" : formatNavCount(contacts.length)}`
+
+  let body: ReactNode
+  if (isPending) body = <ListSkeleton />
+  else if (!contacts.length && !error)
+    body = activeGroup ? (
+      <EmptyState title={`No one fits ${activeGroup.name} right now.`} body="People join as their cards change." />
+    ) : active ? (
+      <EmptyState title={`No one has the ${active} label.`} />
+    ) : (
+      <EmptyState title="No contacts yet." body="Add one, or connect an account that has some." />
+    )
+  else
+    body = (
+      <div className="flex flex-col gap-4" role="group" aria-label="People">
+        {sections.map((s) => (
+          <section key={s.letter} aria-label={s.letter}>
+            <SectionHeader title={s.letter} count={s.items.length} variant="index" level={3} inset={phone} />
+            <ul>
+              {s.items.map((c) => (
+                <PersonRow key={c.id} render={<li />} list contact={c} book={sourceOf(c.bookId)} selected={selected === c.id} onOpen={() => setSelected(c.id)} />
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    )
+
   return (
     <MasterDetail
       section="Contacts"
-      pick={vertical("contacts").pick}
+      pick={PICK}
       onBack={() => setSelected(null)}
       header={
         <>
           <ScreenHead
-            overline={`${active ?? activeGroup?.name ?? "Contacts"} // ${isPending ? "" : formatNavCount(contacts.length)}`}
-            title={active ?? activeGroup?.name ?? "People"}
+            overline={overline}
+            title={name ?? "People"}
             switcher={switching.switcher}
-            below={switcher}
+            below={
+              <>
+                {switcher}
+                {chips.length > 0 && (
+                  <FilterChipGroup type="single" label={`Narrow ${activeGroup!.name} by label`} scroll value={chip ?? "all"} onValueChange={(v) => setChip(v === "all" ? null : v)}>
+                    <FilterChip value="all" count={contacts.length}>
+                      All
+                    </FilterChip>
+                    {chips.map((l) => (
+                      <FilterChip key={l.name} value={l.name} count={l.count}>
+                        {l.name}
+                      </FilterChip>
+                    ))}
+                  </FilterChipGroup>
+                )}
+              </>
+            }
           />
           <Layers restoring={restoring} />
         </>
       }
       list={
-        <div role="list" aria-label="Contacts">
-          {dupes.length > 0 && !active && !activeGroup && (
-            <div className="px-3 pb-2">
-              <Item variant="muted" render={<button type="button" onClick={() => setPlace({ kind: "duplicates" })} />}>
-                <ItemMedia>
-                  <Icon name="user--multiple" />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle>
-                    {dupes.length} possible duplicate{dupes.length === 1 ? "" : "s"}
-                  </ItemTitle>
-                  <ItemDescription>Review and merge</ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <Icon name="chevron--right" tone="muted" />
-                </ItemActions>
-              </Item>
-            </div>
-          )}
-          {!isPending && contacts.length === 0 && (
-            <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-              {active
-                ? `No one has the ${active} label${activeGroup ? ` in ${activeGroup.name}` : ""}.`
-                : activeGroup
-                  ? `No one fits ${activeGroup.name} right now. People join as their cards change.`
-                  : "No contacts yet."}
-            </p>
-          )}
-          {sections.map((s) => (
-            <section key={s.letter} aria-label={s.letter}>
-              <h3 className="sticky top-0 z-10 bg-surface-ground/95 px-4 py-1 text-xs font-semibold text-muted-foreground backdrop-blur">{s.letter}</h3>
-              {s.items.map((c) => (
-                <div role="listitem" key={c.id}>
-                  <EntryRow
-                    selected={selected === c.id}
-                    onSelect={() => setSelected(c.id)}
-                    leading={<PersonAvatar contact={c} />}
-                    title={c.fullName}
-                    supporting={c.org ?? c.emails[0]?.value ?? c.phones[0]?.value}
-                    trailing={sourceOf(c.bookId) && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{sourceOf(c.bookId)}</span>}
-                  />
-                </div>
-              ))}
-            </section>
-          ))}
-          {gone.length > 0 && !active && !activeGroup && (
-            <div className="p-3 text-muted-foreground">
-              <Item render={<button type="button" onClick={() => setPlace({ kind: "deleted" })} />}>
-                <ItemMedia>
-                  <Icon name="trash-can" />
-                </ItemMedia>
-                <ItemContent>Recently deleted</ItemContent>
-                <ItemActions>
-                  <span className="tabular-nums">{gone.length}</span>
-                  <Icon name="chevron--right" />
-                </ItemActions>
-              </Item>
-            </div>
-          )}
-        </div>
+        <LoadState place="your contacts" overline="Contacts" error={error} hasData={contacts.length > 0} onRetry={() => void refetch()} retrying={isRefetching}>
+          {body}
+        </LoadState>
       }
       detail={selected ? <ContactDetailPane key={selected} id={selected} onDeleted={() => setSelected(null)} /> : null}
     />
