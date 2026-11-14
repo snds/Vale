@@ -281,6 +281,10 @@ impl vale_gateway::helper::HostHelper for Helper {
                 ),
                 digest: request.expect_digest.clone().unwrap_or_default(),
                 services: vec!["gateway".into()],
+                // One image, no before or after step (the helper at the kit's 2a2a63f can have several).
+                images: Vec::new(),
+                before: None,
+                after: None,
             }),
         }
     }
@@ -434,6 +438,7 @@ async fn the_owner_updates_and_reloads_through_the_host_helper() {
         vec![host_helper::UpdateRequest {
             tag: Some(newer.into()),
             expect_digest: Some(digest),
+            expect_digests: None,
         }]
     );
 

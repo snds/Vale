@@ -786,7 +786,7 @@ async fn update_now(State(gw): State<Gw>, headers: HeaderMap, Json(body): Json<U
         log_helper(&who, helper::Kind::Update, Some(&tag), Err(updates::OFFER_CHANGED));
         return err(StatusCode::CONFLICT, updates::OFFER_CHANGED);
     }
-    let request = host_helper::UpdateRequest { tag: Some(tag.clone()), expect_digest: gw.updates.offered_digest() };
+    let request = host_helper::UpdateRequest { tag: Some(tag.clone()), expect_digest: gw.updates.offered_digest(), expect_digests: None };
     start_helper(&gw, who, helper::Kind::Update, Some(tag), move |h| h.update(&request).map(|r| helper::updated(&r)))
 }
 
