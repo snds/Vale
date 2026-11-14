@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react"
+import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react"
 
 import { usePushedChrome } from "@/app/screen"
 import { useUi } from "@/app/ui-store"
 import {
-  AdaptiveDialog,
   AdaptiveMenu,
   AdaptiveMenuGroup,
   AdaptiveMenuItem,
@@ -14,7 +13,11 @@ import {
   Badge,
   Button,
   Composer,
+  DropdownMenuItem,
   EmptyState,
+  FieldRow,
+  FieldRowAction,
+  FieldRowValue,
   FloatButton,
   Icon,
   IconButton,
@@ -35,7 +38,7 @@ import {
 import { DateTimePicker } from "@/components/date-picker"
 import { getCoreClient, isMember } from "@/core/client"
 import { useAiReady, useContactPhotos, useMailAction, useMailPrefs, useSharedInbox, useSignatures, useThread, useThreadShare } from "@/core/queries"
-import type { Account, Address, Category, Draft, MessageDetail, MessageSummary } from "@/core/types"
+import type { Account, Address, Category, Draft, Invite, MessageDetail, MessageSummary } from "@/core/types"
 import { useConfirm } from "@/lib/confirm"
 import { useLeaveGuard } from "@/lib/leave-guard"
 import { longTime, snoozeOptions } from "@/lib/time"
@@ -47,17 +50,20 @@ import { AttachmentFile } from "./attachment-preview"
 import { UNDO_SECONDS, displayName, forwardDraft, initials, replyDraft, replyTarget } from "./format"
 import { HtmlBody } from "./html-body"
 import { InviteCard } from "./invite-card"
+import { ANSWERS, folio, inviteLine, inviteTime, useInviteAnswer, useRowSize, waitsForAnswer } from "./invite-words"
 import { CATEGORIES } from "./lanes"
 import { htmlToText, textToHtml } from "./rich-text"
 import { rowTime } from "./row-time"
 import { useSenderActions } from "./sender-actions"
-import { SenderProfile } from "./sender-profile"
+import { openSenderPanel, setSenderPanel } from "./sender-panel"
 import { signatureBlock } from "./signature"
 import { SignatureSuggestion } from "./signature-suggestion"
 import { UnsubscribeAction } from "./unsubscribe"
 import { useAiAssist } from "./use-ai-assist"
 import { LinkedNotes } from "../notes/linked-notes"
-import { SharedNoteCards } from "../notes/shared-note-card"
+import { shareLinksIn, type ShareLink } from "../notes/share-link"
+import { useAddShared } from "../notes/use-add-shared"
+import { useOpenTeamLink } from "../team/use-open-team-link"
 import { useQuickContext } from "../notes/use-quick-context"
 import { ShareThreadDialog } from "../team/share-thread-dialog"
 import { InboxTeamPanel } from "../team/inbox-team"
@@ -187,7 +193,6 @@ function Conversation({
 
   // Layers this screen opens.
   const [sharing, setSharing] = useState(false)
-  const [aboutOpen, setAboutOpen] = useState(false)
   const [unsubscribing, setUnsubscribing] = useState(false)
   const [snoozing, setSnoozing] = useState(false)
   const [reminding, setReminding] = useState(false)
@@ -203,6 +208,13 @@ function Conversation({
   const due = reminder !== null && reminder <= now
   // The person on the other side (ADR-0036): the newest message you didn't send.
   const other = thread.findLast((m) => !isMine(m, account))?.from
+  // The sender panel beside the columns (brief M5, DC5) follows the open conversation; FROM and More › About show it.
+  useEffect(() => {
+    setSenderPanel(other ?? null, row.threadId, onOpenThread)
+    // `other` is a new object each read; its address says who it is.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [other?.email, other?.name, row.threadId, onOpenThread])
+  useEffect(() => () => setSenderPanel(null, null), [])
   const files = thread.flatMap((m) => m.attachments.filter((a) => !a.inline))
   // A reply goes to whoever Reply answers; in a conversation of your own mail only, to whom you wrote.
   const replyTo = target.mailbox === "Sent" ? target.to : [target.from]
@@ -308,7 +320,7 @@ function Conversation({
         </AdaptiveMenuItem>
       )}
       {other && (
-        <AdaptiveMenuItem icon="user--avatar" onSelect={() => setAboutOpen(true)}>
+        <AdaptiveMenuItem icon="user--avatar" onSelect={openSenderPanel}>
           About {displayName(other)}
         </AdaptiveMenuItem>
       )}
@@ -412,6 +424,8 @@ function Conversation({
   }, [row.threadId])
 
   const oneMessage = thread.length === 1
+  // The newest invitation still waiting for your answer earns a block (brief M5).
+  const invitation = thread.findLast((m) => waitsForAnswer(m.invite)) ?? null
   const fact = [showAccount && account ? account.displayName : null, reminder !== null && !due ? `Reminder ${rowTime(reminder, new Date(now * 1000))} if no reply` : null].filter(Boolean)
 
   return (
@@ -423,7 +437,7 @@ function Conversation({
           <MetaList>
             {other ? (
               <MetaItem label="From">
-                <button type="button" aria-label={`About ${displayName(other)}`} className="text-left underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" onClick={() => setAboutOpen(true)}>
+                <button type="button" aria-label={`About ${displayName(other)}`} className="text-left underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" onClick={openSenderPanel}>
                   {displayName(other)}
                 </button>
               </MetaItem>
@@ -473,26 +487,14 @@ function Conversation({
           {fact.length > 0 && <p className="type-overline text-muted-foreground">{fact.join(" // ")}</p>}
         </div>
 
-        {/* The notice slot (brief M4): one place under the title, holding the first notice that applies. */}
-        {screening && fromOther ? (
-          <ScreenerNotice name={displayName(fromOther)} onLetIn={() => decide(fromOther, "allowed")} onScreenOut={() => decide(fromOther, "screened_out")} />
-        ) : due ? (
-          <NeedsYou
-            title="No reply yet"
-            body={`You asked to be reminded ${longTime(reminder!)}.`}
-            announce={false}
-            action={
-              <Button variant="needs-you" onClick={() => triage.toggleArchive(row)}>
-                Done
-              </Button>
-            }
-            secondaryAction={
-              <Button variant="needs-you-text" onClick={() => setReminding(true)}>
-                Remind again
-              </Button>
-            }
-          />
-        ) : null}
+        {/* The notice slot (brief M4, M5): one place under the title. The first thing that applies stands there (the
+            Screener's question, then a reminder that came due, then an invitation to answer); a second waiting thing is
+            a row under WAITING ON YOU, and the block's title ends // +1. */}
+        <NoticeSlot
+          screener={screening && fromOther ? <ScreenerNotice name={displayName(fromOther)} onLetIn={() => decide(fromOther, "allowed")} onScreenOut={() => decide(fromOther, "screened_out")} /> : null}
+          followUp={due ? { when: longTime(reminder!), done: () => triage.toggleArchive(row), again: () => setReminding(true) } : null}
+          invitation={invitation}
+        />
 
         <SummaryCard summary={summary} onClose={summary.reset} />
 
@@ -545,24 +547,192 @@ function Conversation({
         )}
       </article>
 
-      <AdaptiveDialog open={aboutOpen} onOpenChange={setAboutOpen} size="review" title={other ? `About ${displayName(other)}` : "About"}>
-        {aboutOpen && other && (
-          <SenderProfile
-            from={other}
-            threadId={row.threadId}
-            onOpenThread={
-              onOpenThread &&
-              ((t) => {
-                setAboutOpen(false)
-                onOpenThread(t)
-              })
-            }
-          />
-        )}
-      </AdaptiveDialog>
       <ShareThreadDialog threadId={row.threadId} subject={subject} open={sharing} onOpenChange={setSharing} />
       {unsubscribable && <UnsubscribeAction message={unsubscribable} button={false} open={unsubscribing} onOpenChange={setUnsubscribing} onArchive={() => !row.archived && triage.toggleArchive(row)} />}
       {confirm.question()}
+    </div>
+  )
+}
+
+/** A reminder that came due: when it was set for, and its two ways out. */
+interface FollowUpNotice {
+  when: string
+  /** DONE: archives the conversation, with UNDO. */
+  done: () => void
+  /** REMIND AGAIN: the reminder's times. */
+  again: () => void
+}
+
+/**
+ * The notice slot (brief M4, M5; cross-app decisions §2): at most one block. The Screener's question (a calm
+ * notice) comes first, then a reminder that came due, then an invitation to answer, each a needs-you block
+ * with one solid action. What else waits is a row under WAITING ON YOU, and the block's title ends // +1.
+ */
+function NoticeSlot({ screener, followUp, invitation }: { screener: ReactNode; followUp: FollowUpNotice | null; invitation: MessageDetail | null }) {
+  const waiting = [followUp && ("follow-up" as const), invitation?.invite && ("invite" as const)].filter((w) => !!w)
+  const [lead, ...rows] = screener ? [null, ...waiting] : waiting
+  if (!screener && !lead) return null
+  return (
+    <div className="flex flex-col gap-6">
+      {screener ??
+        (lead === "follow-up" ? (
+          <FollowUpBlock notice={followUp!} more={rows.length} />
+        ) : (
+          <InvitationBlock message={invitation!} invite={invitation!.invite!} more={rows.length} />
+        ))}
+      {rows.length > 0 && (
+        <section aria-label="Waiting on you" className="flex flex-col">
+          <SectionHeader title="Waiting on you" count={rows.length} level={3} />
+          <ul aria-label="Waiting on you">
+            {rows.map((w) => (w === "follow-up" ? <FollowUpRow key={w} notice={followUp!} /> : <InvitationRow key={w} message={invitation!} invite={invitation!.invite!} />))}
+          </ul>
+        </section>
+      )}
+    </div>
+  )
+}
+
+/** NO REPLY YET: a reminder you set has passed with no reply. DONE archives (with UNDO); REMIND AGAIN sets another. */
+function FollowUpBlock({ notice, more }: { notice: FollowUpNotice; more: number }) {
+  return (
+    <NeedsYou
+      title="No reply yet"
+      more={more || undefined}
+      body={`You asked to be reminded ${notice.when}.`}
+      announce={false}
+      action={
+        <Button variant="needs-you" onClick={notice.done}>
+          Done
+        </Button>
+      }
+      secondaryAction={
+        <Button variant="needs-you-text" onClick={notice.again}>
+          Remind again
+        </Button>
+      }
+    />
+  )
+}
+
+/** An invitation not answered yet: INVITATION // WED 11.18, what and when, a solid ACCEPT and text MAYBE and DECLINE (Q9: two text actions). */
+function InvitationBlock({ message, invite, more }: { message: MessageDetail; invite: Invite; more: number }) {
+  const { answer, pending, error } = useInviteAnswer(invite, message.id, message.accountId)
+  return (
+    <div className="flex flex-col gap-2">
+      <NeedsYou
+        title={invite.start != null ? `Invitation // ${folio(invite.start)}` : "Invitation"}
+        more={more || undefined}
+        body={inviteLine(invite)}
+        announce={false}
+        action={
+          <Button variant="needs-you" loading={pending} onClick={() => void answer("accepted")}>
+            Accept
+          </Button>
+        }
+        secondaryActions={[
+          <Button key="maybe" variant="needs-you-text" disabled={pending} onClick={() => void answer("tentative")}>
+            Maybe
+          </Button>,
+          <Button key="decline" variant="needs-you-text" disabled={pending} onClick={() => void answer("declined")}>
+            Decline
+          </Button>,
+        ]}
+      />
+      {error && (
+        <p role="alert" className="type-caption text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** The reminder as a second waiting thing: "No reply yet", DONE, and REMIND AGAIN in its menu. */
+function FollowUpRow({ notice }: { notice: FollowUpNotice }) {
+  return (
+    <ListRow
+      render={<li />}
+      size="compact"
+      title="No reply yet"
+      meta={`Reminder ${notice.when}`}
+      metaStyle="plain"
+      action={
+        <Button variant="secondary" size="sm" onClick={notice.done}>
+          Done
+        </Button>
+      }
+      menu={<DropdownMenuItem onClick={notice.again}>Remind again</DropdownMenuItem>}
+    />
+  )
+}
+
+/** The invitation as a second waiting thing: its title and time, and RESPOND, a menu of the three answers. */
+function InvitationRow({ message, invite }: { message: MessageDetail; invite: Invite }) {
+  const { answer, pending, error } = useInviteAnswer(invite, message.id, message.accountId)
+  return (
+    <ListRow
+      render={<li />}
+      size="compact"
+      title={invite.title || "(no title)"}
+      meta={[invite.start != null && invite.end != null ? inviteTime(invite.start, invite.end, invite.allDay) : null, invite.location].filter(Boolean).join(" // ")}
+      metaStyle="plain"
+      disabledReason={error ?? undefined}
+      action={
+        <AdaptiveMenu
+          title={`Respond to ${invite.title || "the invitation"}`}
+          align="end"
+          trigger={
+            <Button variant="secondary" size="sm" loading={pending}>
+              Respond
+            </Button>
+          }
+        >
+          {ANSWERS.map((a) => (
+            <AdaptiveMenuItem key={a.value} onSelect={() => void answer(a.value)}>
+              {a.verb}
+            </AdaptiveMenuItem>
+          ))}
+        </AdaptiveMenu>
+      }
+    />
+  )
+}
+
+/**
+ * A Vale share link in the body (brief M5): a Field Row SHARED WITH YOU with its title, and OPEN IN NOTES
+ * (a note, ADR-0056) or OPEN IN TEAM (a conversation shared with teammates, ADR-0060). Notes are the gateway
+ * owner's, so a team member sees only conversation links (brief 4.0).
+ */
+function SharedLinks({ text }: { text: string }) {
+  const size = useRowSize()
+  const member = isMember()
+  const add = useAddShared()
+  const openTeam = useOpenTeamLink()
+  const [busy, setBusy] = useState<string | null>(null)
+  const links = shareLinksIn(text).filter((l) => l.kind === "thread" || !member)
+  if (!links.length) return null
+  const open = (l: ShareLink) => {
+    setBusy(l.id)
+    void (l.kind === "note" ? add(l) : openTeam(l)).finally(() => setBusy(null))
+  }
+  return (
+    <div className="flex flex-col" role="group" aria-label="Shared with you">
+      {links.map((l, i) => (
+        <FieldRow
+          key={l.id}
+          size={size}
+          label="Shared with you"
+          rule={i === 0 ? "none" : "top"}
+          description={l.from ? `From ${l.from}` : undefined}
+          action={
+            <FieldRowAction loading={busy === l.id} onClick={() => open(l)}>
+              {l.kind === "note" ? "Open in Notes" : "Open in Team"}
+            </FieldRowAction>
+          }
+        >
+          <FieldRowValue truncate="end">{l.title || (l.kind === "note" ? "A shared note" : "A shared conversation")}</FieldRowValue>
+        </FieldRow>
+      ))}
     </div>
   )
 }
@@ -591,7 +761,7 @@ function MessageBody({ message, mine }: { message: MessageDetail; mine: boolean 
   return (
     <div className="flex flex-col gap-6">
       {message.invite && <InviteCard invite={message.invite} messageId={message.id} accountId={message.accountId} />}
-      <SharedNoteCards text={`${message.bodyText ?? ""}\n${message.bodyHtml ?? ""}`} />
+      <SharedLinks text={`${message.bodyText ?? ""}\n${message.bodyHtml ?? ""}`} />
       <div className="max-w-(--c-app-frame-reading)">
         {message.bodyHtml ? <HtmlBody html={message.bodyHtml} from={message.from.email} /> : <div className="type-body break-words whitespace-pre-line text-foreground">{message.bodyText}</div>}
       </div>

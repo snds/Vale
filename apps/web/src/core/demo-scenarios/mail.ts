@@ -1,4 +1,5 @@
-import type { DemoScenarios } from "../demo-scenarios"
+import type { DemoMessage, DemoScenarios, DemoState } from "../demo-scenarios"
+import type { Address, Invite } from "../types"
 
 const nowSecs = () => Math.floor(Date.now() / 1000)
 
@@ -9,6 +10,33 @@ const tomorrowAtEight = () => {
   d.setHours(8, 0, 0, 0)
   return Math.floor(d.getTime() / 1000)
 }
+
+
+const HOUR = 3600
+
+/** A day from today at a clock time, in seconds: the demo's own dates move with the clock. */
+const dayAt = (days: number, hour: number, minute = 0) => {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  d.setHours(hour, minute, 0, 0)
+  return Math.floor(d.getTime() / 1000)
+}
+
+/** A message received on an account, in its own conversation unless `threadId` says which, with nothing else carried. */
+function received(state: DemoState, id: string, accountId: string, from: Address, subject: string, body: string, ago: number, extra: Partial<DemoMessage> = {}): DemoMessage {
+  const date = nowSecs() - ago
+  const me = state.accounts.find((a) => a.id === accountId)
+  const m: DemoMessage = {
+    id, accountId, threadId: id, threadCount: 1, hasAttachments: false, from, subject, preview: body.replace(/\s+/g, " ").slice(0, 160),
+    date, sortAt: date, seen: false, flagged: false, archived: false, snoozedUntil: null, mailbox: "INBOX",
+    to: me ? [{ name: me.displayName, email: me.address }] : [], cc: [], messageId: `${id}@demo.example`, bodyText: body, bodyHtml: null,
+    attachments: [], references: [], invite: null, unsubscribe: null, files: {}, ...extra,
+  }
+  state.messages.push(m)
+  return m
+}
+
+const jo = { name: "Jo Tanaka", email: "jo@joinery.example" }
 
 /** Mail (ADR-0081, ADR-0090): the inbox and its lanes, such as swipe slots or an inbox worked to zero. Names and words are the demo's own. */
 export const mail: DemoScenarios = {
@@ -125,6 +153,89 @@ export const mail: DemoScenarios = {
         sortAt: t - x.ago,
         files: {},
       })
+    })
+  },
+  /**
+   * The kitchen-shelves quote waits on Jo (ADR-0093; brief M5): Jo wrote first, you asked for the quote and set a
+   * reminder, and it came due an hour ago with no reply. The conversation is back in the Inbox with NO REPLY YET.
+   */
+  "follow-up-due": ({ state }) => {
+    const mine = state.messages.find((m) => m.threadId === "t-quote" && m.mailbox === "Sent")
+    if (!mine?.messageId) return
+    received(state, "demo-joinery-1", mine.accountId, jo, "Oak shelves for the kitchen", "Thanks for stopping by the workshop. Send me the alcove measurements and I'll work out a price for the oak shelves.\n\nJo", 3 * 24 * HOUR, {
+      threadId: "t-quote",
+      seen: true,
+    })
+    mine.subject = "Re: Oak shelves for the kitchen"
+    state.followUps.set(mine.messageId, nowSecs() - HOUR)
+  },
+  /**
+   * With `follow-up-due`: Jo's first message also invited you to measure the alcoves on site, and you haven't answered.
+   * Two things wait in one conversation: the reminder takes the block, the invitation a row under WAITING ON YOU.
+   */
+  "invite-waiting": ({ state }) => {
+    const first = state.messages.find((m) => m.id === "demo-joinery-1")
+    if (!first) return
+    const start = dayAt(2, 16, 30)
+    Object.assign(first, {
+      subject: "Invitation: Measure the alcoves",
+      inviteSeed: {
+        uid: "alcoves-1@joinery.example", title: "Measure the alcoves", location: "Your kitchen", start, end: start + 45 * 60, organizer: jo,
+        attendees: [{ ...jo, status: "accepted" }, { name: "Me", email: "me@personal.example", status: "needs-action" }],
+      },
+    })
+  },
+  /**
+   * An invitation in each state the request card has no demo mail for (ADR-0093; brief M5). Use with the `?counter`
+   * address, which adds Studio sync (yours) and Sam's proposal for it. This adds: Dana canceling the intro call, Ana's
+   * yes to Studio sync with a note, Priya keeping Design review's time, and an older copy of Design review's invitation
+   * that your calendar has already moved past. REMOVE FROM CALENDAR deletes the intro call from the demo's calendar.
+   */
+  "invite-states": ({ state, client, wrap }) => {
+    const dana = { name: "Dana Wells", email: "dana@wellsdesign.example" }
+    const ana = { name: "Ana Duarte", email: "ana@example.com" }
+    const priya = { name: "Priya Raman", email: "priya@studio.example" }
+    const me = { name: "Me", email: "me@studio.example" }
+    const add = (id: string, from: Address, subject: string, body: string, ago: number) => received(state, id, "work", from, subject, body, ago)
+    add("demo-invite-cancel", dana, "Canceled: Intro call with Dana Wells", "Dana Wells canceled “Intro call with Dana Wells”. Something came up; I'll book another slot next week.", 0.4 * HOUR)
+    add("demo-invite-reply", ana, "Accepted: Studio sync", "Ana Duarte accepted your invitation to “Studio sync”.", 0.6 * HOUR)
+    add("demo-invite-kept", priya, "Original time kept: Design review", "Priya Raman kept the original time for “Design review”.", 0.9 * HOUR)
+    add("demo-invite-old", priya, "Updated invitation: Design review", "Priya Raman updated “Design review”.", 26 * HOUR)
+    // The events these mails are about, by title, from the demo's own calendar.
+    const eventId = async (title: string) => {
+      const list = await client.listOccurrences(nowSecs() - 30 * 24 * HOUR, nowSecs() + 30 * 24 * HOUR)
+      return list.find((o) => o.title === title) ?? null
+    }
+    const invite = async (id: string): Promise<Invite | null> => {
+      const base = { uid: "", location: null, allDay: false, recurring: false, attendees: [], myStatus: null, outdated: false, from: null }
+      if (id === "demo-invite-cancel") {
+        const o = await eventId("Intro call with Dana Wells")
+        return { ...base, method: "cancel", uid: "intro-dana@wellsdesign.example", title: "Intro call with Dana Wells", start: o?.start ?? dayAt(1, 11), end: o?.end ?? dayAt(1, 11, 30), organizer: dana, eventId: o?.eventId ?? null }
+      }
+      if (id === "demo-invite-reply") {
+        const o = await eventId("Studio sync")
+        return { ...base, method: "reply", uid: "sync-1@vale", title: "Studio sync", start: o?.start ?? dayAt(3, 11), end: o?.end ?? dayAt(3, 12), organizer: me, eventId: o?.eventId ?? null, from: { ...ana, status: "accepted" }, comment: "See you there. I'll bring the glaze samples." }
+      }
+      if (id === "demo-invite-kept") {
+        const o = await eventId("Design review")
+        return { ...base, method: "declinecounter", title: "Design review", start: o?.start ?? null, end: o?.end ?? null, organizer: priya, eventId: o?.eventId ?? null }
+      }
+      if (id === "demo-invite-old") {
+        const o = await eventId("Design review")
+        return { ...base, method: "request", title: "Design review", start: o?.start ?? null, end: o?.end ?? null, organizer: priya, eventId: o?.eventId ?? null, myStatus: "accepted", outdated: true }
+      }
+      return null
+    }
+    wrap("getThread", (original) => async (threadId) => {
+      const list = await original(threadId)
+      return Promise.all(list.map(async (m) => ({ ...m, invite: (await invite(m.id)) ?? m.invite })))
+    })
+    // Applying a cancellation removes the event, as the core does; a guest's answer is already in the demo's copy.
+    wrap("applyInviteUpdate", (original) => async (messageId) => {
+      const i = await invite(messageId)
+      if (!i) return original(messageId)
+      if (i.method === "cancel" && i.eventId) await client.deleteEvent(i.eventId)
+      return (await invite(messageId)) ?? i
     })
   },
 }

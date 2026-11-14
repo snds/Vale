@@ -42,6 +42,12 @@ const bars = async (page) => 1 + ((await page.locator('[data-slot="accessory"]:n
 const strip = (page) => page.locator('[data-slot="accessory"]')
 /** The open conversation: the detail column beside the list, or the screen pushed over it. */
 const reader = (page) => page.getByRole("region", { name: "Mail: what is open" })
+/** The needs-you blocks on the screen that show. */
+const needsYou = (page) => page.locator('[data-slot="needs-you"]:visible')
+/** A toast by its words. */
+const toastSaying = (page, words) => page.locator("[data-sonner-toast]").filter({ hasText: words })
+/** A Field Row by its label, in the open conversation. */
+const fieldRow = (page, label) => reader(page).getByRole("group", { name: label, exact: true })
 /** The reply field pinned at the conversation's foot (a phone's bottom row). */
 const replyField = (page) => page.getByRole("textbox", { name: /^Reply to / })
 /** A conversation's own action by name: in the toolbar on a desktop, in the top bar on a phone (ADR-0092). */
@@ -267,7 +273,12 @@ export const scenes = [
     run: (app) => conversation(app, /Token audit/),
     assert: async ({ page }) => ensure(await reader(page).getByText("That conversation is gone.").isVisible(), "a conversation that is gone does not say so"),
   },
-  { name: "mail-invitation", run: (app) => conversation(app, /Invitation: Design crit/) },
+  {
+    // An invitation to answer (ADR-0093; brief M5): the needs-you block in the notice slot, and the invitation's rows in its message.
+    name: "mail-invitation",
+    run: (app) => conversation(app, /Invitation: Design crit/),
+    assert: async ({ page }) => ensure(await needsYou(page).filter({ hasText: /^Invitation \/\//i }).isVisible(), "the invitation has no needs-you block"),
+  },
   {
     // Files as chips (brief M4): press one to see it, Save saves it ("Saved {name}").
     name: "mail-attachments",
@@ -302,13 +313,48 @@ export const scenes = [
     },
   },
   {
+    // The sender panel (ADR-0093; brief M5; DC5), from the FROM value: at 1440 the detail column is 648 wide, short of the
+    // 960 a third column needs, so it is a sheet from the side; a sheet on a phone and at medium width too.
     name: "mail-sender",
-    sizes: ["phone"], // the sender's panel, from the FROM value
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "mail", screen: "sender-panel" },
     run: async (app) => {
       await conversation(app, /Token audit/)
       await press(app, app.page.getByRole("button", { name: "About Priya Raman", exact: true }))
+      await app.page.getByRole("dialog", { name: "About Priya Raman" }).getByRole("region", { name: "Mail" }).waitFor()
+      await app.page.mouse.move(0, 0)
     },
-    assert: async ({ page }) => ensure(await page.getByRole("dialog", { name: "About Priya Raman" }).isVisible(), "FROM did not open the sender's panel"),
+    assert: async (app) => {
+      const { page } = app
+      const panel = page.getByRole("dialog", { name: "About Priya Raman" })
+      ensure(await panel.isVisible(), "FROM did not open the sender panel as a sheet")
+      for (const name of ["Write", "Open card"]) ensure(await panel.getByRole("button", { name, exact: true }).isVisible(), `the panel has no ${name}`)
+      ensure(/there \/\/ /.test(await panel.locator('[data-slot="sender-local-time"]').innerText()), "the panel does not say the sender's local time")
+      ensure(await panel.getByRole("list", { name: /^Recent mail with / }).locator('[data-slot="list-row"]').count(), "the panel lists no recent mail")
+      if (app.size === "desktop") {
+        // The sheet makes the page behind it inert, so the column is found by its label, not its role.
+        const detail = Math.round((await page.locator('[aria-label="Mail: what is open"] article').first().boundingBox()).width)
+        ensure(Math.abs(detail - 648) <= 2, `the detail column is ${detail} wide at 1440, not 648`)
+        const box = await panel.boundingBox()
+        ensure(Math.round(box.x + box.width) >= 1438 && box.x > 1000, "the panel is not a sheet at the right edge")
+      }
+    },
+  },
+  {
+    // With room (a 2200 wide window), the sender panel stands as a third column beside the conversation, not a sheet (DC5).
+    name: "mail-sender-column",
+    sizes: ["desktop"],
+    viewport: { width: 2200, height: 1000 },
+    run: async (app) => {
+      await conversation(app, /Token audit/)
+      await press(app, app.page.getByRole("button", { name: "About Priya Raman", exact: true }))
+      await app.page.getByRole("complementary", { name: "About Priya Raman" }).waitFor()
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      ensure(!(await page.getByRole("dialog", { name: "About Priya Raman" }).count()), "with room, the sender panel is still a sheet")
+      ensure(Math.round((await reader(page).boundingBox()).width) >= 960, "the conversation keeps less than 960 beside the panel")
+    },
   },
   {
     // Opt-in AI (ADR-0059; brief M5): asked for from More; SUMMARY // NN POINTS, the points, the model, the caveat.
@@ -460,12 +506,255 @@ export const scenes = [
     },
   },
   {
+    // Unsubscribe (ADR-0093; brief M5): one question, its body by method (one-click here), focus on Cancel.
     name: "mail-unsubscribe",
+    sean: { kind: "undrawn", area: "mail", screen: "unsubscribe" },
     run: async (app) => {
       await conversation(app, /Design Systems Weekly/)
       await moreItem(app, "Unsubscribe…")
+      await app.page.getByRole("dialog", { name: "Unsubscribe from Design Systems Weekly?" }).waitFor()
     },
-    assert: async ({ page }) => ensure(await page.getByRole("dialog", { name: /^Unsubscribe from / }).isVisible(), "More's Unsubscribe… did not ask"),
+    assert: async ({ page }) => {
+      const question = page.getByRole("dialog", { name: "Unsubscribe from Design Systems Weekly?" })
+      ensure(/Vale asks the sender to remove you, in one request\./.test(await question.innerText()), "the question does not say what one-click does")
+      ensure(await question.getByRole("button", { name: "Cancel", exact: true }).evaluate((el) => el === document.activeElement), "focus does not start on Cancel")
+    },
+  },
+  {
+    // By mail: the body names the address the request goes to. Yes, then the toast with ARCHIVE.
+    name: "mail-unsubscribe-mail",
+    path: "/?newsletters",
+    run: async (app) => {
+      const { page } = app
+      // Two newsletters bundle in the Inbox: the bundle opens them (ADR-0091).
+      await press(app, bundle(page).locator('[data-slot="list-row-main"]'))
+      await conversation(app, /October at the studio/)
+      await moreItem(app, "Unsubscribe…")
+      const question = page.getByRole("dialog", { name: "Unsubscribe from Clay Club?" })
+      ensure(/Vale sends an unsubscribe message to leave@clayclub\.example from this account\./.test(await question.innerText()), "the question does not say a message goes to the list's address")
+      await press(app, question.getByRole("button", { name: "Unsubscribe", exact: true }))
+      const toast = page.locator("[data-sonner-toast]").filter({ hasText: "Unsubscribe request sent" })
+      await toast.waitFor()
+      ensure(await toast.getByRole("button", { name: "Archive", exact: true }).isVisible(), "the toast has no Archive")
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // A reminder that came due (ADR-0093; brief M5): NO REPLY YET in the notice slot, with a solid DONE and a text REMIND AGAIN.
+    name: "mail-needs-you",
+    scenario: "follow-up-due",
+    sean: { kind: "undrawn", area: "mail", screen: "needs-you" },
+    run: (app) => conversation(app, /Oak shelves for the kitchen/),
+    assert: async ({ page }) => {
+      const block = needsYou(page)
+      ensure((await block.count()) === 1, `${await block.count()} needs-you blocks show, not one`)
+      ensure(/^No reply yet$/i.test((await block.locator('[data-slot="needs-you-title"]').innerText()).trim()), "the block's title is not NO REPLY YET")
+      ensure(/You asked to be reminded /.test(await block.innerText()), "the block does not say when you asked to be reminded")
+      ensure(await block.getByRole("button", { name: "Done", exact: true }).isVisible(), "the block has no Done")
+      ensure(await block.getByRole("button", { name: "Remind again", exact: true }).isVisible(), "the block has no Remind again")
+    },
+  },
+  {
+    // DONE archives the conversation (a toast with UNDO); UNDO brings it back to the Inbox.
+    name: "mail-needs-you-done",
+    scenario: "follow-up-due",
+    run: async (app) => {
+      const { page } = app
+      await conversation(app, /Oak shelves for the kitchen/)
+      await press(app, needsYou(page).getByRole("button", { name: "Done", exact: true }))
+      const toast = toastSaying(page, /^Archived /)
+      await toast.waitFor()
+      const inbox = page.getByRole("list", { name: "Inbox", exact: true })
+      await inbox.getByRole("button", { name: /Oak shelves for the kitchen/ }).waitFor({ state: "detached" })
+      await press(app, toast.getByRole("button", { name: "Undo", exact: true }))
+      await inbox.getByRole("button", { name: /Oak shelves for the kitchen/ }).first().waitFor()
+      await toastsGone(app)
+    },
+  },
+  {
+    // Two things wait in one conversation: one block (the reminder, its title ending // +1), the invitation a row under WAITING ON YOU.
+    name: "mail-needs-you-two",
+    scenario: ["follow-up-due", "invite-waiting"],
+    run: (app) => conversation(app, /Oak shelves for the kitchen/),
+    assert: async ({ page }) => {
+      const block = needsYou(page)
+      ensure((await block.count()) === 1, `${await block.count()} needs-you blocks show when two things wait, not one`)
+      ensure(/\/\/ \+1\b/.test((await block.locator('[data-slot="needs-you-title"]').innerText()).trim()), "the block's title does not end // +1")
+      const rows = reader(page).getByRole("list", { name: "Waiting on you" })
+      ensure(await rows.getByText("Measure the alcoves", { exact: true }).isVisible(), "the invitation is not a row under Waiting on you")
+      ensure(await rows.getByRole("button", { name: "Respond", exact: true }).isVisible(), "the invitation's row has no Respond")
+    },
+  },
+  {
+    // An invitation to answer, as Sean sees it: the block (ACCEPT, MAYBE, DECLINE) and the invitation's rows.
+    name: "mail-invite-request",
+    sean: { kind: "undrawn", area: "mail", screen: "invitation-request" },
+    run: (app) => conversation(app, /Invitation: Design crit/),
+    assert: async ({ page }) => {
+      const block = needsYou(page)
+      ensure(/^Invitation \/\/ [A-Za-z]{3} \d\d\.\d\d/i.test((await block.locator('[data-slot="needs-you-title"]').innerText()).trim()), "the block's title is not INVITATION // DAY MM.DD")
+      ensure(/^Design crit, \d\d:\d\d – \d\d:\d\d, Studio, room 2$/.test((await block.locator('[data-slot="needs-you-body"]').innerText()).trim()), "the block's body is not {title}, {time}, {place}")
+      for (const name of ["Accept", "Maybe", "Decline"]) ensure(await block.getByRole("button", { name, exact: true }).isVisible(), `the block has no ${name}`)
+      for (const label of ["When", "Where", "Organizer", "Your calendar", "Calendar"]) ensure(await fieldRow(page, label).isVisible(), `the invitation has no ${label} row`)
+      ensure(/3 invited, 1 going/.test(await fieldRow(page, "Organizer").innerText()), "ORGANIZER does not count who is invited and going")
+      ensure(await fieldRow(page, "When").getByRole("button", { name: "Propose new time" }).isVisible(), "WHEN has no Propose new time")
+    },
+  },
+  {
+    // Each answer raises its toast: ACCEPT from the block (and the calendar it went into), then MAYBE and DECLINE from YOUR ANSWER's CHANGE.
+    name: "mail-invite-answered",
+    run: async (app) => {
+      const { page } = app
+      await conversation(app, /Invitation: Design crit/)
+      await press(app, needsYou(page).getByRole("button", { name: "Accept", exact: true }))
+      await toastSaying(page, "Accepted Design crit · added to Work").waitFor()
+      ensure(!(await needsYou(page).count()), "the block stays once the invitation is answered")
+      await toastsGone(app)
+      for (const [answer, words] of [["Maybe", "Replied maybe to Design crit"], ["Not going", "Declined Design crit"]]) {
+        await press(app, fieldRow(page, "Your answer").getByRole("button", { name: "Change" }))
+        await press(app, page.getByRole(app.phone ? "dialog" : "menu", { name: "Your answer" }).getByRole(app.phone ? "radio" : "menuitemradio", { name: answer, exact: true }))
+        await toastSaying(page, words).waitFor()
+        await toastsGone(app)
+      }
+      ensure(/Not going/.test(await fieldRow(page, "Your answer").innerText()), "YOUR ANSWER does not say Not going")
+    },
+  },
+  {
+    // A guest proposes another time for your event (the `?counter` mail): NOW struck through, PROPOSED, the note, two answers.
+    name: "mail-invite-counter",
+    path: "/?counter",
+    sean: { kind: "undrawn", area: "mail", screen: "invitation-counter" },
+    run: (app) => conversation(app, /New time proposed: Studio sync/),
+    assert: async ({ page }) => {
+      ensure(await fieldRow(page, "Now").locator("s").isVisible(), "NOW is not struck through")
+      ensure(await fieldRow(page, "Proposed").isVisible(), "no PROPOSED row")
+      for (const name of ["Accept new time", "Keep original"]) ensure(await reader(page).getByRole("button", { name, exact: true }).isVisible(), `no ${name}`)
+    },
+  },
+  {
+    // ACCEPT NEW TIME moves the event and says so; the answered caption takes the buttons' place.
+    name: "mail-invite-counter-answered",
+    path: "/?counter",
+    run: async (app) => {
+      const { page } = app
+      await conversation(app, /New time proposed: Studio sync/)
+      await press(app, reader(page).getByRole("button", { name: "Accept new time", exact: true }))
+      await toastSaying(page, "Moved Studio sync and told everyone").waitFor()
+      await reader(page).getByText("You moved the event to this time").waitFor()
+      await toastsGone(app)
+    },
+  },
+  {
+    // The organizer canceled: REMOVE FROM CALENDAR, which removes it and says so.
+    name: "mail-invite-cancel",
+    path: "/?counter",
+    scenario: "invite-states",
+    run: async (app) => {
+      const { page } = app
+      await conversation(app, /Canceled: Intro call with Dana Wells/)
+      ensure(await reader(page).getByText("Dana Wells canceled this event.").isVisible(), "the cancellation does not say who canceled")
+      await press(app, reader(page).getByRole("button", { name: "Remove from calendar", exact: true }))
+      await toastSaying(page, "Removed Intro call with Dana Wells from your calendar").waitFor()
+      await reader(page).getByRole("button", { name: "Remove from calendar", exact: true }).waitFor({ state: "detached" })
+      await toastsGone(app)
+    },
+  },
+  {
+    // A guest answered your invitation, with a note: UPDATE YOUR EVENT.
+    name: "mail-invite-reply",
+    path: "/?counter",
+    scenario: "invite-states",
+    run: async (app) => {
+      const { page } = app
+      await conversation(app, /Accepted: Studio sync/)
+      ensure(await reader(page).getByText("Ana Duarte accepted your invitation.").isVisible(), "the reply does not say who answered how")
+      ensure(await reader(page).locator("blockquote").filter({ hasText: "glaze samples" }).isVisible(), "the guest's note is not quoted")
+      await press(app, reader(page).getByRole("button", { name: "Update your event", exact: true }))
+      await toastSaying(page, "Updated Studio sync").waitFor()
+      await toastsGone(app)
+    },
+  },
+  {
+    // The organizer kept the original time: one line.
+    name: "mail-invite-kept",
+    path: "/?counter",
+    scenario: "invite-states",
+    run: (app) => conversation(app, /Original time kept: Design review/),
+    assert: async ({ page }) => ensure(await reader(page).getByText("Priya Raman kept the original time.").isVisible(), "no line saying the time was kept"),
+  },
+  {
+    // An older copy of an invitation: one caption, no block.
+    name: "mail-invite-outdated",
+    path: "/?counter",
+    scenario: "invite-states",
+    run: (app) => conversation(app, /Updated invitation: Design review/),
+    assert: async ({ page }) => {
+      ensure(await reader(page).getByText("Your calendar has a newer version of this event.").isVisible(), "no caption for an outdated invitation")
+      ensure(!(await needsYou(page).count()), "an outdated invitation shows a needs-you block")
+    },
+  },
+  {
+    // Propose a new time (brief M5): the form layer with NEW DATE, STARTS, ENDS, the note, and YOUR CALENDAR for the new time.
+    // An end before the start says so; the picture is the form with a good time.
+    name: "mail-propose-time",
+    sean: { kind: "undrawn", area: "mail", screen: "propose-time" },
+    run: async (app) => {
+      const { page } = app
+      await conversation(app, /Invitation: Design crit/)
+      await press(app, fieldRow(page, "When").getByRole("button", { name: "Propose new time" }))
+      const form = page.getByRole("dialog", { name: /Propose a new time/ })
+      await form.waitFor()
+      await form.getByLabel("Ends", { exact: true }).fill("09:00")
+      await form.getByText("The new time ends before it starts.").waitFor()
+      await form.getByLabel("Starts", { exact: true }).fill("10:00")
+      await form.getByLabel("Ends", { exact: true }).fill("10:45")
+      ensure(!(await form.getByText("The new time ends before it starts.").count()), "the error stays once the time is right")
+      ensure(await form.getByRole("group", { name: "Your calendar" }).isVisible(), "the form has no YOUR CALENDAR line for the new time")
+      // The picture shows the form at rest: no field in the middle of an edit.
+      await page.evaluate(() => document.activeElement?.blur())
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // PROPOSE sends it: the toast names the organizer and the time, and WHEN says what you proposed.
+    name: "mail-propose-time-sent",
+    run: async (app) => {
+      const { page } = app
+      await conversation(app, /Invitation: Design crit/)
+      await press(app, fieldRow(page, "When").getByRole("button", { name: "Propose new time" }))
+      const form = page.getByRole("dialog", { name: /Propose a new time/ })
+      await form.getByLabel("Starts", { exact: true }).fill("10:00")
+      await form.getByLabel("Ends", { exact: true }).fill("10:45")
+      await press(app, app.phone ? form.getByRole("button", { name: "Propose", exact: true }) : form.getByRole("button", { name: "Propose", exact: true }))
+      await toastSaying(page, /^Asked Priya Raman about [A-Za-z]{3} \d\d\.\d\d 10:00$/).waitFor()
+      ensure(/You proposed .* 10:00 – 10:45/.test(await fieldRow(page, "When").innerText()), "WHEN does not say what you proposed")
+      ensure(await fieldRow(page, "When").getByRole("button", { name: "Propose another" }).isVisible(), "WHEN has no Propose another")
+      await toastsGone(app)
+    },
+  },
+  {
+    // A signature with details you don't have (brief M5): a compact info banner with REVIEW (the contact form, filled in) and dismiss.
+    name: "mail-signature-suggestion",
+    run: async (app) => {
+      const { page } = app
+      await conversation(app, /Photos from the trip/)
+      const banner = reader(page).getByRole("status", { name: "Contact details in the signature" })
+      await banner.waitFor()
+      ensure(/signature has a phone number|isn’t in your contacts/.test(await banner.innerText()), "the banner does not say what the signature has")
+      ensure(await banner.getByRole("button", { name: "Review", exact: true }).isVisible(), "the banner has no Review")
+      ensure(await banner.getByRole("button", { name: "Not now", exact: true }).isVisible(), "the banner cannot be dismissed")
+    },
+  },
+  {
+    // A Vale share link in a message: a Field Row SHARED WITH YOU with its title and OPEN IN NOTES.
+    name: "mail-shared-link",
+    path: "/?shared=https://notes.studio.example/share%23eyJ2IjoxLCJyZWxheSI6IndzczovL25vdGVzLnN0dWRpby5leGFtcGxlIiwiaWQiOiJkZXNpZ25yZXZpZXdhZ2VuZGEwMSIsIm1vZGUiOiJ2aWV3IiwidG9rZW4iOiJkZW1vLXNoYXJlLXRva2VuIiwidGl0bGUiOiJEZXNpZ24gcmV2aWV3IGFnZW5kYSIsImZyb20iOiJTYW0gT2thZm9yIn0",
+    run: (app) => conversation(app, /Design review agenda/),
+    assert: async ({ page }) => {
+      const row = reader(page).getByRole("group", { name: "Shared with you", exact: true }).first()
+      ensure(/Design review agenda/.test(await row.innerText()), "the shared link's row does not show its title")
+      ensure(await row.getByRole("button", { name: "Open in Notes" }).isVisible(), "the shared note's row has no Open in Notes")
+    },
   },
   {
     name: "mail-share",

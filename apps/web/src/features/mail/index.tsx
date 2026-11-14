@@ -27,6 +27,7 @@ import { CATEGORIES, LANES } from "./lanes"
 import { MailNav } from "./mail-nav"
 import { useSenderActions } from "./sender-actions"
 import { ScheduledList } from "./scheduled-list"
+import { SenderPanelSlot } from "./sender-profile"
 import { TeamList, TeamThreadView } from "../team/team-view"
 import { InboxChips, NewsletterBundle, ScreenerPointer } from "./splits"
 import { LaneConversation, LoadingRows, SnoozedBeside } from "./lane-list"
@@ -291,6 +292,7 @@ export function MailView() {
           <SnoozedBeside accountId={accountId} now={now} selectedId={selectedId} onOpen={setSelected} />
         ) : undefined
       }
+      side={tab !== "team" && <SenderPanelSlot />}
       detail={
         tab === "team" ? (
           teamOpen && <TeamThreadView key={teamOpen} id={teamOpen} />

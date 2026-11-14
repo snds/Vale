@@ -27,6 +27,8 @@ interface MasterDetailProps {
   detailIsPlace?: boolean
   /** What the detail column shows while nothing is open, in place of "Nothing open." (Desktop / 04's snoozed mail). Never pushed. */
   idle?: ReactNode
+  /** A panel beside the detail (unicron's `AppFrameSidePanel`: Mail's sender panel): a third column with room, else a sheet. */
+  side?: ReactNode
 }
 
 /**
@@ -37,7 +39,7 @@ interface MasterDetailProps {
  * phone's top bar, or the status line's leading slot at medium width.
  * With `listFills`, the list has the room until something opens.
  */
-export function MasterDetail({ section, header, list, detail, onBack, onRoot, pick, listFills = false, detailTint, detailIsPlace = false, idle }: MasterDetailProps) {
+export function MasterDetail({ section, header, list, detail, onBack, onRoot, pick, listFills = false, detailTint, detailIsPlace = false, idle, side }: MasterDetailProps) {
   const frame = useAppFrame()
   const hasDetail = !!detail
   // Pushed over the list (compact and medium): Back closes it and returns to the list where it was (ADR-0084).
@@ -78,6 +80,7 @@ export function MasterDetail({ section, header, list, detail, onBack, onRoot, pi
           )}
         </AppFrameDetail>
       )}
+      {!wide && side}
     </>
   )
 }
