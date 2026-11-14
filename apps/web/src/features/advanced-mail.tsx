@@ -2,6 +2,8 @@
 import { NativeSelect, NativeSelectOption, Switch, ToggleGroup, ToggleGroupItem, toast } from "@unicron/ui"
 import { useMailPrefs, useSetMailPrefs } from "@/core/queries"
 import type { MailPrefs } from "@/core/types"
+import { useSettingSave } from "@/features/settings/save"
+import { SaveFailed } from "@/features/settings/save-failed"
 
 const IMAGES: { value: MailPrefs["images"]; label: string; hint: string }[] = [
   { value: "ask", label: "Ask", hint: "Blocked until you load them, message by message. Images can tell a sender you opened their mail, and when." },
@@ -21,9 +23,14 @@ const CHECK = [2, 5, 15, 30, 60]
 export function AdvancedMail() {
   const { data: prefs } = useMailPrefs()
   const set = useSetMailPrefs()
+  // A failed save leaves the control on its stored value, with the server's words under it (ADR-0104).
+  const save = useSettingSave()
   if (!prefs) return null
   const change = (p: Partial<MailPrefs>, said?: string) =>
-    set.mutate({ ...prefs, ...p }, { onSuccess: () => said && toast.success(said, { duration: 2000 }), onError: (e) => toast.error(e.message) })
+    save.run(
+      Object.keys(p)[0]!,
+      set.mutateAsync({ ...prefs, ...p }).then(() => said && toast.success(said, { duration: 2000 })),
+    )
 
   return (
     <div className="flex flex-col gap-6">
@@ -33,14 +40,15 @@ export function AdvancedMail() {
         value={prefs.images}
         options={IMAGES}
         onChange={(images) => change({ images }, images === "ask" ? "Images wait until you ask" : images === "contacts" ? "Images load for your contacts" : "Images always load")}
+        failed={save.failed("images")}
       />
-      <Choice id="mark-read" title="Mark as read" value={prefs.markRead} options={MARK_READ} onChange={(markRead) => change({ markRead })} />
+      <Choice id="mark-read" title="Mark as read" value={prefs.markRead} options={MARK_READ} onChange={(markRead) => change({ markRead })} failed={save.failed("markRead")} />
 
       <section className="flex flex-col gap-3" aria-labelledby="replies-heading">
         <h3 id="replies-heading" className="text-sm font-medium">
           Replies
         </h3>
-        <PrefSwitch id="reply-quote" title="Include the message you're replying to" hint="Quoted below an “On … wrote:” line." checked={prefs.quote} onChange={(quote) => change({ quote })} />
+        <PrefSwitch id="reply-quote" title="Include the message you're replying to" hint="Quoted below an “On … wrote:” line." checked={prefs.quote} onChange={(quote) => change({ quote })} failed={save.failed("quote")} />
         <PrefSwitch
           id="reply-below"
           title="Write below the quote"
@@ -48,6 +56,7 @@ export function AdvancedMail() {
           checked={prefs.quote && prefs.replyBelow}
           disabled={!prefs.quote}
           onChange={(replyBelow) => change({ replyBelow })}
+          failed={save.failed("replyBelow")}
         />
       </section>
 
@@ -61,6 +70,7 @@ export function AdvancedMail() {
           hint="Whether one comes back is up to the other person's app. You can still change it per message, in the composer. Vale never sends receipts for mail you read."
           checked={prefs.requestReceipts}
           onChange={(requestReceipts) => change({ requestReceipts })}
+          failed={save.failed("requestReceipts")}
         />
       </section>
 
@@ -76,13 +86,14 @@ export function AdvancedMail() {
           ))}
         </NativeSelect>
         <p className="text-xs text-muted-foreground">For accounts without push. With push, new mail arrives within seconds either way.</p>
+        <SaveFailed message={save.failed("checkMinutes")} />
       </div>
     </div>
   )
 }
 
 /** A three-way choice: the options in a row, and what the chosen one means under it. */
-function Choice<T extends string>({ id, title, value, options, onChange }: { id: string; title: string; value: T; options: { value: T; label: string; hint: string }[]; onChange: (v: T) => void }) {
+function Choice<T extends string>({ id, title, value, options, onChange, failed }: { id: string; title: string; value: T; options: { value: T; label: string; hint: string }[]; onChange: (v: T) => void; failed: string | null }) {
   return (
     <section className="flex flex-col gap-1.5" aria-labelledby={`${id}-heading`}>
       <h3 id={`${id}-heading`} className="text-sm font-medium">
@@ -98,11 +109,12 @@ function Choice<T extends string>({ id, title, value, options, onChange }: { id:
       <p className="text-xs text-muted-foreground" aria-live="polite">
         {options.find((o) => o.value === value)?.hint}
       </p>
+      <SaveFailed message={failed} />
     </section>
   )
 }
 
-function PrefSwitch({ id, title, hint, checked, disabled, onChange }: { id: string; title: string; hint: string; checked: boolean; disabled?: boolean; onChange: (on: boolean) => void }) {
+function PrefSwitch({ id, title, hint, checked, disabled, onChange, failed }: { id: string; title: string; hint: string; checked: boolean; disabled?: boolean; onChange: (on: boolean) => void; failed: string | null }) {
   return (
     <div className="flex items-start gap-3">
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -110,6 +122,7 @@ function PrefSwitch({ id, title, hint, checked, disabled, onChange }: { id: stri
           {title}
         </span>
         <span className="text-xs text-muted-foreground">{hint}</span>
+        <SaveFailed message={failed} />
       </div>
       <Switch checked={checked} disabled={disabled} aria-labelledby={`${id}-label`} onCheckedChange={onChange} />
     </div>

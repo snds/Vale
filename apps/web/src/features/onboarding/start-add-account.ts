@@ -1,12 +1,15 @@
 import { useUi } from "@/app/ui-store"
+import { useAccountStep } from "@/features/settings/account-step"
 
 /**
  * "Add an account…", from a section's account list and the command menu
- * (brief X1). It will open the provider list (brief T1); until the accounts
- * lane builds that, it opens Settings › Accounts, where accounts are added
- * today.
+ * (brief X1): Settings › Accounts, at its ADD AN ACCOUNT providers (brief
+ * T1; ADR-0104), with the first one focused. Each provider opens today's
+ * form in that column (pushed on a phone) until first run restyles it as
+ * X8's second step.
  */
 export function startAddAccount() {
+  useAccountStep.setState({ step: { kind: "list" }, focusAdd: true })
   useUi.getState().openSettings("accounts")
 }
 

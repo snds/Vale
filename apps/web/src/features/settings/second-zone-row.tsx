@@ -1,4 +1,4 @@
-import { FieldRow, FieldRowAction } from "@unicron/ui"
+import { FieldRow, FieldRowAction, useAppFrame } from "@unicron/ui"
 import { ZonePicker } from "@/components/zone-picker"
 import { setSecondZone, useSecondZone, zoneLabel } from "@/features/calendar/zones"
 
@@ -9,8 +9,11 @@ import { setSecondZone, useSecondZone, zoneLabel } from "@/features/calendar/zon
  */
 export function SecondZoneRow() {
   const zone = useSecondZone()
+  // Stacked on a phone, as every settings row is there (ADR-0104).
+  const phone = useAppFrame().phone
   return (
     <FieldRow
+      size={phone ? "stacked" : "default"}
       label="Second time zone"
       description="A second column of hours in Day and Week."
       action={<ZonePicker title="Second time zone" value={zone} onPick={setSecondZone} none trigger={<FieldRowAction>Change</FieldRowAction>} />}

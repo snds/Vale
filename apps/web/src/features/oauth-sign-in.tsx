@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { Icon, type IconName, Button, Field, FieldDescription, FieldGroup, FieldLabel, Input, Spinner, DialogAction, DialogActions, toast } from "@unicron/ui"
-import { SettingsHeading } from "./settings/section-header"
+import { AccountScreenHead } from "./settings/account-screen-head"
 import { getCoreClient } from "@/core/client"
 import type { OAuthClientInfo, OAuthIssuer } from "@/core/types"
 
@@ -31,7 +31,7 @@ const DOCS = "https://github.com/snds/Vale/blob/main/docs"
 
 const COPY: Record<OAuthIssuer, ProviderCopy> = {
   google: {
-    title: "Add Gmail",
+    title: "Add // Gmail",
     company: "Google",
     grants: [
       { icon: "email", text: "Read, organize, and send your Gmail" },
@@ -53,7 +53,7 @@ const COPY: Record<OAuthIssuer, ProviderCopy> = {
     docs: `${DOCS}/google-verification.md#use-your-own-oauth-client`,
   },
   microsoft: {
-    title: "Add Outlook",
+    title: "Add // Outlook",
     company: "Microsoft",
     grants: [
       { icon: "email", text: "Read, organize, and send your Outlook mail" },
@@ -93,7 +93,7 @@ export function OAuthSignIn({ issuer, onBack, onDone }: { issuer: OAuthIssuer; o
     mutationFn: async () => (await getCoreClient()).addOAuthAccount(issuer, hint.trim() || null),
     onSuccess: (a) => {
       void qc.invalidateQueries()
-      toast.success(`${a.address} added — fetching mail, calendars, and contacts`)
+      toast.success(`Added ${a.address}`)
       onDone()
     },
   })
@@ -102,16 +102,13 @@ export function OAuthSignIn({ issuer, onBack, onDone }: { issuer: OAuthIssuer; o
 
   return (
     <div className="flex flex-col gap-4">
-      <SettingsHeading
-        title={copy.title}
-        description={`You'll sign in on ${copy.company}'s page in your browser. This app never sees your ${copy.company} password.`}
-        onBack={() => (signIn.isPending && cancel(), onBack())}
-      />
+      <AccountScreenHead title={copy.title} onBack={() => (signIn.isPending && cancel(), onBack())} />
+      <p className="type-body text-text-secondary">{`You'll sign in on ${copy.company}'s page in your browser. This app never sees your ${copy.company} password.`}</p>
 
       {signIn.isPending ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border bg-muted/40 px-4 py-6 text-center" role="status" aria-live="polite">
           {/* The status around it says what's happening; the spinner would add "Loading". */}
-          <Spinner className="size-6" aria-hidden />
+          <Spinner aria-hidden />
           <p className="text-sm font-medium">Finish signing in in your browser</p>
           <p className="max-w-xs text-xs text-muted-foreground">When {copy.company} says you're signed in, come back here. The tab can be closed.</p>
           <Button variant="outline" size="sm" onClick={cancel}>
@@ -143,12 +140,9 @@ export function OAuthSignIn({ issuer, onBack, onDone }: { issuer: OAuthIssuer; o
               {signIn.error instanceof Error ? signIn.error.message : String(signIn.error)}
             </p>
           )}
-          <p className="flex gap-2 text-xs text-muted-foreground">
-            <Icon name="information" size="sm" className="mt-0.5" />
-            {client?.builtIn ? copy.builtInWarning : copy.ownWarning}
-          </p>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <Button type="button" variant="link" size="sm" className="px-0" onClick={() => setEditing(true)}>
+          <p className="type-caption text-text-secondary">{client?.builtIn ? copy.builtInWarning : copy.ownWarning}</p>
+          <div className="flex flex-wrap-reverse items-center justify-between gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(true)}>
               {client?.builtIn ? `Use your own ${copy.clientNoun}` : `Change ${copy.clientNoun}`}
             </Button>
             <Button onClick={() => signIn.mutate()}>
@@ -176,8 +170,7 @@ function ClientForm({ issuer, copy, current, onClose }: { issuer: OAuthIssuer; c
   return (
     <form className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), save.mutate({ clientId: clientId.trim(), clientSecret: secret.trim() || null }))}>
       {!current && (
-        <p className="flex gap-2 rounded-lg bg-muted px-3 py-2 text-sm" role="status">
-          <Icon name="password" size="sm" className="mt-0.5" />
+        <p className="type-body text-text-secondary" role="status">
           {copy.noClient}
         </p>
       )}

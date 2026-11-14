@@ -1,14 +1,17 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
-import { Icon, type IconName, Badge, Button, Field, FieldDescription, FieldGroup, FieldLabel, Input, Item, ItemContent, ItemDescription, ItemMedia, ItemTitle, NativeSelect, NativeSelectOption, toast } from "@unicron/ui"
+import { type IconName, Button, Field, FieldDescription, FieldGroup, FieldLabel, FieldRow, FieldRowAction, Input, NativeSelect, NativeSelectOption, NavItem, SectionHeader, Skeleton, toast, useAppFrame } from "@unicron/ui"
+import { usePushedScreen } from "@/app/places"
 import { gatewayMe, getCoreClient, isMember, signOutOfGateway } from "@/core/client"
 import { useAccounts, useCore } from "@/core/queries"
 import type { Account, AccountConfig, DavConfig, JmapConfig, OAuthIssuer, Provider, Security, ServerConfig } from "@/core/types"
-import { longTime } from "@/lib/time"
+import { useConfirm } from "@/lib/confirm"
 
 import { OAuthSignIn } from "./oauth-sign-in"
-import { SectionActions, SettingsHeading } from "./settings/section-header"
+import { AccountScreenHead } from "./settings/account-screen-head"
+import { setAccountStep, useAccountStep } from "./settings/account-step"
+import { SaveFailed } from "./settings/save-failed"
 
 interface Preset {
   id: string
@@ -33,7 +36,10 @@ interface Preset {
   davPasswordHelp?: { text: string; href: string }
 }
 
+// In the order first run lists them (brief X8).
 const PRESETS: Preset[] = [
+  { id: "google", label: "Gmail", icon: "email", provider: "google", passwordLabel: "", oauth: "google" },
+  { id: "microsoft", label: "Outlook / Microsoft 365", icon: "email", provider: "microsoft", passwordLabel: "", oauth: "microsoft" },
   {
     id: "icloud", label: "iCloud", icon: "cloud", provider: "i_cloud",
     imap: { host: "imap.mail.me.com", port: 993, security: "tls" },
@@ -66,149 +72,296 @@ const PRESETS: Preset[] = [
     passwordLabel: "Password",
     dav: "ask",
   },
-  { id: "google", label: "Gmail", icon: "email", provider: "google", passwordLabel: "", oauth: "google" },
-  { id: "microsoft", label: "Outlook / Microsoft 365", icon: "email", provider: "microsoft", passwordLabel: "", oauth: "microsoft" },
 ]
 
-/**
- * Settings → Accounts (ADR-0075): the accounts on this device or gateway,
- * and adding one. Adding and connecting calendars are steps in the section,
- * each with a way back to the list.
- */
-export function AccountsSection() {
-  const [preset, setPreset] = useState<Preset | null>(null)
-  const [connecting, setConnecting] = useState<Account | null>(null)
-  if (isMember()) return <MemberSettings />
-  if (preset?.oauth) return <OAuthSignIn issuer={preset.oauth} onBack={() => setPreset(null)} onDone={() => setPreset(null)} />
-  if (preset) return <AddAccountForm preset={preset} onBack={() => setPreset(null)} onDone={() => setPreset(null)} />
-  if (connecting) return <ConnectDavForm account={connecting} onDone={() => setConnecting(null)} />
-  return <AccountList onAdd={setPreset} onConnect={setConnecting} />
+/** The provider's name on an account's row (brief T1). */
+function providerName(a: Account): string {
+  switch (a.provider) {
+    case "google":
+      return "Gmail"
+    case "microsoft":
+      return "Outlook"
+    case "i_cloud":
+      return "iCloud"
+    case "jmap":
+      return isFastmail(a.jmap?.sessionUrl) ? "Fastmail" : "JMAP"
+    case "local":
+      return "This device"
+    default:
+      return "IMAP"
+  }
 }
 
-function AccountList({ onAdd, onConnect }: { onAdd: (p: Preset) => void; onConnect: (a: Account) => void }) {
-  const { data: accounts = [] } = useAccounts()
-  const { data: core } = useCore()
+function isFastmail(url: string | undefined) {
+  try {
+    const host = new URL(url ?? "").hostname
+    return host === "fastmail.com" || host.endsWith(".fastmail.com")
+  } catch {
+    return false
+  }
+}
+
+/** An OAuth account whose sync failed signs in again in the browser (ADR-0046): its row offers SIGN IN. */
+const needsSignIn = (a: Account) => !!a.oauth && !!a.lastError
+
+/** What is wrong or under way, after the provider's name: "Gmail // sign-in needed". Nothing when all is well. */
+function accountState(a: Account): string | null {
+  if (needsSignIn(a)) return "sign-in needed"
+  if (a.lastError) return "not syncing"
+  if (a.lastSync === null) return "first sync"
+  return null
+}
+
+/** "Synced Thu 09:16": the day and the clock, as the frames write a time; the date once it is a week old. */
+function synced(secs: number, now = new Date()) {
+  const at = new Date(secs * 1000)
+  if (now.getTime() - at.getTime() > 6 * 86_400_000) return `Synced ${at.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+  const day = at.toLocaleDateString(undefined, { weekday: "short" })
+  return `Synced ${day} ${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`
+}
+
+/** Signs an OAuth account in again, in the browser; SIGN IN shows its loading state meanwhile. */
+function useSignInAgain() {
   const qc = useQueryClient()
-  const remove = useMutation({
-    mutationFn: async (id: string) => (await getCoreClient()).removeAccount(id),
-    onSuccess: () => qc.invalidateQueries(),
-    onError: (e) => toast.error(e.message),
-  })
-  // An OAuth account whose sign-in expired or was revoked: sign in again in the browser.
-  const reauth = useMutation({
+  return useMutation({
     mutationFn: async (id: string) => (await getCoreClient()).reauthOAuthAccount(id),
     onSuccess: (a) => {
       void qc.invalidateQueries()
-      toast.success(`${a.address} is connected again`)
+      toast.success(`Signed in to ${a.address}`)
     },
-    onError: (e) => toast.error(e.message),
   })
+}
+
+/**
+ * Settings → Accounts (brief T1; ADR-0104). The accounts, one Field Row
+ * each, as Mobile / 16 and Desktop / 12 draw them; the providers to add one
+ * with; and, on a gateway, signing out of it. Managing an account, adding
+ * one and connecting its calendars are screens pushed in this column. A team
+ * member sees whose accounts these are, and Sign out.
+ */
+export function AccountsSection() {
+  const step = useAccountStep((s) => s.step)
+  const { data: accounts = [], isPending } = useAccounts()
+  // A pushed screen is a history entry where the section is pushed itself (ADR-0084): Back closes it first.
+  usePushedScreen(step.kind !== "list", () => setAccountStep({ kind: "list" }))
+  if (isMember()) return <MemberBlock />
+  if (isPending) return <SkeletonRows />
+  const back = () => setAccountStep({ kind: "list" })
+  if (step.kind === "add") {
+    const preset = PRESETS.find((p) => p.id === step.preset)
+    if (preset?.oauth) return <OAuthSignIn issuer={preset.oauth} onBack={back} onDone={back} />
+    if (preset) return <AddAccountForm preset={preset} onBack={back} onDone={back} />
+  }
+  const account = step.kind === "manage" || step.kind === "connect" ? accounts.find((a) => a.id === step.id) : undefined
+  if (step.kind === "connect" && account) return <ConnectDavForm account={account} onBack={() => setAccountStep({ kind: "manage", id: account.id })} />
+  if (step.kind === "manage" && account) return <ManageAccount account={account} onBack={back} />
+  return <AccountList />
+}
+
+/** Loading a section: three skeleton rows (brief T0). */
+function SkeletonRows() {
+  return (
+    <div className="flex flex-col gap-5" aria-busy="true" aria-label="Loading accounts">
+      <Skeleton variant="row" />
+      <Skeleton variant="row" />
+      <Skeleton variant="row" />
+    </div>
+  )
+}
+
+/** Where mail and passwords are kept, by build: one line (brief T1). Kept in full: it is about privacy. */
+function StorageLine() {
+  const { data: core } = useCore()
+  const line =
+    core?.kind === "demo"
+      ? "You're using the web preview with sample mail. Connecting real accounts needs the desktop app for now."
+      : core?.remote
+        ? "Mail is kept on your gateway. Passwords are sealed there with its key."
+        : "Mail stays on this device. Passwords are kept in your system keychain."
+  return <p className="type-body pb-6 text-text-secondary">{line}</p>
+}
+
+/**
+ * The ACCOUNTS group: one Field Row per account, as drawn. Settings' phone
+ * screen shows it above the list of sections too (Mobile / 16), where
+ * MANAGE opens the account inside Accounts.
+ */
+export function AccountRows({ onManage }: { onManage?: (a: Account) => void }) {
+  const { data: accounts = [] } = useAccounts()
+  const phone = useAppFrame().phone
+  const signIn = useSignInAgain()
+  if (!accounts.length) return null
+  return (
+    <section aria-label="Accounts">
+      <SectionHeader title="Accounts" count={accounts.length} level={3} />
+      {accounts.map((a) => {
+        const state = accountState(a)
+        const failed = signIn.isError && signIn.variables === a.id ? signIn.error.message : null
+        return (
+          <div key={a.id}>
+            <FieldRow
+              size={phone ? "stacked" : "default"}
+              label={a.displayName}
+              // The address, then when it last synced, or what went wrong (the value already says "first sync").
+              description={
+                <>
+                  {a.address}
+                  {a.lastError ? (
+                    <>
+                      {" · "}
+                      <span className="text-critical-text">{a.lastError}</span>
+                    </>
+                  ) : (
+                    a.lastSync !== null && ` · ${synced(a.lastSync)}`
+                  )}
+                </>
+              }
+              action={
+                needsSignIn(a) ? (
+                  <FieldRowAction loading={signIn.isPending && signIn.variables === a.id} onClick={() => signIn.mutate(a.id)}>
+                    Sign in
+                  </FieldRowAction>
+                ) : (
+                  <FieldRowAction onClick={() => (onManage ?? manage)(a)}>Manage</FieldRowAction>
+                )
+              }
+            >
+              {state ? `${providerName(a)} // ${state}` : providerName(a)}
+            </FieldRow>
+            <SaveFailed message={failed} />
+          </div>
+        )
+      })}
+    </section>
+  )
+}
+
+const manage = (a: Account) => setAccountStep({ kind: "manage", id: a.id })
+
+function AccountList() {
+  const { data: core } = useCore()
+  const owner = !!core?.remote && !isMember()
+  const focusAdd = useAccountStep((s) => s.focusAdd)
+  const add = useRef<HTMLElement>(null)
+  // "Add an account…" from elsewhere (startAddAccount): the providers, with the first one focused.
+  useEffect(() => {
+    if (!focusAdd) return
+    useAccountStep.setState({ focusAdd: false })
+    add.current?.scrollIntoView({ block: "start" })
+    add.current?.querySelector<HTMLElement>("a, button")?.focus({ preventScroll: true })
+  }, [focusAdd])
 
   return (
-    <>
-      <SettingsHeading
-        title="Accounts"
-        description={core?.remote ? "Mail is kept on your gateway. Passwords are sealed there with its key." : "Mail stays on this device. Passwords are kept in your system keychain."}
-      />
+    <div className="flex flex-col gap-8">
+      <div>
+        <StorageLine />
+        <AccountRows />
+      </div>
 
-      {core?.kind === "demo" && (
-        <p className="flex gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-          <Icon name="information" size="sm" className="mt-0.5" />
-          You're using the web preview with sample mail. Connecting real accounts needs the desktop app for now.
-        </p>
-      )}
-
-      {accounts.length > 0 && (
-        <ul className="flex flex-col divide-y rounded-xl border">
-          {accounts.map((a) => (
-            <li key={a.id} className="flex items-center gap-3 px-3 py-2.5">
-              <Icon name="at" tone="muted" />
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-medium">{a.displayName}</span>
-                <span className="truncate text-xs text-muted-foreground">{a.address}</span>
-                {a.lastError ? (
-                  <span className="flex flex-wrap items-center gap-x-2 text-xs text-destructive">
-                    Sync problem: {a.lastError}
-                    {a.oauth && core?.kind === "native" && (
-                      <Button variant="link" size="inline" disabled={reauth.isPending} onClick={() => reauth.mutate(a.id)}>
-                        {reauth.isPending && reauth.variables === a.id ? "Waiting for the browser…" : "Sign in again"}
-                      </Button>
-                    )}
-                  </span>
-                ) : (
-                  <span className="text-xs text-muted-foreground">{a.lastSync ? `Synced ${longTime(a.lastSync)}` : "Waiting for first sync"}</span>
-                )}
-                {a.dav ? (
-                  a.davError ? (
-                    <span className="text-xs text-destructive">Calendars and contacts: {a.davError}</span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">Calendars and contacts {a.davLastSync ? `synced ${longTime(a.davLastSync)}` : "connecting"}</span>
-                  )
-                ) : (
-                  core?.kind === "native" && (
-                    <span className="text-xs">
-                      <Button variant="link" size="inline" onClick={() => onConnect(a)}>
-                        Connect calendars and contacts
-                      </Button>
-                    </span>
-                  )
-                )}
-              </div>
-              {core?.kind === "native" && (
-                <Button variant="ghost" size="icon-sm" aria-label={`Remove ${a.displayName}`} onClick={() => confirm(`Remove ${a.address} from this device? Mail on the server is not affected.`) && remove.mutate(a.id)}>
-                  <Icon name="trash-can" />
-                </Button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="flex flex-col gap-1.5">
-        <h3 className="text-sm font-medium">Add an account</h3>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <section ref={add} aria-label="Add an account">
+        <SectionHeader title="Add an account" level={3} />
+        <ul role="list" className="flex flex-col gap-1 pt-2">
           {PRESETS.map((preset) => {
-            const p = core?.remote && preset.oauth && !SAME_COMPUTER ? { ...preset, unavailable: OAUTH_REMOTE } : preset
+            const unavailable = core?.remote && preset.oauth && !SAME_COMPUTER ? OAUTH_REMOTE : core?.kind === "demo" && !preset.oauth ? DEMO_ONLY : preset.unavailable
             return (
-              <Item key={p.id} variant="outline" render={<button type="button" disabled={!!p.unavailable || (core?.kind === "demo" && !p.oauth)} onClick={() => onAdd(p)} />}>
-                <ItemMedia>
-                  <Icon name={p.icon} tone="muted" />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle>{p.label}</ItemTitle>
-                  {p.unavailable && <ItemDescription>{p.unavailable}</ItemDescription>}
-                </ItemContent>
-              </Item>
+              <li key={preset.id}>
+                <NavItem label={preset.label} icon={preset.icon} disabled={!!unavailable} description={unavailable} onClick={() => setAccountStep({ kind: "add", preset: preset.id })} />
+              </li>
             )
           })}
-        </div>
-      </div>
+        </ul>
+      </section>
 
-      {core?.remote && (
-        <div className="flex justify-end">
-          <Button variant="outline" size="sm" onClick={() => void signOutOfGateway().then(() => location.reload())}>
-            <Icon name="logout" data-icon="inline-start" /> Sign out of this gateway
-          </Button>
-        </div>
+      {/* Signing out of the gateway, for its owner, last (brief T1; it was a button under the section list). */}
+      {owner && (
+        <section aria-label="Gateway">
+          <SectionHeader title="Gateway" level={3} />
+          <FieldRow label="Signed in" action={<FieldRowAction onClick={() => void signOutOfGateway().then(() => location.reload())}>Sign out</FieldRowAction>}>
+            This gateway
+          </FieldRow>
+        </section>
       )}
-    </>
+    </div>
   )
 }
 
-/** A team member's settings (ADR-0063): the accounts and the rest are the owner's. */
-function MemberSettings() {
-  const me = gatewayMe()
+/** One account, pushed in the column (brief T1): its facts, its calendars, and removing it. */
+function ManageAccount({ account: a, onBack }: { account: Account; onBack: () => void }) {
+  const phone = useAppFrame().phone
+  const size = phone ? "stacked" : "default"
+  const qc = useQueryClient()
+  const signIn = useSignInAgain()
+  const confirm = useConfirm()
+  const remove = async () => {
+    const yes = await confirm.ask({
+      overline: `${a.displayName} // Account`,
+      title: `Remove ${a.address}?`,
+      description: "Mail on the server is not affected.",
+      confirmLabel: "Remove",
+      run: async () => (await getCoreClient()).removeAccount(a.id),
+    })
+    if (!yes) return
+    onBack()
+    void qc.invalidateQueries()
+    toast.success(`Removed ${a.address}`)
+  }
   return (
-    <>
-      <SettingsHeading title="Accounts" description={`You're signed in as ${me?.name} on a shared inbox. Its accounts and settings belong to the gateway's owner.`} />
-      <div className="flex justify-end">
-        <Button variant="outline" size="sm" onClick={() => void signOutOfGateway().then(() => location.reload())}>
-          <Icon name="logout" data-icon="inline-start" /> Sign out
+    <div className="flex flex-col">
+      <AccountScreenHead title={a.displayName} onBack={onBack} />
+      <FieldRow size={size} label="Address">
+        {a.address}
+      </FieldRow>
+      <FieldRow size={size} label="Provider">
+        {providerName(a)}
+      </FieldRow>
+      <FieldRow
+        size={size}
+        label="Mail"
+        description={a.lastError ? <span className="text-critical-text">{a.lastError}</span> : undefined}
+        action={
+          needsSignIn(a) ? (
+            <FieldRowAction loading={signIn.isPending} onClick={() => signIn.mutate(a.id)}>
+              Sign in
+            </FieldRowAction>
+          ) : undefined
+        }
+      >
+        {a.lastError ? "Not syncing" : a.lastSync !== null ? synced(a.lastSync) : "First sync"}
+      </FieldRow>
+      <SaveFailed message={signIn.isError ? signIn.error.message : null} />
+      <FieldRow
+        size={size}
+        label="Calendars and contacts"
+        rule="both"
+        description={a.dav ? (a.davError ? <span className="text-critical-text">{a.davError}</span> : a.davLastSync !== null ? synced(a.davLastSync) : "Connecting") : undefined}
+        action={a.dav ? undefined : <FieldRowAction onClick={() => setAccountStep({ kind: "connect", id: a.id })}>Connect</FieldRowAction>}
+      >
+        {a.dav ? (a.davError ? "Not syncing" : "Connected") : "Not connected"}
+      </FieldRow>
+      <div className="pt-8">
+        <Button variant="ghost-destructive" onClick={() => void remove()}>
+          Remove account
         </Button>
       </div>
-    </>
+      {confirm.question()}
+    </div>
   )
 }
+
+/** A team member's Accounts (ADR-0063; brief T1): the accounts are the owner's. */
+function MemberBlock() {
+  const me = gatewayMe()
+  return (
+    <div className="flex flex-col items-start gap-6">
+      <p className="type-body text-text-body">{`You're signed in as ${me?.name} on a shared inbox. Its accounts belong to the owner.`}</p>
+      <Button variant="secondary" onClick={() => void signOutOfGateway().then(() => location.reload())}>
+        Sign out
+      </Button>
+    </div>
+  )
+}
+
+const DEMO_ONLY = "Needs the desktop app"
 
 /**
  * Provider sign-in returns to a page on the computer running the app. Behind
@@ -232,13 +385,15 @@ function ServerFields({ label, value, onChange, idPrefix }: { label: string; val
       <legend className="mb-1.5 text-sm font-medium">{label}</legend>
       <Input aria-label={`${label} server`} placeholder="mail.example.com" value={value.host} onChange={(e) => onChange({ ...value, host: e.target.value.trim() })} id={`${idPrefix}-host`} autoCapitalize="none" />
       <Input aria-label={`${label} port`} inputMode="numeric" value={value.port} onChange={(e) => onChange({ ...value, port: Number(e.target.value.replace(/\D/g, "")) || 0 })} />
-      <NativeSelect aria-label={`${label} security`} value={value.security} onChange={(e) => onChange({ ...value, security: e.target.value as Security })} className="col-span-2 w-full">
-        {SECURITY.map((s) => (
-          <NativeSelectOption key={s.value} value={s.value}>
-            {s.label}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
+      <div className="col-span-2 flex flex-col">
+        <NativeSelect aria-label={`${label} security`} value={value.security} onChange={(e) => onChange({ ...value, security: e.target.value as Security })}>
+          {SECURITY.map((s) => (
+            <NativeSelectOption key={s.value} value={s.value}>
+              {s.label}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </div>
     </fieldset>
   )
 }
@@ -273,14 +428,14 @@ function AddAccountForm({ preset, onBack, onDone }: { preset: Preset; onBack: ()
     },
     onSuccess: (a) => {
       void qc.invalidateQueries()
-      toast.success(`${a.address} added — fetching mail`)
+      toast.success(`Added ${a.address}`)
       onDone()
     },
   })
 
   return (
     <form onSubmit={(e) => (e.preventDefault(), add.mutate())} className="flex flex-col gap-4">
-      <SettingsHeading title={`Add ${preset.label}`} onBack={onBack} />
+      <AccountScreenHead title={`Add // ${preset.label}`} onBack={onBack} />
       <FieldGroup>
         <Field>
           <FieldLabel htmlFor="acct-address">Email address</FieldLabel>
@@ -337,25 +492,17 @@ function AddAccountForm({ preset, onBack, onDone }: { preset: Preset; onBack: ()
         )}
         {preset.dav === "ask" && <DavUrlFields calendarUrl={calendarUrl} setCalendarUrl={setCalendarUrl} contactsUrl={contactsUrl} setContactsUrl={setContactsUrl} />}
         {typeof preset.dav === "object" && !preset.dav.separateSecret && (
-          <p className="flex gap-2 text-xs text-muted-foreground">
-            <Icon name="calendar" size="sm" /> Calendars and contacts connect with the same password.
-          </p>
+          <p className="type-caption text-text-secondary">Calendars and contacts connect with the same password.</p>
         )}
       </FieldGroup>
 
-      {add.error && (
-        <p role="alert" className="flex gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          <Icon name="warning" size="sm" className="mt-0.5" /> {add.error.message}
-        </p>
-      )}
-      <SectionActions>
-        <Badge variant="outline" className="mr-auto self-center">
-          <Icon name="locked" /> Checked before saving
-        </Badge>
-        <Button type="submit" disabled={add.isPending}>
-          {add.isPending ? "Connecting…" : "Add account"}
+      <SaveFailed message={add.error?.message ?? null} />
+      <div className="flex flex-col items-end gap-2">
+        <Button type="submit" loading={add.isPending}>
+          Add account
         </Button>
-      </SectionActions>
+        <p className="type-caption text-text-secondary">Checked before saving.</p>
+      </div>
     </form>
   )
 }
@@ -388,8 +535,8 @@ function DavUrlFields({ calendarUrl, setCalendarUrl, contactsUrl, setContactsUrl
   )
 }
 
-/** Adds calendars and contacts to an account that only has mail. */
-function ConnectDavForm({ account, onDone }: { account: Account; onDone: () => void }) {
+/** Adds calendars and contacts to an account that only has mail (brief T1: CONNECT on Manage). */
+function ConnectDavForm({ account, onBack }: { account: Account; onBack: () => void }) {
   const preset = PRESETS.find((p) => p.provider === account.provider && typeof p.dav === "object" && (p.jmap ? !!account.jmap : !account.jmap))
   const fixed = preset && typeof preset.dav === "object" ? preset.dav : null
   const [calendarUrl, setCalendarUrl] = useState(fixed?.calendarUrl ?? "")
@@ -406,13 +553,13 @@ function ConnectDavForm({ account, onDone }: { account: Account; onDone: () => v
     },
     onSuccess: () => {
       void qc.invalidateQueries()
-      toast.success("Calendars and contacts connected — syncing")
-      onDone()
+      toast.success(`Connected calendars and contacts for ${account.address}`)
+      onBack()
     },
   })
   return (
     <form onSubmit={(e) => (e.preventDefault(), connect.mutate())} className="flex flex-col gap-4">
-      <SettingsHeading title="Calendars and contacts" description={account.address} onBack={onDone} />
+      <AccountScreenHead title={`Calendars and contacts // ${account.displayName}`} onBack={onBack} />
       <FieldGroup>
         {!fixed && <DavUrlFields calendarUrl={calendarUrl} setCalendarUrl={setCalendarUrl} contactsUrl={contactsUrl} setContactsUrl={setContactsUrl} />}
         <Field>
@@ -423,16 +570,12 @@ function ConnectDavForm({ account, onDone }: { account: Account; onDone: () => v
           </FieldDescription>
         </Field>
       </FieldGroup>
-      {connect.error && (
-        <p role="alert" className="flex gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          <Icon name="warning" size="sm" className="mt-0.5" /> {connect.error.message}
-        </p>
-      )}
-      <SectionActions>
-        <Button type="submit" disabled={connect.isPending}>
-          {connect.isPending ? "Connecting…" : "Connect"}
+      <SaveFailed message={connect.error?.message ?? null} />
+      <div className="flex justify-end">
+        <Button type="submit" loading={connect.isPending}>
+          Connect
         </Button>
-      </SectionActions>
+      </div>
     </form>
   )
 }
