@@ -18,6 +18,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm build
+      # The build watch's rules and the build stamp (ADR-0091).
+      - run: pnpm --filter web test
+      # The build wrote its id into the page and into build.json, and they agree.
+      - run: grep -q "<meta name=\"vale-build\" content=\"$(python3 -c 'import json; print(json.load(open("apps/web/dist/build.json"))["build"])')\"" apps/web/dist/index.html
       # Design-system analytics ratchet: fails when correct-use violations on
       # @unicron/ui components, or plain <button>s that bypass them (rawElements),
       # grow beyond .dsa/baseline.json.
@@ -53,6 +57,10 @@ jobs:
           docker run -d --name gw -p 127.0.0.1:8080:8080 -e GATEWAY_PASSWORD=ci-password-0123456789 -e GATEWAY_KEY="$(openssl rand -base64 32)" vale-gateway
           for i in $(seq 1 20); do curl -fs http://127.0.0.1:8080/api/session && break; sleep 1; done
           curl -fs http://127.0.0.1:8080/ | grep -q '<div id="root">'
+          # The web app's build id (ADR-0091): the page's tag and build.json agree, never cached.
+          build=$(curl -fs http://127.0.0.1:8080/build.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["build"])')
+          curl -fs http://127.0.0.1:8080/ | grep -q "<meta name=\"vale-build\" content=\"$build\""
+          curl -fsI http://127.0.0.1:8080/build.json | grep -iq '^cache-control: no-cache'
           docker logs gw
 
   # Real IMAP (Dovecot) + SMTP (aiosmtpd) round trip: sync, flag push, archive
