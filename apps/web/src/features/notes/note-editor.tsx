@@ -6,7 +6,8 @@ import { type Editor, EditorContent, useEditor, useEditorState } from "@tiptap/r
 import { useEffect, useRef, useState } from "react"
 import type * as Y from "yjs"
 
-import { Icon, toast } from "@unicron/ui"
+import { Icon, ToolbarButton, toast, useAppFrame } from "@unicron/ui"
+import { FormatBar } from "@/components/format-bar"
 import { getCoreClient } from "@/core/client"
 import { queryClient, useMyName, useNotesPrefs } from "@/core/queries"
 import type { NoteDetail, NotesPrefs } from "@/core/types"
@@ -15,7 +16,6 @@ import { toBase64 } from "@/lib/base64"
 import { prepareImage } from "@/lib/image"
 import { type Sketch, SVG_MIME, toSvg } from "@/lib/sketch"
 
-import { FormatBar } from "../mail/rich-editor"
 import { SortChecked } from "./checklists"
 import { noteExtensions } from "./extensions"
 import { NOTE_FILE } from "./note-src"
@@ -145,6 +145,7 @@ export function NoteEditor({ note, autoFocus, onSaved, locked = false }: { note:
   }, [editor])
   const picker = useRef<HTMLInputElement>(null)
   const [scanning, setScanning] = useState(false)
+  const phone = useAppFrame().phone
 
   // Live edits from other devices while this note is open.
   // Which sync is running: a new one (say, encryption turned on) needs the note again.
@@ -206,35 +207,49 @@ export function NoteEditor({ note, autoFocus, onSaved, locked = false }: { note:
   })
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    // The bar's ground is the note's own (its tint, when it has a color).
+    <div className="flex min-h-0 flex-1 flex-col [--c-format-bar-ground:var(--note-surface,var(--background))]">
       <EditorContent editor={editor} className="min-h-0 flex-1 overflow-y-auto [&>div]:min-h-full" />
       {live && <WikiSuggest editor={editor} q={live} choices={choices} active={active} onPick={choose} />}
-      <div className="sticky bottom-0 bg-(--note-surface,var(--background)) transition-colors">
-        {readOnly ? (
-          <p className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground md:px-8 [&_svg]:size-4" role="status">
-            <Icon name="view" />
-            {guest?.from ? `${guest.from} shared this note for reading` : "Shared with you for reading"}. Their changes show up here.
-          </p>
-        ) : (
-        <FormatBar editor={editor} notes onAddImage={() => picker.current?.click()} onScan={() => setScanning(true)} onSketch={() => useSketchSheet.getState().show(null, null)} />
-        )}
-        <SketchSheet onDone={(s, pos) => void saveSketch(editor, note.id, s, pos)} />
-        <ScanSheet open={scanning} onOpenChange={setScanning} onScanned={(pages) => void addScans(editor, note.id, pages)} />
-        <input
-          ref={picker}
-          type="file"
-          accept="image/*"
-          multiple
-          className="sr-only"
-          tabIndex={-1}
-          aria-hidden
-          onChange={(e) => {
-            const files = [...(e.target.files ?? [])]
-            e.target.value = ""
-            void addImages(editor, note.id, files)
-          }}
+      {readOnly ? (
+        <p className="sticky bottom-0 flex items-center gap-2 bg-(--note-surface,var(--background)) px-4 py-2 text-xs text-muted-foreground transition-colors md:px-8 [&_svg]:size-4" role="status">
+          <Icon name="view" />
+          {guest?.from ? `${guest.from} shared this note for reading` : "Shared with you for reading"}. Their changes show up here.
+        </p>
+      ) : (
+        // The shared format bar (ADR-0089): docked at the column's foot; on a phone, just above the keyboard.
+        <FormatBar
+          editor={editor}
+          heading
+          checklist
+          mode={phone ? "keyboard" : "docked"}
+          actions={
+            <>
+              {/* Starts [[ so the note picker opens: easier than finding brackets on a phone keyboard. */}
+              <ToolbarButton icon="notebook" label="Link to a note" onClick={() => editor.chain().focus().insertContent("[[").run()} />
+              <ToolbarButton icon="image" label="Add image" onClick={() => picker.current?.click()} />
+              <ToolbarButton icon="scan--alt" label="Scan a document" onClick={() => setScanning(true)} />
+              <ToolbarButton icon="pen" label="Sketch" onClick={() => useSketchSheet.getState().show(null, null)} />
+            </>
+          }
         />
-      </div>
+      )}
+      <SketchSheet onDone={(s, pos) => void saveSketch(editor, note.id, s, pos)} />
+      <ScanSheet open={scanning} onOpenChange={setScanning} onScanned={(pages) => void addScans(editor, note.id, pages)} />
+      <input
+        ref={picker}
+        type="file"
+        accept="image/*"
+        multiple
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])]
+          e.target.value = ""
+          void addImages(editor, note.id, files)
+        }}
+      />
     </div>
   )
 }

@@ -1,5 +1,5 @@
 // Notes: the list, cards and map, a note and its menu, folders, import, sync and the quick note.
-import { area, button, ensure, formLayer, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, sidebar, switcherLayer } from "./helpers.mjs"
+import { area, button, ensure, formatBar, formLayer, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, sidebar, switcherLayer } from "./helpers.mjs"
 
 /** Opens a note from the Notes list by its title. */
 export const note = async (app, name) => {
@@ -56,6 +56,39 @@ export const scenes = [
       const picker = page.getByRole("dialog", { name: "Remind me" })
       ensure(await picker.getByRole("button", { name: "Set reminder", exact: true }).isVisible(), "the reminder picker has no Set reminder button")
       ensure((await picker.getByRole("gridcell", { name: /^Friday, November 13/ }).getAttribute("aria-selected")) === "true", "the picker did not open on the reminder already set")
+    },
+  },
+  {
+    // The note's format bar (ADR-0089; briefs N2 and 1.4): the shared bar with Heading and Checklist and the
+    // note's own actions at its end. Docked at the column's foot; on a phone it stands above the keyboard
+    // and scrolls sideways.
+    name: "notes-format-bar",
+    sean: { kind: "undrawn", area: "notes", screen: "format-bar" },
+    run: async (app) => {
+      const { page } = app
+      await note(app, /Cabin packing list/)
+      const names = ["Heading", "Bold", "Italic", "Link", "Bulleted list", "Numbered list", "Checklist", "Quote", "Code", "Link to a note", "Add image", "Scan a document", "Sketch"]
+      const bar = await formatBar(app, page, names)
+      const wrap = page.locator('[data-slot="format-bar"]')
+      const mode = await wrap.getAttribute("data-mode")
+      ensure(mode === (app.phone ? "keyboard" : "docked"), `the note's format bar is in the ${mode} mode`)
+      const box = await wrap.boundingBox()
+      const room = await wrap.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }))
+      if (app.phone) {
+        ensure(room.scroll > room.client, "the phone's format bar does not scroll sideways")
+        // Its last button is reached by the keys, and comes into view.
+        await bar.getByRole("button", { name: "Bold", exact: true }).focus()
+        await page.keyboard.press("End")
+        await app.settle()
+        const last = await bar.getByRole("button", { name: "Sketch", exact: true }).boundingBox()
+        ensure(last.x >= 0 && last.x + last.width <= app.viewport.width, "End did not bring the last button into view")
+        await page.keyboard.press("Home")
+      } else ensure(room.scroll <= room.client, "the docked format bar is cut off")
+      ensure(box.y + box.height <= app.viewport.height + 1 && box.y + box.height >= app.viewport.height - 64, `the format bar ends at ${Math.round(box.y + box.height)}: not docked at the foot of the note's column`)
+      // A checklist row says so on the bar.
+      await page.locator(".ProseMirror li").first().click()
+      await app.settle()
+      ensure((await bar.getByRole("button", { name: "Checklist", exact: true }).getAttribute("aria-pressed")) === "true", "Checklist is not on in a checklist row")
     },
   },
   { name: "notes-note-actions", run: (app) => noteAction(app) },

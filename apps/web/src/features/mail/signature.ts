@@ -1,6 +1,6 @@
 import { generateHTML, generateJSON } from "@tiptap/core"
 
-import { MAIL_EXTENSIONS } from "./use-rich-editor"
+import { MAIL_EXTENSIONS } from "@/components/use-rich-editor"
 
 /**
  * A signature as the composer holds it: the standard `-- ` delimiter line,

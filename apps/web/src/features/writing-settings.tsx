@@ -1,12 +1,13 @@
 import { useState } from "react"
 
 import { Icon, Button, Field, FieldLabel, Input, toast } from "@unicron/ui"
+import { FormatBar } from "@/components/format-bar"
+import { RichEditor } from "@/components/rich-editor"
+import { useRichEditor } from "@/components/use-rich-editor"
 import { getCoreClient } from "@/core/client"
 import { useAccounts, useSignatures, useTemplates } from "@/core/queries"
 import type { Account, Template } from "@/core/types"
-import { FormatBar, RichEditor } from "@/features/mail/rich-editor"
 import { htmlToText } from "@/features/mail/rich-text"
-import { useRichEditor } from "@/features/mail/use-rich-editor"
 
 /**
  * Signatures (one per account, added to new messages and replies) and
@@ -81,32 +82,29 @@ function SignatureEditor({ account, html }: { account: Account; html: string }) 
   const editor = useRichEditor({ html, placeholder: "No signature", focusFirst: false, label: `Signature for ${account.address}`, compact: true })
   const [saving, setSaving] = useState(false)
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-xs text-muted-foreground">
-        {account.displayName} · {account.address}
-      </span>
-      <div className="flex flex-col rounded-xl border">
-        <RichEditor editor={editor} />
-        <div className="flex items-center justify-between gap-2 border-t pr-2">
-          <FormatBar editor={editor} />
-          <Button
-            size="sm"
-            disabled={saving}
-            onClick={async () => {
-              setSaving(true)
-              try {
-                await (await getCoreClient()).setSignature(account.id, editor.isEmpty ? "" : editor.getHTML())
-                toast.success(editor.isEmpty ? `Removed the signature for ${account.address}` : `Saved the signature for ${account.address}`)
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : String(e))
-              } finally {
-                setSaving(false)
-              }
-            }}
-          >
-            Save
-          </Button>
-        </div>
+    <div className="flex flex-col gap-2">
+      {/* The shared rich-text field (ADR-0089), named for the account it signs. */}
+      <RichEditor editor={editor} label={`${account.displayName} // ${account.address}`} bar={<FormatBar editor={editor} />} />
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          variant="secondary"
+          loading={saving}
+          aria-label={`Save the signature for ${account.address}`}
+          onClick={async () => {
+            setSaving(true)
+            try {
+              await (await getCoreClient()).setSignature(account.id, editor.isEmpty ? "" : editor.getHTML())
+              toast.success(editor.isEmpty ? `Removed the signature for ${account.address}` : `Saved the signature for ${account.address}`)
+            } catch (e) {
+              toast.error(e instanceof Error ? e.message : String(e))
+            } finally {
+              setSaving(false)
+            }
+          }}
+        >
+          Save
+        </Button>
       </div>
     </div>
   )
@@ -140,10 +138,7 @@ function TemplateEditor({ template, onDone }: { template: Template | null; onDon
           <Input id="tpl-subject" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Fills an empty subject" />
         </Field>
       </div>
-      <div className="flex flex-col rounded-lg border bg-background">
-        <RichEditor editor={editor} />
-        <FormatBar editor={editor} />
-      </div>
+      <RichEditor editor={editor} label="Text" bar={<FormatBar editor={editor} />} />
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

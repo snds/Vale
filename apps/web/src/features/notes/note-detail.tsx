@@ -182,11 +182,12 @@ export function NoteDetailPane({ id, fresh, onClosed }: { id: string; fresh: boo
     // The note takes its card's tint, as an open Keep note does; the pane
     // around it follows from the list (MasterDetail's detailTint).
     <div
-      className="min-h-full transition-colors"
+      // A column as tall as the pane at least, so the note's format bar docks at the pane's foot (ADR-0089).
+      className="flex min-h-full flex-1 flex-col transition-colors"
       style={color ? ({ background: noteFill(color), "--note-surface": noteFill(color) } as CSSProperties) : undefined}
       data-note-color={color ?? undefined}
     >
-      <article className="mx-auto flex h-full w-full max-w-3xl flex-col" aria-label="Note">
+      <article className="mx-auto flex w-full max-w-3xl flex-1 flex-col" aria-label="Note">
         <div className="flex shrink-0 items-center gap-1 px-3 pt-2 md:px-6 md:pt-4">
           <span className="min-w-0 flex-1 truncate px-1 text-xs text-muted-foreground">
             {/* Locked and shared never go together: a shared note can't be locked. */}

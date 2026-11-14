@@ -3,6 +3,43 @@
  * rules). The knobs the composer shares with notes are in shell.css.
  */
 
+/* ── Tier 3 · Knobs ──────────────────────────────────────────────────────── */
+:root,
+.light,
+.dark,
+[data-theme] {
+  /* The format bar (ADR-0089), wherever it stands: in a field's box, at the
+     foot of the note, above a phone's keyboard. */
+  --c-format-bar-padding-x: 0.5rem;
+  --c-format-bar-padding-y: 0.25rem;
+  --c-format-bar-rule: var(--line-rule);
+  --c-format-bar-ground: var(--surface-ground);
+}
+
+@layer components {
+  /* A row that never wraps: on a narrow screen it scrolls sideways, with no bar. */
+  .format-bar {
+    display: flex;
+    min-width: 0;
+    flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: var(--c-format-bar-padding-y) var(--c-format-bar-padding-x);
+    border-top: 1px solid var(--c-format-bar-rule);
+  }
+  /* At the foot of a column that scrolls: it stays in view over the text. */
+  .format-bar[data-mode="docked"],
+  .format-bar[data-mode="keyboard"] {
+    position: sticky;
+    bottom: 0;
+    background: var(--c-format-bar-ground);
+  }
+  /* A phone: just above the on-screen keyboard (src/lib/keyboard-inset.ts). */
+  .format-bar[data-mode="keyboard"] {
+    bottom: var(--keyboard-inset, 0px);
+  }
+}
+
 /* Composer body (Tiptap). Preflight strips list and quote styling, so the
    editor puts back just what an email needs. */
 @layer components {

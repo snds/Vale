@@ -1,14 +1,16 @@
 import Collaboration from "@tiptap/extension-collaboration"
 import { Placeholder } from "@tiptap/extensions"
-import { EditorContent, useEditor } from "@tiptap/react"
+import { useEditor } from "@tiptap/react"
 import { type ReactNode, useState } from "react"
 import type * as Y from "yjs"
 
 import { Avatar, AvatarFallback, Button, Icon, IconButton, Textarea } from "@unicron/ui"
+import { FormatBar } from "@/components/format-bar"
+import { RichEditor } from "@/components/rich-editor"
+import { MAIL_EXTENSIONS, richTextClass } from "@/components/use-rich-editor"
 import { useMyName } from "@/core/queries"
 import { shortTime } from "@/lib/time"
 
-import { MAIL_EXTENSIONS } from "../mail/use-rich-editor"
 import { PeopleHere } from "../notes/people-here"
 import { initials } from "../mail/format"
 import { DRAFT_FIELD, type TeamComment, addComment, removeComment } from "./team-doc"
@@ -170,17 +172,15 @@ function SharedDraft({ doc, owner, from, readOnly, onUseReply }: { doc: Y.Doc; o
       immediatelyRender: true,
       editable: !readOnly,
       editorProps: {
-        attributes: { role: "textbox", "aria-label": "Reply together", "aria-multiline": "true", class: "team-draft min-h-24 px-3 py-2 text-sm leading-relaxed outline-none" },
+        attributes: { role: "textbox", "aria-label": "Reply together", "aria-multiline": "true", class: richTextClass(true) },
       },
     },
     [doc, readOnly],
   )
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs font-medium text-muted-foreground">Reply together</p>
-      <div className="rounded-lg border bg-background focus-within:ring-2 focus-within:ring-ring/50">
-        <EditorContent editor={editor} />
-      </div>
+      {/* The shared rich-text field (ADR-0089); someone reading along gets no format bar. */}
+      <RichEditor editor={editor} label="Reply together" bar={readOnly ? undefined : <FormatBar editor={editor} />} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">{owner ? "Everyone with the link writes here. When it's ready, open it as your reply and send it." : `${from ?? "The person who shared it"} sends it from their account.`}</p>
         {owner && onUseReply && !readOnly && (

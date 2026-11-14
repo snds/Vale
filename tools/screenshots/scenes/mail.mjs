@@ -1,5 +1,5 @@
 // Mail: the lanes, a conversation, reading and writing. Search is in search.mjs.
-import { area, button, closeForm, discardQuestion, ensure, formLayer, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, switcher, switcherLayer, toastGone } from "./helpers.mjs"
+import { area, button, closeForm, discardQuestion, ensure, formatBar, formLayer, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, switcher, switcherLayer, toastGone } from "./helpers.mjs"
 import { settings } from "./settings.mjs"
 
 /** Opens a conversation in the Inbox list by its subject. */
@@ -16,7 +16,7 @@ export const compose = async (app) => {
 export const send = async (app, subject) => {
   const message = await compose(app)
   await message.getByRole("combobox", { name: "To" }).pressSequentially("Marcus")
-  await press(app, message.getByRole("option", { name: /Marcus Lee/ }))
+  await press(app, app.page.getByRole("option", { name: /Marcus Lee/ }))
   await message.getByRole("textbox", { name: "Subject" }).fill(subject)
   await press(app, message.getByRole("button", { name: "Send", exact: true }))
   await message.waitFor({ state: "detached" })
@@ -179,7 +179,7 @@ export const scenes = [
     run: async (app) => {
       const dialog = await compose(app)
       await dialog.getByRole("combobox", { name: "To" }).pressSequentially("Marcus")
-      await press(app, dialog.getByRole("option", { name: /Marcus Lee/ }))
+      await press(app, app.page.getByRole("option", { name: /Marcus Lee/ }))
       await dialog.getByRole("textbox", { name: "Subject" }).fill("Saturday ferry")
       await dialog.getByRole("textbox", { name: "Message" }).click()
       await app.page.keyboard.type("The 08:15 crossing is booked. Shall we meet at the pier at 7:45?")
@@ -261,6 +261,152 @@ export const scenes = [
     },
   },
   {
+    // The recipient field (ADR-0089; briefs M6 and 1.4): people as chips in the Text Field box, with up to
+    // six suggestions under it. Enter and a comma take the highlighted person; a pasted list splits;
+    // Backspace takes the last chip off; text that is not an address is a critical chip and Send says why.
+    name: "mail-recipients",
+    sean: { kind: "undrawn", area: "mail", screen: "recipients" },
+    run: async (app) => {
+      const { page } = app
+      const form = await compose(app)
+      const field = form.locator('[data-slot="recipient-field"]').first()
+      const to = form.getByRole("combobox", { name: "To" })
+      const list = page.getByRole("listbox", { name: "Suggestions" })
+      const chips = async () => (await field.locator('[data-slot="chip"]').allInnerTexts()).map((t) => t.replace(/\s+/g, " ").replace(/ ,/g, ",").trim())
+      const expectChips = async (want, when) => {
+        await app.settle()
+        const have = await chips()
+        ensure(JSON.stringify(have) === JSON.stringify(want), `${when}: the field holds ${JSON.stringify(have)}, not ${JSON.stringify(want)}`)
+      }
+      const send = form.getByRole("button", { name: "Send", exact: true })
+      const reason = form.getByText("Fix or remove the address in red.")
+
+      // Typing lists people under the field: six at most, each a tile, a name and an address.
+      await to.pressSequentially("mar")
+      await list.waitFor()
+      await app.settle()
+      ensure((await to.getAttribute("aria-expanded")) === "true" && (await to.getAttribute("aria-controls")) === (await list.getAttribute("id")), "the field does not say its list is open")
+      const options = list.getByRole("option")
+      ensure((await options.count()) >= 1 && (await options.count()) <= 6, `the list shows ${await options.count()} people, not one to six`)
+      ensure((await to.getAttribute("aria-activedescendant")) === (await options.first().getAttribute("id")), "the first person is not the highlighted one")
+      ensure(await options.first().locator('[data-slot="initial-tile"]').count(), "a suggestion has no initial tile")
+      ensure(/Marcus Lee\s*marcus@example\.com/.test(await options.first().innerText()), "a suggestion is not a name and an address")
+      const box = await field.locator('[data-slot="chip-field-box"]').boundingBox()
+      const under = await list.boundingBox()
+      ensure(under.y >= box.y + box.height - 1 && Math.abs(under.x - box.x) < 24, "the list does not hang under the field's box")
+      // Esc closes the list, not the message.
+      await page.keyboard.press("Escape")
+      await app.settle()
+      ensure(!(await list.count()), "Esc did not close the list")
+      ensure(await form.isVisible(), "Esc in the list closed the message")
+      // Typing on opens it again. Enter takes the highlighted person: a chip with the name; the address is said after it.
+      await to.pressSequentially("c")
+      await list.waitFor()
+      await page.keyboard.press("Enter")
+      await expectChips(["Marcus Lee, marcus@example.com"], "after Enter")
+      ensure((await to.inputValue()) === "", "the typed text stayed after Enter")
+      ensure(!(await list.count()), "the list stayed open after a pick")
+      ensure(await field.getByRole("button", { name: "Remove Marcus Lee", exact: true }).count(), "the chip has no remove button named for the person")
+      // A comma takes the highlighted person too.
+      await to.pressSequentially("ana")
+      await list.waitFor()
+      ensure(!(await list.getByRole("option", { name: /marcus@example\.com/ }).count()), "the list offers someone already in the field")
+      await page.keyboard.press(",")
+      await expectChips(["Marcus Lee, marcus@example.com", "Ana Duarte, ana@example.com"], "after a comma")
+      // An address typed out in full is kept as typed.
+      await to.pressSequentially("kit@example.org,")
+      await expectChips(["Marcus Lee, marcus@example.com", "Ana Duarte, ana@example.com", "kit@example.org"], "after an address and a comma")
+      // A pasted list splits on commas and semicolons.
+      await to.evaluate((el) => {
+        const data = new DataTransfer()
+        data.setData("text/plain", "lena@example.org; omar@example.org")
+        el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }))
+      })
+      await expectChips(["Marcus Lee, marcus@example.com", "Ana Duarte, ana@example.com", "kit@example.org", "lena@example.org", "omar@example.org"], "after pasting two")
+      // Backspace in the empty input takes the last chip off; each chip's own button takes that chip off.
+      await to.press("Backspace")
+      await expectChips(["Marcus Lee, marcus@example.com", "Ana Duarte, ana@example.com", "kit@example.org", "lena@example.org"], "after Backspace")
+      await press(app, field.getByRole("button", { name: "Remove kit@example.org", exact: true }))
+      await expectChips(["Marcus Lee, marcus@example.com", "Ana Duarte, ana@example.com", "lena@example.org"], "after a chip's remove button")
+      ensure(!(await reason.count()) && !(await send.isDisabled()), "Send is off although every chip is an address")
+      // Text that is not an address: a critical chip, said in words too, and Send gives the reason.
+      await to.pressSequentially("the ferry people")
+      await to.press("Enter")
+      await expectChips(["Marcus Lee, marcus@example.com", "Ana Duarte, ana@example.com", "lena@example.org", "the ferry people, not an address"], "after text that is not an address")
+      ensure((await field.locator('[data-slot="chip"][data-tone="critical"]').count()) === 1, "the wrong chip is not the one critical chip")
+      ensure(await send.isDisabled(), "Send is on with a wrong address in the field")
+      ensure(await reason.isVisible(), "Send does not say why it is off")
+      if (!app.phone) ensure((await send.getAttribute("aria-describedby")) === (await reason.getAttribute("id")), "the reason is not tied to Send")
+      // Ctrl+Enter does not send it either.
+      await page.keyboard.press("Control+Enter")
+      await app.settle()
+      ensure(await form.isVisible(), "Ctrl+Enter sent a message with a wrong address")
+      // Backspace removes the wrong one, and Send works again.
+      await to.press("Backspace")
+      await app.settle()
+      ensure(!(await reason.count()) && !(await send.isDisabled()), "Send stayed off after the wrong address was removed")
+      // The picture: the wrong chip, its reason, and the list open on what is being typed.
+      await to.pressSequentially("the ferry people")
+      await to.press("Enter")
+      await to.pressSequentially("pr")
+      await list.waitFor()
+      // No tooltip from the pointer's last press in the picture.
+      await page.mouse.move(0, 0)
+      await app.settle()
+    },
+  },
+  {
+    // The format bar in the message field (ADR-0089; briefs M6 and 1.4): unicron's Toolbar of toggles on the
+    // box's bottom edge. One Tab stop; Bold toggles; Link opens its address in a popover (a sheet on a phone).
+    name: "mail-format-bar",
+    run: async (app) => {
+      const { page } = app
+      const form = await compose(app)
+      // By its class, not its role: a phone's link sheet hides the message from roles while it is open.
+      const text = form.locator(".ProseMirror")
+      ensure((await text.getAttribute("aria-label")) === "Message", "the message field is not named Message")
+      await text.click()
+      await page.keyboard.type("The 08:15 crossing is booked.")
+      const bar = await formatBar(app, form, ["Bold", "Italic", "Link", "Bulleted list", "Numbered list", "Quote", "Code"])
+      ensure((await form.locator('[data-slot="format-bar"]').getAttribute("data-mode")) === "field", "the message's format bar is not on its field")
+      // Link: its address in a layer of its own; a scheme that is not the web or mail is refused in words.
+      await text.selectText()
+      // The editor hears of a new selection a moment after the browser makes it.
+      await app.settle()
+      ensure(await text.evaluate((el) => String(window.getSelection()).trim() === el.textContent.trim()), "the message's words are not selected")
+      await press(app, bar.getByRole("button", { name: "Link", exact: true }))
+      const link = page.getByRole("dialog", { name: "Link" })
+      const address = link.getByRole("textbox", { name: "Link address" })
+      ensure(await address.isVisible(), "Link did not open the link's address")
+      ensure(await link.getByRole("button", { name: "Remove", exact: true }).isDisabled(), "Remove is on although the words have no link")
+      await address.fill("ftp://example.org")
+      await press(app, link.getByRole("button", { name: "Apply", exact: true }))
+      ensure(await link.getByText("Only web and email links.").isVisible(), "a refused link does not say why")
+      await address.fill("example.org/ferry")
+      await address.press("Enter")
+      await link.waitFor({ state: "detached" })
+      await app.settle()
+      ensure((await text.locator('a[href="https://example.org/ferry"]').count()) && (await text.locator('a[href="https://example.org/ferry"]').innerText()).trim() === "The 08:15 crossing is booked.", "Apply did not link the selected words")
+      ensure(await form.isVisible(), "applying a link closed the message")
+      ensure(await text.evaluate((el) => el === document.activeElement), "focus did not return to the message after Apply")
+      // On a link, the toggle is on, the layer opens on its address, and Remove takes it off.
+      ensure((await bar.getByRole("button", { name: "Link", exact: true }).getAttribute("aria-pressed")) === "true", "Link is not on while the cursor is in a link")
+      await press(app, bar.getByRole("button", { name: "Link", exact: true }))
+      ensure((await address.inputValue()) === "https://example.org/ferry", "the layer did not open on the link's address")
+      await press(app, link.getByRole("button", { name: "Remove", exact: true }))
+      await link.waitFor({ state: "detached" })
+      ensure(!(await text.locator("a").count()), "Remove did not take the link off")
+      // Focus is back in the message before the layer opens again.
+      await page.waitForFunction(() => document.activeElement?.classList.contains("ProseMirror"))
+      await app.settle()
+      // The picture: the layer open on an address.
+      await press(app, bar.getByRole("button", { name: "Link", exact: true }))
+      await address.fill("example.org/ferry")
+      await app.settle()
+      ensure((await page.locator(".composer-body").first().evaluate((el) => el.textContent)).trim() === "The 08:15 crossing is booked.", "typing a link's address changed the message")
+    },
+  },
+  {
     // The form layer at its compose size (ADR-0087; brief 3.2): a dialog of 720 with the subject as its
     // title; the whole screen on a phone, with Send as the top row's float button.
     name: "form-layer-compose",
@@ -271,7 +417,7 @@ export const scenes = [
       const message = page.getByRole("dialog", { name: "New message" })
       const write = async (form) => {
         await form.getByRole("combobox", { name: "To" }).pressSequentially("Marcus")
-        await press(app, form.getByRole("option", { name: /Marcus Lee/ }))
+        await press(app, page.getByRole("option", { name: /Marcus Lee/ }))
         await form.getByRole("textbox", { name: "Subject" }).fill("Saturday ferry")
         await form.getByRole("textbox", { name: "Message" }).click()
         await page.keyboard.type("The 08:15 crossing is booked. Shall we meet at the pier at 7:45?")

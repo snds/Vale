@@ -1,8 +1,13 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 
 import { useUi, type ComposerDraft } from "@/app/ui-store"
 import { FormLayer, FormLayerForm } from "@/components/editor-frame"
-import { Icon, Button, ButtonGroup, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, Field, FieldLabel, Input, NativeSelect, NativeSelectOption, DialogAction, DialogActions, toast, useAppFrame } from "@unicron/ui"
+import { FormatBar } from "@/components/format-bar"
+import { RecipientField } from "@/components/recipient-field"
+import { hasWrongAddress, recipientProblemId } from "@/components/recipients"
+import { RichEditor } from "@/components/rich-editor"
+import { useRichEditor } from "@/components/use-rich-editor"
+import { Icon, Button, ButtonGroup, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, Field, FieldLabel, Input, Label, NativeSelect, NativeSelectOption, DialogAction, DialogActions, TextField, toast, useAppFrame } from "@unicron/ui"
 import { getCoreClient } from "@/core/client"
 import { useAccounts, useCore, useLocalTimes, useMailPrefs, useSignatures, useTemplates } from "@/core/queries"
 import type { Draft, LocalTime, OutgoingAttachment, Template } from "@/core/types"
@@ -11,11 +16,8 @@ import { useLeaveGuard } from "@/lib/leave-guard"
 import { FOLLOW_UP_OPTIONS, longTime, nextLocalHour, partOfDay, timeThere, utcLabel } from "@/lib/time"
 
 import { UNDO_SECONDS, formatRecipients, formatSize, parseRecipients } from "./format"
-import { RecipientInput } from "./recipient-input"
-import { FormatBar, RichEditor } from "./rich-editor"
 import { FollowUpAfterMenu, SendLaterMenu, type TheirMorning } from "./send-later"
 import { signatureBlock, withSignature } from "./signature"
-import { useRichEditor } from "./use-rich-editor"
 import { htmlToText, textToHtml } from "./rich-text"
 
 /** Most providers reject messages over 25 MB; base64 adds about a third. */
@@ -85,19 +87,6 @@ export function ComposeMail() {
   )
 }
 
-function Row({ label, children, htmlFor }: { label: string; children: ReactNode; htmlFor?: string }) {
-  return (
-    <div className="flex min-h-11 items-center gap-2 border-b">
-      <label htmlFor={htmlFor} className="w-14 shrink-0 text-sm text-muted-foreground">
-        {label}
-      </label>
-      {children}
-    </div>
-  )
-}
-
-const bare = "h-10 flex-1 min-w-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-
 function ComposerForm({ initial, onDone }: { initial: ComposerDraft; onDone: () => void }) {
   const { data: accounts = [] } = useAccounts()
   const { data: core } = useCore()
@@ -112,6 +101,10 @@ function ComposerForm({ initial, onDone }: { initial: ComposerDraft; onDone: () 
   const [to, setTo] = useState(formatRecipients(initial.to))
   const [cc, setCc] = useState(formatRecipients(initial.cc))
   const [showCc, setShowCc] = useState((initial.cc?.length ?? 0) > 0)
+  // A chip that is not an address (ADR-0089): its field says so under its box, and Send points at that line as its reason.
+  const [toProblem, setToProblem] = useState<string | null>(null)
+  const [ccProblem, setCcProblem] = useState<string | null>(null)
+  const addressProblem = toProblem ?? (showCc ? ccProblem : null)
   const [subject, setSubject] = useState(initial.subject ?? "")
   const [sendAt, setSendAt] = useState<number | null>(initial.sendAt ?? null)
   const [followUp, setFollowUp] = useState<number | null>(initial.followUpAfter ?? null)
@@ -226,6 +219,8 @@ function ComposerForm({ initial, onDone }: { initial: ComposerDraft; onDone: () 
   }
 
   const send = async () => {
+    // Sent from the keyboard with a wrong address still being typed: the field turns it red and Send says why.
+    if (hasWrongAddress(to) || (showCc && hasWrongAddress(cc))) return
     setError(null)
     setSending(true)
     const html = editor.isEmpty ? null : editor.getHTML()
@@ -276,7 +271,7 @@ function ComposerForm({ initial, onDone }: { initial: ComposerDraft; onDone: () 
     const html = editor.isEmpty ? "" : editor.getHTML()
     return htmlToText(shownBlock.current ? html.replace(shownBlock.current, "") : html).trim() !== ""
   })
-  const cannotSend = accounts.length === 0 || totalBytes > MAX_ATTACHMENTS
+  const cannotSend = accounts.length === 0 || totalBytes > MAX_ATTACHMENTS || addressProblem !== null
   const sendLater = (
     <SendLaterMenu onPick={setSendAt} theirs={theirs} trigger={<Button type="button" variant={phone ? "ghost" : "default"} size="icon" aria-label="Send later" disabled={sending || accounts.length === 0} />}>
       <Icon name={phone ? "time" : "chevron--down"} />
@@ -291,7 +286,7 @@ function ComposerForm({ initial, onDone }: { initial: ComposerDraft; onDone: () 
       primary={{ label: sendAt === null ? "Send" : "Schedule", icon: sendAt === null ? "send--alt" : "time", disabled: cannotSend, loading: sending }}
       primaryControl={
         <ButtonGroup>
-          <Button type="submit" disabled={cannotSend} loading={sending} aria-keyshortcuts="Control+Enter Meta+Enter">
+          <Button type="submit" disabled={cannotSend} focusableWhenDisabled loading={sending} aria-keyshortcuts="Control+Enter Meta+Enter" aria-describedby={addressProblem ? recipientProblemId(toProblem ? "composer-to" : "composer-cc") : undefined}>
             <Icon name={sendAt === null ? "send--alt" : "time"} data-icon="inline-start" /> {sendAt === null ? "Send" : "Schedule"}
           </Button>
           {sendLater}
@@ -367,7 +362,7 @@ function ComposerForm({ initial, onDone }: { initial: ComposerDraft; onDone: () 
         </>
       }
     >
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
       {sendAt !== null && (
         <p className="flex items-center gap-2 border-b bg-accent/50 px-2 py-2 text-sm">
           <Icon name="time" tone="muted" size="sm" />
@@ -379,29 +374,30 @@ function ComposerForm({ initial, onDone }: { initial: ComposerDraft; onDone: () 
       )}
 
       {accounts.length > 1 && (
-        <Row label="From" htmlFor="composer-from">
-          <NativeSelect id="composer-from" size="sm" value={accountId} onChange={(e) => setAccountId(e.target.value)} className="border-0 shadow-none">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="composer-from">From</Label>
+          <NativeSelect id="composer-from" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
             {accounts.map((a) => (
               <NativeSelectOption key={a.id} value={a.id}>
                 {a.displayName} · {a.address}
               </NativeSelectOption>
             ))}
           </NativeSelect>
-        </Row>
+        </div>
       )}
-      <Row label="To" htmlFor="composer-to">
-        <RecipientInput id="composer-to" className={bare} value={to} onChange={setTo} data-composer-focus={initial.to?.length ? undefined : ""} inputMode="email" />
+      {/* The shared recipient field (ADR-0089): people as chips, suggestions from Contacts. */}
+      <div className="flex items-start gap-2">
+        <RecipientField id="composer-to" label="To" value={to} onChange={setTo} onProblem={setToProblem} focusFirst={!initial.to?.length} />
         {!showCc && (
-          <Button type="button" variant="ghost" size="sm" onClick={() => setShowCc(true)}>
-            Cc
-          </Button>
+          // Level with the field's box: below its overline (16) and the gap under it (4), and as tall as the box.
+          <div className="shrink-0 pt-5">
+            <Button type="button" variant="ghost" size="lg" onClick={() => setShowCc(true)}>
+              Cc
+            </Button>
+          </div>
         )}
-      </Row>
-      {showCc && (
-        <Row label="Cc" htmlFor="composer-cc">
-          <RecipientInput id="composer-cc" className={bare} value={cc} onChange={setCc} inputMode="email" />
-        </Row>
-      )}
+      </div>
+      {showCc && <RecipientField id="composer-cc" label="Cc" value={cc} onChange={setCc} onProblem={setCcProblem} />}
       {late && (
         // Outside their working hours: say so, and offer their morning (ADR-0041).
         <p data-slot="recipient-local-time" className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/40 px-2 py-2 text-sm">
@@ -417,17 +413,11 @@ function ComposerForm({ initial, onDone }: { initial: ComposerDraft; onDone: () 
           )}
         </p>
       )}
-      <Row label="Subject" htmlFor="composer-subject">
-        <input id="composer-subject" className={bare} value={subject} onChange={(e) => setSubject(e.target.value)} />
-      </Row>
-
-
-      {/* The editor pads its own text: out by that much, it lines up with the fields. */}
-      <div className="-mx-4 flex min-h-0 flex-1 flex-col">
-        <RichEditor editor={editor} />
-      </div>
+      <TextField id="composer-subject" label="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
+      {/* The shared rich-text field, with its format bar on the box's bottom edge. */}
+      <RichEditor editor={editor} label="Message" fill bar={<FormatBar editor={editor} />} />
       {files.length > 0 && (
-        <ul className="flex flex-wrap gap-2 border-t py-2" aria-label="Attachments">
+        <ul className="flex flex-wrap gap-2" aria-label="Attachments">
           {files.map((f, i) => (
             <li key={`${f.filename}-${i}`} className="flex max-w-full items-center gap-1.5 rounded-lg border bg-muted/40 py-1 pr-1 pl-2 text-xs">
               <Icon name="attachment" tone="muted" size="sm" />
@@ -440,7 +430,6 @@ function ComposerForm({ initial, onDone }: { initial: ComposerDraft; onDone: () 
           ))}
         </ul>
       )}
-      <FormatBar editor={editor} />
       </div>
       <SaveTemplateDialog
         open={savingTemplate}

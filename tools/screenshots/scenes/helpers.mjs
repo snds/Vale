@@ -147,3 +147,41 @@ export const formLayer = async (app, { open, write, primary, width = 640 }) => {
   await app.settle()
   ensure(!(await discardQuestion(page).count()), "saving asked about discarding")
 }
+
+/**
+ * The format bar (ADR-0089), checked the same way wherever it stands: its buttons in order, one Tab
+ * stop with the arrow keys along it, and Bold going on and off over the selected text. Leaves the
+ * text as it was. Returns the toolbar.
+ */
+export const formatBar = async (app, within, names) => {
+  const { page } = app
+  const bar = within.getByRole("toolbar", { name: "Formatting" })
+  const items = bar.locator('[data-slot="toolbar-button"], [data-slot="toolbar-toggle"]')
+  const have = await items.evaluateAll((list) => list.map((el) => el.getAttribute("aria-label")))
+  ensure(JSON.stringify(have) === JSON.stringify(names), `the format bar reads ${have.join(", ")}, not ${names.join(", ")}`)
+  // One Tab stop; the arrows, Home and End move along it.
+  const stops = () => items.evaluateAll((list) => list.filter((el) => el.tabIndex === 0).length)
+  ensure((await stops()) === 1, `the format bar has ${await stops()} Tab stops, not one`)
+  const focused = () => page.evaluate(() => document.activeElement?.getAttribute("aria-label"))
+  await items.first().focus()
+  await page.keyboard.press("ArrowRight")
+  ensure((await focused()) === names[1], `ArrowRight from ${names[0]} went to ${await focused()}, not ${names[1]}`)
+  await page.keyboard.press("End")
+  ensure((await focused()) === names.at(-1), `End went to ${await focused()}, not ${names.at(-1)}`)
+  await page.keyboard.press("Home")
+  ensure((await focused()) === names[0], `Home went to ${await focused()}, not ${names[0]}`)
+  ensure((await stops()) === 1, "moving along the format bar left more than one Tab stop")
+  // Bold goes on over the selected words and off again, and a press on it leaves focus in the text.
+  const text = within.locator(".ProseMirror").first()
+  await text.selectText()
+  // The editor hears of a new selection a moment after the browser makes it.
+  await app.settle()
+  const bold = bar.getByRole("button", { name: "Bold", exact: true })
+  ensure((await bold.getAttribute("aria-pressed")) === "false", "Bold is on before it is pressed")
+  await press(app, bold)
+  ensure((await bold.getAttribute("aria-pressed")) === "true" && (await text.locator("strong").count()) > 0, "Bold did not go on")
+  ensure(await text.evaluate((el) => el === document.activeElement), "a press on the format bar took focus from the text")
+  await press(app, bold)
+  ensure((await bold.getAttribute("aria-pressed")) === "false" && !(await text.locator("strong").count()), "Bold did not go off")
+  return bar
+}
