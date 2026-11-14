@@ -1,28 +1,42 @@
 import { useMemo, useState } from "react"
 
-import { Badge, IconButton, Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@unicron/ui"
+import { IconButton, SectionHeader } from "@unicron/ui"
 import { MonthGrid } from "@/components/month-grid"
 import { getCoreClient, type AppJump } from "@/core/client"
 import { useCoreEvents, useOccurrences } from "@/core/queries"
 import type { Occurrence } from "@/core/types"
 import { useNowSecs } from "@/hooks/use-now"
 import { APP_JUMP_KEY } from "@/lib/app-jump"
+import { calendarSwatches, eventSwatch } from "@/lib/swatches"
 
-import { eventStyle } from "./colors"
-import { addDays, dayLabel, fmt, fromSecs, rangeLabel, secs, startOfDay, startOfWeek } from "./dates"
-import { QuickAdd } from "./quick-add-field"
+import { spokenEvent } from "./card-context"
+import { addDays, dayLabel, fmt, fromSecs, secs, startOfDay, startOfWeek } from "./dates"
 import { JoinButton } from "./join-button"
 import { occurrenceKey } from "./layout"
-import { placeLabel } from "./meeting"
 import { AHEAD, nextUp, whenLabel } from "./next-up"
+import { OccurrenceCard } from "./occurrence-card"
+import { QuickAdd } from "./quick-add-field"
 import { useCalendars } from "./use-calendars"
 
-/** The menu-bar mini calendar (ADR-0054): today, what's next, a month to
- * pick a day from, that day's events, and quick add. It's the desktop's
- * small window under the tray icon; `/?mini` in a browser shows the same. */
+/**
+ * The menu-bar calendar (ADR-0054, ADR-0100; brief C8): what is next, a
+ * month to pick a day from, that day's events, and quick add, without Vale
+ * open. The desktop's small window under the tray icon; `/?mini` in a
+ * browser shows the same. 320 px wide, no shell, the ground and one hairline
+ * frame (styles/calendar.css, `.mini-calendar`).
+ *
+ * - Today's date, and "Open Vale".
+ * - NEXT UP: one card in the next look, `Now` or `In 25 min`, and JOIN, the
+ *   window's one primary, when it has a call.
+ * - The compact month grid, a square under busy days; pressing a day picks it.
+ * - The picked day (TODAY, TOMORROW or its date): its events as compact
+ *   cards, each with a secondary JOIN while its call has not ended.
+ * - Quick add: Enter adds the event, and its day shows, so it appears.
+ */
 export function MiniCalendar() {
   useCoreEvents()
   const calendars = useCalendars()
+  const swatches = useMemo(() => calendarSwatches(calendars.values()), [calendars])
   const now = useNowSecs(30_000)
   const today = startOfDay(fromSecs(now))
   // The window stays open for days: a new day starts back at today.
@@ -59,67 +73,54 @@ export function MiniCalendar() {
     }
   }
   const openEvent = (o: Occurrence) => void open({ kind: "event", id: o.eventId, start: o.start })
+  const label = dayLabel(picked, today)
+  const when = (o: Occurrence) => {
+    const w = whenLabel(o, now)
+    return w.charAt(0).toUpperCase() + w.slice(1)
+  }
 
   return (
-    <div data-slot="mini-calendar" className="mx-auto flex h-dvh max-w-md flex-col bg-background text-foreground">
-      <header className="flex items-start justify-between gap-2 px-4 pt-3">
-        <div>
-          <p className="text-xs font-semibold tracking-wide text-(--c-calendar-today-text) uppercase">{today.toLocaleDateString(undefined, { weekday: "long" })}</p>
-          <h1 className="text-lg font-semibold">{today.toLocaleDateString(undefined, { month: "long", day: "numeric" })}</h1>
-        </div>
+    <div className="mini-calendar" data-slot="mini-calendar">
+      <header className="flex items-center justify-between gap-2">
+        <h1 className="type-subtitle">{today.toLocaleDateString(undefined, { month: "long", day: "numeric" })}</h1>
         <IconButton label="Open Vale" icon="launch" onClick={() => void open(null)} />
       </header>
 
-      <section aria-label="Next up" className="px-3 pt-2">
+      <section aria-label="Next up" className="flex flex-col gap-3">
+        <SectionHeader title="Next up" />
         {next ? (
-          <div className="grid grid-cols-[1fr_auto] items-center gap-2" style={eventStyle(calendars.get(next.calendarId))}>
-            <Item variant="muted" size="sm" render={<button type="button" onClick={() => openEvent(next)} />}>
-              <ItemMedia>
-                <span aria-hidden className="event-dot h-8 w-1 rounded-full" />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>
-                  {next.title || "(no title)"}
-                  <Badge variant={next.start <= now ? "default" : "secondary"}>{next.start <= now ? "Now" : whenLabel(next, now)}</Badge>
-                </ItemTitle>
-                <ItemDescription>{[rangeLabel(next.start, next.end, false), placeLabel(next)].filter(Boolean).join(" · ")}</ItemDescription>
-              </ItemContent>
-            </Item>
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <OccurrenceCard occurrence={next} next note={when(next)} label={`${spokenEvent(next)}, ${when(next)}`} onOpen={() => openEvent(next)} />
+            </div>
             {next.meetingUrl && <JoinButton url={next.meetingUrl} appUrl={next.meetingAppUrl} />}
           </div>
         ) : (
-          <p className="px-1 py-2 text-sm text-muted-foreground">Nothing else in the next 12 hours.</p>
+          <p className="type-body text-text-secondary">Nothing else in the next 12 hours.</p>
         )}
       </section>
 
-      <div className="px-3 pt-2 pb-2">
-        <MonthGrid variant="compact" month={month} onMonthChange={setMonth} selected={picked} onPick={setPicked} marks={(d) => ({ events: busyDays.get(startOfDay(d).getTime()) ?? 0 })} />
-      </div>
+      <MonthGrid variant="compact" month={month} onMonthChange={setMonth} selected={picked} onPick={setPicked} marks={(d) => ({ events: busyDays.get(startOfDay(d).getTime()) ?? 0 })} />
 
-      <section aria-label={dayLabel(picked, today)} className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
-        <h2 className="px-1 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">{dayLabel(picked, today)}</h2>
-        {dayOcc.length === 0 && <p className="px-1 text-sm text-muted-foreground">Nothing planned.</p>}
-        <div className="flex flex-col gap-0.5">
-          {dayOcc.map((o) => (
-            <div key={occurrenceKey(o)} className="grid grid-cols-[1fr_auto] items-center gap-2" style={eventStyle(calendars.get(o.calendarId))}>
-              <Item size="xs" render={<button type="button" onClick={() => openEvent(o)} />}>
-                <ItemMedia>
-                  <span aria-hidden className="event-dot h-6 w-1 rounded-full" />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle>{o.title || "(no title)"}</ItemTitle>
-                  <ItemDescription>{[o.allDay ? "All day" : `${fmt.time(Math.max(o.start, secs(picked)))} – ${fmt.time(o.end)}`, placeLabel(o)].filter(Boolean).join(" · ")}</ItemDescription>
-                </ItemContent>
-              </Item>
-              {o.meetingUrl && o.end > now && <JoinButton url={o.meetingUrl} appUrl={o.meetingAppUrl} variant="outline" />}
-            </div>
-          ))}
-        </div>
+      <section aria-label={label} className="mini-calendar-day flex flex-col gap-3">
+        <SectionHeader title={label === "Today" || label === "Tomorrow" ? label : fmt.dayLong(picked)} count={dayOcc.length || undefined} />
+        {dayOcc.length === 0 ? (
+          <p className="type-body text-text-secondary">Nothing planned</p>
+        ) : (
+          <ul aria-label={`Events, ${label}`} className="flex flex-col gap-2">
+            {dayOcc.map((o) => (
+              <li key={occurrenceKey(o)} className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <OccurrenceCard occurrence={o} compact swatch={eventSwatch(swatches.get(o.calendarId))} label={spokenEvent(o)} onOpen={() => openEvent(o)} />
+                </div>
+                {o.meetingUrl && o.end > now && <JoinButton url={o.meetingUrl} appUrl={o.meetingAppUrl} variant="outline" />}
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
-      <div className="border-t px-4 pt-3 pb-3">
-        <QuickAdd calendars={calendars} />
-      </div>
+      <QuickAdd calendars={calendars} onAdded={(start) => setPicked(fromSecs(start))} />
     </div>
   )
 }

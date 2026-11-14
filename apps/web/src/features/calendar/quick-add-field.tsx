@@ -8,13 +8,13 @@ import { clock, fmt, fromSecs, secs } from "./dates"
 import { parseQuickAdd, quickToInput } from "./quick-add"
 
 /**
- * Natural-language add: "Lunch with Ana tomorrow 1pm at Café". One field,
+ * Natural-language add (brief C8): "Lunch with Ana tomorrow 1pm at Café". One field,
  * Enter adds the event to the first calendar that takes new events, and the
  * helper line says what it read. It stands in the menu-bar window only
  * (brief C4, C8): in the app, the event form's TITLE reads the sentence
  * (ADR-0099, Q5).
  */
-export function QuickAdd({ calendars }: { calendars: Map<string, Collection> }) {
+export function QuickAdd({ calendars, onAdded }: { calendars: Map<string, Collection>; /** The event was added: its start, so its day can show it. */ onAdded?: (start: number) => void }) {
   const [text, setText] = useState("")
   const create = usePimAction((c, input: Parameters<typeof c.createEvent>[0]) => c.createEvent(input))
   const target = [...calendars.values()].find((c) => c.writable && !c.hidden) ?? [...calendars.values()].find((c) => c.writable)
@@ -24,6 +24,7 @@ export function QuickAdd({ calendars }: { calendars: Map<string, Collection> }) 
     try {
       const e = await create.mutateAsync(quickToInput(parsed, target.id))
       setText("")
+      onAdded?.(e.start)
       toast.success(`Added ${e.title}`, { description: `${fmt.dayLong(fromSecs(e.start))}${e.allDay ? "" : `, ${clock(e.start)}`} // ${target.name}`, duration: 4000 })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -38,8 +39,8 @@ export function QuickAdd({ calendars }: { calendars: Map<string, Collection> }) 
   return (
     <form onSubmit={(e) => (e.preventDefault(), void submit())} data-slot="quick-add">
       <TextField
-        label="Quick add event"
-        placeholder="Lunch Friday 1pm"
+        aria-label="Quick add event"
+        placeholder="Add an event, like “lunch fri 1pm”"
         leading={<Icon name="add" />}
         value={text}
         onChange={(e) => setText(e.target.value)}

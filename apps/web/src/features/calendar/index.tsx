@@ -32,14 +32,15 @@ import { calendarSwatches } from "@/lib/swatches"
 import { DayCards, PhoneWeek, Upcoming, WeekCards } from "./agenda"
 import { moveBetweenEvents, type CardContext } from "./card-context"
 import { CalendarNav } from "./calendar-nav"
-import { SaveSetDialog } from "./calendar-sets"
+import { SaveSetLayer } from "./calendar-sets"
 import { addDays, addMonths, dateInput, eventsOn, folio, fromSecs, monthDay, rangeFact, sameDay, secs, startOfDay, startOfWeek, timeInput, weekNumber } from "./dates"
 import { EventDetailPane, EventReview } from "./event-detail"
 import { useCalendars } from "./use-calendars"
 import { MonthGrid } from "./month-grid"
 import { BookingLinks } from "./booking-links"
 import { AddCalendarsDialog } from "./interesting"
-import { TasksPanel } from "./tasks"
+import { TaskPlanPane, TasksPanel } from "./tasks"
+import { tasksOverline, useOpenTasks, usePlanning } from "./planning"
 import { nextUp } from "./next-up"
 import { occurrenceKey } from "./layout"
 import { TimeGrid } from "./time-grid"
@@ -150,6 +151,9 @@ export function CalendarView() {
   const { isPending: calendarsPending } = useCollections("calendar")
   const { data: accounts = [] } = useAccounts()
   const { data: keys } = useKeyBindings()
+  const { data: openTasks = [] } = useOpenTasks()
+  // Planning a task takes the detail column (TasksPanel's onPlan closes an event open there).
+  const planning = usePlanning((s) => s.task)
 
   const weekStart = startOfWeek(focus)
   const week = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
@@ -316,7 +320,8 @@ export function CalendarView() {
   )
   const head = tool ? (
     <>
-      <ScreenHead overline="Calendar" title={tool} switcher={switching.switcher} below={switcherLayer} />
+      {/* Tasks counts its open items (brief C6): `TASKS // 07`. */}
+      <ScreenHead overline={place === "tasks" ? tasksOverline(openTasks.length) : "Calendar"} title={tool} switcher={switching.switcher} below={switcherLayer} />
     </>
   ) : (
     <ScreenHead overline={overline} title={title} meta={meta} switcher={switching.switcher} actions={wide ? chips : undefined} below={below} />
@@ -356,12 +361,13 @@ export function CalendarView() {
     <WeekCards days={week} today={today} occurrences={occurrences} ctx={ctx} loading={loading} onKeyDown={moveBetweenEvents} />
   )
 
-  const detail = selected && <EventDetailPane key={selectedKey} eventId={selected.eventId} start={selected.start} calendars={calendars} onDeleted={() => setSelected(null)} />
+  // A task's plan stands in the detail column on a desktop (brief C6); an event opened from Tasks, otherwise.
+  const detail = place === "tasks" && planning && frame.split ? <TaskPlanPane onOpen={openEvent} /> : selected && <EventDetailPane key={selectedKey} eventId={selected.eventId} start={selected.start} calendars={calendars} onDeleted={() => setSelected(null)} />
   const forms = (
     <>
       {/* What the calendars list opens (brief X1): the holidays picker by its intent, and the form that names a set. */}
       <AddCalendarsDialog />
-      <SaveSetDialog />
+      <SaveSetLayer />
     </>
   )
 
@@ -390,11 +396,11 @@ export function CalendarView() {
     <>
       <MasterDetail
         section={tool ?? "Calendar"}
-        pick={vertical("calendar").pick}
+        pick={place === "tasks" ? "Plan a task to block time for it here." : vertical("calendar").pick}
         header={head}
         list={
           <AppFrameInset>
-            {tool ? place === "tasks" ? <TasksPanel onOpen={openEvent} /> : <BookingLinks /> : body}
+            {tool ? place === "tasks" ? <TasksPanel onOpen={openEvent} onPlan={() => setSelected(null)} /> : <BookingLinks /> : body}
           </AppFrameInset>
         }
         detail={detail}

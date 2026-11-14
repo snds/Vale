@@ -8,8 +8,9 @@
 .light,
 .dark,
 [data-theme] {
-  /* An event whose calendar has no color of its own: a neutral ink (the menu-bar window's dot). */
-  --c-event-fallback: var(--text-label);
+  /* The menu-bar window (ADR-0100; brief C8): 320 wide, its content 16 in from the hairline frame. */
+  --c-mini-calendar-width: calc(var(--spacing) * 80);
+  --c-mini-calendar-inset: calc(var(--spacing) * 4);
   /* The time grid (ADR-0098; brief C1): 48 px an hour, the gutter's width, and the height of its
      box of hours where it scrolls inside a list (a phone's Day, medium width): ten hours. */
   --c-calendar-hour-height: calc(var(--spacing) * 12);
@@ -25,10 +26,27 @@
   --c-month-cell-min: calc(var(--spacing) * 32);
 }
 
-/* Event dots take one input, --event (the calendar's color): the menu-bar window's list. */
+/* ── The menu-bar window (features/calendar/mini-calendar.tsx; ADR-0100) ───
+   Brief C8: no shell, the ground, one hairline frame. The window is 320 wide;
+   a browser wider than that shows it as a column of that width. Sections
+   stand 24 apart, as the dense panes do. */
 @layer components {
-  .event-dot {
-    background: var(--event);
+  .mini-calendar {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 6);
+    box-sizing: border-box;
+    width: 100%;
+    max-width: var(--c-mini-calendar-width);
+    min-height: 100dvh;
+    margin-inline: auto;
+    padding: var(--c-mini-calendar-inset);
+    background: var(--surface-ground);
+    color: var(--text-body);
+    box-shadow: inset 0 0 0 var(--stroke-rule) var(--line-rule);
+  }
+  .mini-calendar-day {
+    flex: 1 1 auto;
   }
 }
 

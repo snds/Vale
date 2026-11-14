@@ -85,7 +85,7 @@ function nextHalfHour() {
  * on it, or its calendar button, opens the month grid; the button is named
  * "Start date, Friday, November 20, 2026".
  */
-function DateField({ label, name, value, onPick, min }: { label?: string; name: string; value: string; onPick: (date: string) => void; min?: string }) {
+export function DateField({ label, name, value, onPick, min }: { label?: string; name: string; value: string; onPick: (date: string) => void; min?: string }) {
   const [open, setOpen] = useState(false)
   const d = fromInputs(value)
   const spoken = `${name}, ${d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}`

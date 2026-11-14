@@ -1,5 +1,5 @@
 // Calendar: every view, an event and its editor, the calendars list, booking links, and the menu-bar window.
-import { area, button, closeForm, ensure, formLayer, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, sidebar, switcherLayer, toastGone } from "./helpers.mjs"
+import { area, button, closeForm, ensure, formLayer, formPrimary, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, sidebar, switcherLayer, toastGone } from "./helpers.mjs"
 import { compose } from "./mail.mjs"
 import { settings } from "./settings.mjs"
 
@@ -38,6 +38,33 @@ export const newEvent = async (app) => {
   await area(app, "Calendar")
   await press(app, button(app.page, "New event"))
   return app.page.getByRole("dialog", { name: "New event" })
+}
+
+/** The toasts on screen. */
+const toasts = (page) => page.locator("[data-sonner-toast]")
+/** Add calendars (brief C5): the form layer's dialog, or a sheet on a phone. */
+const addCalendars = (page) => page.getByRole("dialog", { name: "Add calendars" })
+/** Opens Tasks, Calendar's place (brief C6). */
+const tasks = async (app) => {
+  await area(app, "Calendar")
+  await pick(app, "Tasks")
+  await app.page.getByRole("region", { name: "Tasks" }).first().waitFor()
+}
+/** A task's plan: the detail column's form on a desktop, the form layer elsewhere. */
+const planForm = (app) => (app.size === "desktop" ? app.page.locator('[data-slot="task-plan"]') : app.page.getByRole("dialog").filter({ hasText: "Block time for it." }))
+/** The menu-bar window's parts (brief C8), wherever it is shown. */
+const miniParts = async (page) => {
+  const mini = page.locator('[data-slot="mini-calendar"]')
+  ensure(/^November 12$/.test((await mini.getByRole("heading", { level: 1 }).innerText()).trim()), "the window's top line is not today's date")
+  ensure(await mini.getByRole("button", { name: "Open Vale" }).isVisible(), "the window has no Open Vale")
+  const next = mini.getByRole("region", { name: "Next up" })
+  ensure((await next.locator('[data-slot="calendar-event"]').count()) === 1 || (await next.getByText("Nothing else in the next 12 hours.").count()), "NEXT UP has neither one event nor its empty line")
+  if (await next.locator('[data-slot="calendar-event"]').count()) ensure((await next.locator('[data-slot="calendar-event"]').getAttribute("data-tone")) === "primary", "NEXT UP's event is not in the next look")
+  const grid = mini.getByRole("grid", { name: "November 2026" })
+  ensure((await grid.getByRole("gridcell", { name: /^Thursday, November 12, today, \d+ events?$/ }).getAttribute("aria-selected")) === "true", "today is not the picked day, named with its events")
+  ensure((await grid.getByRole("gridcell").count()) === 42, "the month is not six weeks")
+  ensure(await mini.getByRole("region", { name: "Today", exact: true }).isVisible(), "the picked day has no section")
+  ensure(await mini.getByRole("textbox", { name: "Quick add event" }).isVisible(), "the window has no quick add")
 }
 
 /** The open event: the detail column or a pushed screen, or the review dialog. */
@@ -618,18 +645,220 @@ export const scenes = [
     },
   },
   {
+    // Add calendars (ADR-0100; brief C5): holidays by country, your own first, a region under a country
+    // that is on, and the moon. The form layer's size, no primary; each change saves at once; DONE closes it.
     name: "calendar-add-calendars",
+    sean: { kind: "undrawn", area: "calendar", screen: "add-calendars" },
     run: async (app) => {
+      const { page } = app
       const list = await calendars(app)
       await press(app, list.getByRole("button", { name: "Add calendars", exact: true }))
+      const form = addCalendars(page)
+      // Turning a country on saves it at once, and shows its REGION row; picking a region shows it.
+      const germany = form.getByRole("switch", { name: "Holidays in Germany" })
+      await germany.scrollIntoViewIfNeeded()
+      await press(app, germany)
+      ensure(await germany.isChecked(), "Germany did not turn on")
+      await press(app, form.getByRole("button", { name: "Change region for Holidays in Germany" }))
+      await press(app, page.getByRole("menuitemradio", { name: "Bavaria" }).or(page.getByRole("radio", { name: "Bavaria" })).first())
+      // The calendar takes the region's name; the country stays under it.
+      ensure(await form.getByRole("switch", { name: "Holidays in Bavaria" }).isChecked(), "the region did not rename the calendar")
+      const region = (await form.locator('[data-slot="field-row"]').first().innerText()).replace(/\s+/g, " ")
+      ensure(/region.*bavaria/i.test(region), `the region row reads "${region}"`)
+      // The picture: the top of the list, your own country first.
+      await form.getByRole("switch").first().scrollIntoViewIfNeeded()
+      await page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      const form = addCalendars(page)
+      ensure(await form.getByText("Worked out on this device. Nothing is fetched.").isVisible(), "the caption is missing")
+      const first = (await form.locator('[data-slot="toggle-row"]').first().innerText()).replace(/\s+/g, " ")
+      ensure(/United States.*Your country/.test(first), `the first country reads "${first}", not yours`)
+      ensure(await form.getByRole("switch", { name: "Moon phases" }).count(), "SKY has no Moon phases")
+      ensure(await form.getByRole("switch", { name: "Holidays in Bavaria" }).isChecked(), "a country turned on did not stay on")
+      // No primary: DONE is a secondary, the layer's only action.
+      const actions = await form.getByRole("button", { name: "Done", exact: true }).count()
+      ensure(actions === 1, "there is no DONE")
+      ensure(!(await form.locator('[data-slot="button"][data-variant="default"]').count()), "Add calendars has a primary button")
     },
   },
   {
-    name: "calendar-plan-task",
+    // Save as set (ADR-0100; brief C5): SET NAME, then SAVE SET, in the form layer; the set joins SETS,
+    // picked, since it is what shows. The picture: the calendars list with the set.
+    name: "calendar-set-save",
+    sizes: ["phone", "desktop", "medium"],
+    sean: { kind: "undrawn", area: "calendar", screen: "sets" },
     run: async (app) => {
+      const { page } = app
+      await formLayer(app, {
+        open: async () => {
+          const list = await calendars(app)
+          await press(app, list.getByRole("button", { name: "Save as set…", exact: true }))
+          return page.getByRole("dialog", { name: /New set/ })
+        },
+        write: async (form) => form.getByRole("textbox", { name: "Set name" }).fill("Weekdays"),
+        primary: "Save set",
+      })
+      await toasts(page).filter({ hasText: "Saved Weekdays" }).waitFor()
+      await toastGone(app)
+      await calendars(app)
+    },
+    assert: async (app) => {
+      const list = await groups(app)
+      const set = list.getByRole("radio", { name: "Weekdays" })
+      ensure(await set.count(), "the saved set is not in SETS")
+      ensure((await set.getAttribute("aria-checked")) === "true", "the saved set is not picked, though it is what shows")
+    },
+  },
+  {
+    // Sets with UNDO (ADR-0100; brief C5, X6): picking a set says "Showing …"; deleting one says
+    // "Deleted …" with UNDO, which saves the kept set again and leaves what shows as it was.
+    name: "calendar-set-delete-undo",
+    run: async (app) => {
+      const { page } = app
+      let list = await calendars(app)
+      const holidays = () => list.getByRole("checkbox", { name: /^Holidays/ })
+      // A set without Holidays.
+      await press(app, holidays())
+      await press(app, list.getByRole("button", { name: "Save as set…", exact: true }))
+      const form = page.getByRole("dialog", { name: /New set/ })
+      await form.getByRole("textbox", { name: "Set name" }).fill("No holidays")
+      await press(app, formPrimary(form, "Save set"))
+      await toastGone(app)
+      list = await calendars(app)
+      // Holidays back on: the set is no longer what shows; picking it hides Holidays again.
+      await press(app, holidays())
+      const set = () => list.getByRole("radio", { name: "No holidays" })
+      ensure((await set().getAttribute("aria-checked")) === "false", "the set says it shows while Holidays is on")
+      await press(app, set())
+      await toasts(page).filter({ hasText: "Showing No holidays" }).waitFor()
+      ensure(!(await holidays().isChecked()), "picking the set did not hide Holidays")
+      // Holidays on again, then delete the set: it goes, with UNDO.
+      await press(app, holidays())
+      await press(app, list.getByRole("button", { name: "Delete set No holidays" }))
+      ensure(!(await set().count()), "the deleted set is still listed")
+      // A phone's sheet stands over the toast's slot: it closes first, as a person would close it.
+      if (await switcherLayer(page).count()) await leaveLayer(app)
+      const deleted = toasts(page).filter({ hasText: "Deleted No holidays" })
+      await deleted.waitFor()
+      await press(app, deleted.getByRole("button", { name: "Undo", exact: true }))
+      list = await calendars(app)
+      await set().waitFor()
+      ensure(await holidays().isChecked(), "UNDO changed what shows")
+      // The set saved again is the kept one: picking it hides Holidays.
+      await press(app, set())
+      ensure(!(await holidays().isChecked()), "the set UNDO saved again is not the one deleted")
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // A reminder comes due (ADR-0100; brief X5): the event's title, "In 30 min · 16:30 · {place}", OPEN.
+    // It stays 15 s, past a toast's usual 6.
+    name: "calendar-reminder-toast",
+    scenario: "reminder-due",
+    sean: { kind: "undrawn", area: "calendar", screen: "reminder" },
+    run: async (app) => {
+      const { page } = app
       await area(app, "Calendar")
-      await pick(app, "Tasks")
+      const toast = toasts(page).filter({ has: page.getByRole("button", { name: "Open", exact: true }) })
+      await toast.waitFor()
+      await page.mouse.move(0, 0)
+      await page.waitForTimeout(7_000)
+      ensure(await toast.isVisible(), "the reminder left before 15 s")
+    },
+    assert: async ({ page }) => {
+      const toast = toasts(page).first()
+      const words = (await toast.innerText()).replace(/\s+/g, " ").trim()
+      ensure(/In 30 min · \d\d:\d\d · /.test(words), `the reminder reads "${words}"`)
+      ensure(!/Time to leave|Missed/.test(words), `a due alert reads "${words}"`)
+    },
+  },
+  {
+    // Two reminders came due while Vale was closed (brief X5): one toast, "2 reminders came due while
+    // Vale was closed", with SEE; SEE opens Missed, the events as their cards. (⌘K reopening it is a7's.)
+    name: "calendar-missed",
+    scenario: "missed",
+    sean: { kind: "undrawn", area: "calendar", screen: "missed" },
+    run: async (app) => {
+      const { page } = app
+      await area(app, "Calendar")
+      const notice = toasts(page).filter({ hasText: "2 reminders came due while Vale was closed" })
+      await notice.waitFor()
+      ensure((await toasts(page).count()) === 1, "two missed reminders raised more than one toast")
+      await press(app, notice.getByRole("button", { name: "See", exact: true }))
+      await page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      const list = page.getByRole("dialog", { name: "Missed", exact: true })
+      ensure(await list.isVisible(), "SEE did not open the Missed list")
+      const items = list.getByRole("list", { name: "Missed reminders" }).getByRole("listitem")
+      ensure((await items.count()) === 2, "the Missed list does not hold both reminders")
+      ensure((await list.locator('[data-slot="calendar-event"]').count()) === 2, "the missed events are not their cards")
+      ensure(/^(Started|Starts|Starting)/.test((await list.locator('[data-slot="calendar-event"]').first().innerText()).split("\n").pop().trim()), "a missed card does not say when it was due")
+    },
+  },
+  {
+    // A task's plan (ADR-0100; brief C6): the detail column on a desktop, the form layer on a phone and
+    // at medium width. PLAN // {NOTE}, the words as title, DAY, STARTS, ENDS, CALENDAR, one primary PLAN.
+    name: "calendar-plan-task",
+    sizes: ["phone", "desktop", "medium"],
+    sean: { kind: "undrawn", area: "calendar", screen: "plan" },
+    run: async (app) => {
+      await tasks(app)
       await press(app, button(app.page, "Plan: Board games"))
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async (app) => {
+      const { page } = app
+      const form = planForm(app)
+      ensure(await form.isVisible(), "the plan did not open")
+      if (app.size === "desktop") {
+        ensure(!(await page.getByRole("dialog").count()), "a desktop plans in a dialog, not the detail column")
+        ensure(/^PLAN \/\/ CABIN PACKING LIST$/i.test((await page.locator('[data-slot="page-head-overline"]:visible').last().innerText()).trim()), "the plan's overline is not PLAN // its note")
+        ensure((await form.getByRole("button", { name: "Plan", exact: true }).getAttribute("data-variant")) === "default", "PLAN is not the primary")
+        ensure(await form.getByRole("button", { name: "Open note", exact: true }).isVisible(), "the plan has no OPEN NOTE")
+        // The row being planned is the selected one.
+        ensure((await page.getByRole("list", { name: "Open tasks" }).locator('[aria-current="true"]').count()) === 1, "the planned row is not selected")
+      }
+      for (const field of ["Starts", "Ends"]) ensure(await form.getByLabel(field, { exact: true }).count(), `the plan has no ${field}`)
+      ensure(await form.getByText("Block time for it. The task stays in its note.").isVisible(), "the plan's line is missing")
+      ensure(await form.locator('[data-slot="field-row"]').filter({ hasText: "Calendar" }).count(), "the plan has no CALENDAR row")
+      ensure(await form.getByRole("button", { name: "Find a free time" }).isVisible(), "the plan has no FIND A FREE TIME")
+    },
+  },
+  {
+    // Planning a task end to end (brief C6, X6): free times as chips, PLAN, "Planned …" with SHOW; the row
+    // then says PLANNED and links to its event; a plan with changes asks before another row's PLAN.
+    name: "calendar-plan-form",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await tasks(app)
+      await press(app, button(page, "Plan: Board games"))
+      let form = planForm(app)
+      await press(app, form.getByRole("button", { name: "Find a free time" }))
+      const chips = form.getByRole("radiogroup", { name: "Free times" }).getByRole("radio")
+      ensure((await chips.count()) > 0, "no free times were found")
+      await press(app, chips.first())
+      // Changed: another row's PLAN asks first, and KEEP EDITING keeps it.
+      await press(app, button(page, "Plan: Coffee + grinder"))
+      const ask = page.getByRole("dialog", { name: "Discard changes?" })
+      ensure(await ask.isVisible(), "moving to another task's plan dropped the changes without asking")
+      await press(app, ask.getByRole("button", { name: "Keep editing", exact: true }))
+      ensure(await page.locator('[data-slot="task-plan"][aria-label="Plan Board games"]').isVisible(), "KEEP EDITING left the plan")
+      form = planForm(app)
+      await press(app, form.getByRole("button", { name: "Plan", exact: true }))
+      const planned = toasts(page).filter({ hasText: "Planned Board games" })
+      await planned.waitFor()
+      ensure(await planned.getByRole("button", { name: "Show", exact: true }).count(), "the Planned toast has no SHOW")
+      await toastGone(app)
+      // The row now links to its event.
+      const link = page.getByRole("button", { name: /^Planned .*, open the event$/ }).first()
+      await link.waitFor()
+      ensure(await button(page, "Plan again: Board games").isVisible(), "a planned task does not say PLAN AGAIN")
+      await press(app, link)
+      ensure(await page.locator('[data-slot="event-detail"][aria-label="Board games"]:visible').count(), "the planned link did not open its event")
+      await page.mouse.move(0, 0)
     },
   },
   {
@@ -655,18 +884,32 @@ export const scenes = [
     },
   },
   {
-    // Tasks is a place of its own (ADR-0084; brief C6): today's panel in the list column, the screen on a phone.
+    // Tasks is a place of its own (ADR-0084, ADR-0100; brief C6): TASKS // NN, rows with a checkbox,
+    // the note's title, PLAN; checking one ticks it in its note, with UNDO.
     name: "places-tasks",
     sizes: ["phone", "desktop", "medium"],
+    sean: { kind: "undrawn", area: "calendar", screen: "tasks" },
     run: async (app) => {
-      await area(app, "Calendar")
-      await pick(app, "Tasks")
+      const { page } = app
+      await tasks(app)
+      const rows = page.getByRole("list", { name: "Open tasks" }).getByRole("listitem")
+      const before = await rows.count()
+      await press(app, page.getByRole("checkbox", { name: "Done: Coffee + grinder" }))
+      const done = toasts(page).filter({ hasText: "Done: Coffee + grinder" })
+      await done.waitFor()
+      ensure((await rows.count()) === before - 1, "a checked task stayed in the list")
+      await press(app, done.getByRole("button", { name: "Undo", exact: true }))
+      await page.getByRole("checkbox", { name: "Done: Coffee + grinder" }).waitFor()
+      ensure((await rows.count()) === before, "UNDO did not bring the task back")
+      await page.mouse.move(0, 0)
     },
     assert: async (app) => {
       const { page } = app
       ensure(await page.getByRole("region", { name: "Tasks" }).first().isVisible(), "the Tasks panel is not showing")
       ensure(await button(page, "Plan: Board games").first().isVisible(), "a task cannot be planned from here")
-      if (app.phone) ensure((await headTitle(page)) === "Tasks", "the phone's page head does not name Tasks")
+      const overline = (await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()).trim()
+      ensure(/^TASKS \/\/ \d\d$/i.test(overline), `the head's overline reads "${overline}"`)
+      ensure((await headTitle(page)) === "Tasks", "the page head does not name Tasks")
       if (await sidebar(page).locator('[aria-label="Tasks"]').count()) ensure((await oneCurrent(sidebar(page), "the sidebar")) === "Tasks", "Tasks is not the sidebar's current place")
       else ensure((await oneCurrent(await groups(app), "the calendars list")) === "Tasks", "Tasks is not the current place")
       if (await switcherLayer(page).count()) await leaveLayer(app)
@@ -696,13 +939,44 @@ export const scenes = [
     },
   },
   {
-    // The menu-bar calendar's own small window (ADR-0054). Its month is the shared month grid (ADR-0088).
+    // The menu-bar calendar (ADR-0054, ADR-0100; brief C8), as a browser shows `/?mini`: the window's
+    // column on the ground. Its month is the shared month grid (ADR-0088).
     name: "mini-calendar",
     path: "/?mini",
+    assert: async ({ page }) => miniParts(page),
+  },
+  {
+    // The window at its own width, 320, as the tray opens it.
+    name: "mini-calendar-window",
+    path: "/?mini",
+    sizes: ["desktop"],
+    viewport: { width: 320, height: 760 },
+    sean: { kind: "undrawn", area: "calendar", screen: "menu-bar" },
     assert: async ({ page }) => {
-      const grid = page.getByRole("grid", { name: "November 2026" })
-      ensure(await grid.getByRole("gridcell", { name: /^Thursday, November 12, today, \d+ events?$/ }).getAttribute("aria-selected") === "true", "today is not the picked day, named with its events")
-      ensure((await grid.getByRole("gridcell").count()) === 42, "the month is not six weeks")
+      await miniParts(page)
+      const box = await page.locator('[data-slot="mini-calendar"]').boundingBox()
+      ensure(Math.round(box.width) === 320, `the window is ${Math.round(box.width)} wide`)
+    },
+  },
+  {
+    // Quick add in the window (ADR-0054; brief C4, C8): a sentence and Enter add the event, and its
+    // day shows it in the list.
+    name: "mini-calendar-quick-add",
+    path: "/?mini",
+    sizes: ["desktop"],
+    viewport: { width: 320, height: 760 },
+    run: async (app) => {
+      const { page } = app
+      const field = page.getByRole("textbox", { name: "Quick add event" })
+      ensure((await field.getAttribute("placeholder")) === "Add an event, like “lunch fri 1pm”", "the quick-add field's placeholder changed")
+      await field.fill("Pick up the bikes fri 4pm")
+      await field.press("Enter")
+      await app.settle()
+      const day = page.getByRole("region", { name: "Tomorrow", exact: true })
+      await day.waitFor()
+      ensure(await day.getByRole("button", { name: /^Pick up the bikes, 16:00/ }).isVisible(), "the added event is not in its day's list")
+      ensure((await page.getByRole("gridcell", { name: /^Friday, November 13/ }).getAttribute("aria-selected")) === "true", "the added event's day is not picked")
+      await page.mouse.move(0, 0)
     },
   },
   {

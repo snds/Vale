@@ -1,6 +1,7 @@
 import { zonedInput } from "@/lib/zoned"
 
-import type { DemoScenarios } from "../demo-scenarios"
+import type { DueReminder } from "../types"
+import type { Demo, DemoScenarios } from "../demo-scenarios"
 
 /** Calendar (ADR-0081): calendars, events and booking links in states the sample data doesn't reach. */
 export const calendar: DemoScenarios = {
@@ -43,4 +44,31 @@ export const calendar: DemoScenarios = {
         })
       })
   },
+  /**
+   * A reminder comes due (ADR-0100; brief X5): the next event today with a
+   * place, its alert set 30 minutes before. The demo's clock does not move,
+   * so the core's own check never fires one; this hands the watcher one, once.
+   */
+  "reminder-due": (demo) => dueOnce(demo, false),
+  /** Time to leave (ADR-0029) for the same event: its travel time starts now. */
+  "reminder-leave": (demo) => dueOnce(demo, true),
+}
+
+/** Gives the first "reminder" listener one reminder for the next event today with a place, 30 minutes before it. */
+function dueOnce({ client, wrap }: Demo, leave: boolean) {
+  let fired = false
+  wrap("on", (on) => (event, handler) => {
+    const off = on(event, handler)
+    if (event === "reminder" && !fired) {
+      fired = true
+      const now = Math.floor(Date.now() / 1000)
+      void client.listOccurrences(now, now + 86_400).then((list) => {
+        const o = list.filter((x) => !x.allDay && x.location && x.start > now).sort((a, b) => a.start - b.start)[0]
+        if (!o) return
+        const due: DueReminder = { eventId: o.eventId, title: o.title, location: o.location, start: o.start, fireAt: o.start - 30 * 60, leave: leave || undefined }
+        setTimeout(() => handler(due), 300)
+      })
+    }
+    return off
+  })
 }

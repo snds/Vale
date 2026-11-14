@@ -93,8 +93,10 @@ export function CalendarNav({ standalone = false }: { standalone?: boolean }) {
               key={s.id}
               label={s.name}
               checked={active === s.id}
-              onCheckedChange={() => apply(s.id)}
-              action={<IconButton label={`Delete set ${s.name}`} icon="close" size="icon-xs" onClick={() => remove(s.id)} />}
+              // Picking a set shows exactly its calendars, and says so: "Showing Work" (brief C5).
+              onCheckedChange={() => apply(s)}
+              // Deleting it can be taken back: the toast's UNDO saves it again (brief X6).
+              action={<IconButton label={`Delete set ${s.name}`} icon="close" size="icon-xs" onClick={() => remove(s)} />}
             />
           ))}
           {sets.length === 0 && <SaveAsSet onPick={picked} />}
