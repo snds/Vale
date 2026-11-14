@@ -51,6 +51,14 @@ const tiles = async (row) => (await row.locator('[data-slot="swipe-action"]').al
 /** The row's overflow button: its name is its word, then the row's. */
 const moreOf = (row) => row.getByRole("button", { name: /^More actions/ })
 const menu = (page) => page.getByRole("menu").last()
+/** The Inbox's chips (brief M2): a radio group named Show; a chip by its name (a split's count follows it). */
+const chips = (page) => page.getByRole("radiogroup", { name: "Show", exact: true })
+const chip = (page, name) => chips(page).getByRole("radio", { name: new RegExp(`^${name}(\\W|$)`) })
+/** The Screener's pointer row at the top of the Inbox: its main control is the word Screener. */
+const screenerPointer = (page) => page.locator('[data-slot="list-row"]').filter({ hasText: "3 new senders waiting" }).getByRole("button", { name: /^Screener/ })
+const newSplit = (page) => page.getByRole("button", { name: "New split", exact: true })
+/** The newsletter bundle above the Inbox's conversations. */
+const bundle = (page) => page.locator('[data-slot="swipe-row"]').filter({ has: page.locator('[data-slot="list-row-sender"]', { hasText: /^Newsletters$/ }) })
 
 /**
  * Drags a row sideways (dx) or down (dy) as a finger does on a phone (Chromium's touch input, so the
@@ -535,32 +543,256 @@ export const scenes = [
     sizes: ["desktop", "phone", "medium"],
     run: async (app) => {
       const { page } = app
-      const show = page.getByRole("group", { name: "Show" })
       const open = async () => {
-        await press(app, show.getByRole("button", { name: "New split" }))
+        await press(app, newSplit(page))
         return page.getByRole("dialog", { name: "New split" })
       }
       const write = async (form) => {
         await form.getByRole("textbox", { name: "Name" }).fill("Bills")
-        await form.getByRole("textbox", { name: "Subject contains" }).fill("invoice")
+        await form.getByRole("textbox", { name: "Subject has" }).fill("invoice")
       }
-      await formLayer(app, { open, write, primary: "Add split" })
+      await formLayer(app, { open, write, primary: "Create split" })
       await toastGone(app)
-      ensure(await show.getByRole("button", { name: "Bills" }).isVisible(), "Ctrl+Enter did not add the split")
-      await press(app, show.getByRole("button", { name: "Edit split" }))
-      ensure(await page.getByRole("dialog", { name: "Edit split" }).getByRole("button", { name: "Delete split", exact: true }).isVisible(), "an edited split has no Delete")
+      ensure(await chip(page, "Bills").isVisible(), "Ctrl+Enter did not add the split")
+      ensure(await chip(page, "Bills").isChecked(), "the new split is not the chosen chip")
+      await press(app, button(page, "Edit split"))
+      ensure(await page.getByRole("dialog", { name: "Edit split" }).getByRole("button", { name: "Delete", exact: true }).isVisible(), "an edited split has no Delete")
     },
   },
-  { name: "mail-newsletters", run: (app) => press(app, app.page.getByRole("group", { name: "Show" }).getByRole("button", { name: "Newsletters" })) },
-  { name: "mail-split-new", run: (app) => press(app, app.page.getByRole("group", { name: "Show" }).getByRole("button", { name: "New split" })) },
   {
-    name: "mail-screener", // the Screener lane shows once screening is on (ADR-0018)
+    // The Inbox's filters (ADR-0091; brief M2): one row of single-choice chips under the page head, All, People,
+    // Updates, Newsletters and a chip per split with its unread count, then New split. Above the first conversation
+    // the Screener's pointer (where the sidebar can't show its count) and the newsletter bundle. A split's chip filters.
+    name: "mail-chips",
+    sean: { kind: "undrawn", area: "mail", screen: "inbox-filters" },
+    path: "/?newsletters&screener",
+    scenario: ["splits", "screener-waiting"],
     run: async (app) => {
+      const { page } = app
+      const names = (await chips(page).getByRole("radio").allInnerTexts()).map((t) => t.trim().split(/\s+/)[0])
+      ensure(JSON.stringify(names) === JSON.stringify(["ALL", "PEOPLE", "UPDATES", "NEWSLETTERS", "STUDIO", "TRAVEL"]), `the chips read ${JSON.stringify(names)}`)
+      ensure(await chip(page, "All").isChecked(), "All is not the chosen chip")
+      ensure(!(await button(page, "Edit split").count()), "Edit split shows with no split chosen")
+      ensure(/\b01\b|\b02\b/.test(await chip(page, "Studio").innerText()), "the Studio chip has no unread count")
+      ensure(await bundle(page).isVisible(), "the newsletter bundle is not above the conversations")
+      const pointer = screenerPointer(page)
+      if (app.size === "desktop") {
+        ensure(!(await pointer.count()), "the desktop shows the Screener's pointer row besides the sidebar's count")
+        ensure(await page.getByRole("navigation", { name: "Vale" }).getByRole("button", { name: /^Screener, 3 new senders waiting/ }).count(), "the sidebar's Screener item does not carry the count")
+      } else ensure(await pointer.isVisible(), "no Screener pointer row on the Inbox")
+      // Studio's chip filters the Inbox: only the studio's mail, no bundle, and Edit split appears.
+      await press(app, chip(page, "Studio"))
+      const list = page.getByRole("list", { name: "Inbox", exact: true })
+      await list.getByRole("button", { name: /Token audit/ }).first().waitFor()
+      ensure(!(await list.getByRole("button", { name: /Your booking is confirmed/ }).count()), "the Studio chip still lists the ferry's mail")
+      ensure(!(await bundle(page).count()), "the bundle shows inside a split")
+      ensure(await button(page, "Edit split").isVisible(), "a chosen split has no Edit split")
+      // Back to All for the picture.
+      await press(app, chip(page, "All"))
+      await page.mouse.move(0, 0)
+      await app.settle()
+    },
+  },
+  {
+    // The bundle row's tap chooses NEWSLETTERS (brief M2).
+    name: "mail-newsletters",
+    path: "/?newsletters",
+    run: async (app) => {
+      const { page } = app
+      await press(app, bundle(page).locator('[data-slot="list-row-main"]'))
+      ensure(await chip(page, "Newsletters").isChecked(), "a tap on the bundle did not choose Newsletters")
+      await page.getByRole("list", { name: "Inbox", exact: true }).getByRole("button", { name: /October at the studio/ }).first().waitFor()
+      await page.mouse.move(0, 0)
+      await app.settle()
+    },
+  },
+  {
+    // The bundle's two actions from its overflow button (brief M2; decisions §10): on a phone it always shows. MARK
+    // READ takes the unread square away; ARCHIVE ALL empties it with a toast whose Undo brings it back. On a phone a
+    // left swipe shows the same two tiles. The picture: the menu open.
+    name: "mail-bundle-menu",
+    sean: { kind: "undrawn", area: "mail", screen: "bundle" },
+    path: "/?newsletters",
+    run: async (app) => {
+      const { page } = app
+      const row = bundle(page)
+      const open = async () => {
+        if (!app.phone) await row.hover()
+        const more = moreOf(row)
+        ensure(await more.isVisible(), "the bundle has no overflow button")
+        await press(app, more)
+        await menu(page).waitFor()
+        return menu(page)
+      }
+      if (app.phone) {
+        await drag(app, row, -120)
+        ensure(JSON.stringify(await tiles(row)) === JSON.stringify(["MARK READ", "ARCHIVE ALL"]), `the bundle's tiles read ${JSON.stringify(await tiles(row))}`)
+        await pressOutside(app)
+      }
+      let m = await open()
+      const items = (await m.getByRole("menuitem").allInnerTexts()).map((t) => t.trim())
+      ensure(JSON.stringify(items) === JSON.stringify(["Mark read", "Archive all"]), `the bundle's menu reads ${JSON.stringify(items)}`)
+      await press(app, m.getByRole("menuitem", { name: "Mark read", exact: true }))
+      await page.waitForTimeout(300)
+      ensure(!(await row.locator('[data-slot="list-row-unread"]').count()), "Mark read left the unread square")
+      m = await open()
+      ensure(!(await m.getByRole("menuitem", { name: "Mark read", exact: true }).count()), "Mark read is offered with nothing unread")
+      await press(app, m.getByRole("menuitem", { name: "Archive all", exact: true }))
+      const toast = page.locator("[data-sonner-toast]").filter({ hasText: "Archived 2 newsletters" })
+      await toast.waitFor()
+      ensure(!(await row.count()), "Archive all left the bundle")
+      await press(app, toast.getByRole("button", { name: "Undo", exact: true }))
+      await row.waitFor()
+      for (const t of await page.locator("[data-sonner-toast]").all()) await t.waitFor({ state: "detached", timeout: 15_000 }).catch(() => {})
+      // The picture: the Inbox as it starts, with the bundle's menu open.
+      await page.reload()
+      await app.settle()
+      await open()
+    },
+  },
+  {
+    // The split form (brief M2), new and empty: the line, NAME, FROM with its helper, SUBJECT HAS, the two toggles.
+    name: "mail-split-new",
+    sean: { kind: "undrawn", area: "mail", screen: "split-form" },
+    run: async (app) => {
+      const { page } = app
+      await press(app, newSplit(page))
+      const form = page.getByRole("dialog", { name: "New split" })
+      ensure(await form.getByText("Mail must match everything you fill in.").isVisible(), "the form has no line saying how it matches")
+      ensure(await form.getByText("An address, or a domain with @ in front.").isVisible(), "From has no helper")
+      for (const t of ["Only with attachments", "Keep out of All"]) ensure(await form.getByRole("switch", { name: t }).count(), `the form has no ${t}`)
+      ensure(await form.getByRole("button", { name: "Change", exact: false }).count(), "the form has no Account row with Change")
+      ensure(!(await form.getByRole("button", { name: "Delete", exact: true }).count()), "a new split offers Delete")
+    },
+  },
+  {
+    // A split edited (brief M2; X6): it saves under a new name, and its DELETE has an Undo that makes it again from
+    // what was saved. A wrong address is a red chip and stops the save. The picture: the form for an existing split.
+    name: "mail-split-edit",
+    scenario: "splits",
+    run: async (app) => {
+      const { page } = app
+      const form = page.getByRole("dialog", { name: "Edit split" })
+      const edit = async (name) => {
+        await press(app, chip(page, name))
+        await press(app, button(page, "Edit split"))
+        await form.waitFor()
+      }
+      await edit("Studio")
+      ensure((await form.getByRole("textbox", { name: "Name" }).inputValue()) === "Studio", "the form did not open with the split's name")
+      ensure(await form.getByRole("button", { name: "Remove @studio.example", exact: true }).count(), "From does not hold the split's domain as a chip")
+      // A wrong address is a red chip, and the save stops.
+      const from = form.getByRole("combobox", { name: "From" }).or(form.getByRole("textbox", { name: "From" })).first()
+      await from.fill("ferry")
+      await from.press("Enter")
+      ensure(await form.getByText("Fix or remove the address in red.").isVisible(), "a wrong address does not say what to fix")
+      await press(app, form.getByRole("button", { name: "Remove ferry", exact: true }))
+      await form.getByRole("textbox", { name: "Name" }).fill("Studio crew")
+      await press(app, form.getByRole("button", { name: "Save", exact: true }))
+      await form.waitFor({ state: "detached" })
+      await toastGone(app)
+      ensure(await chip(page, "Studio crew").isChecked(), "the saved split is not the chosen chip under its new name")
+      // DELETE, then UNDO: the split comes back, chosen.
+      await press(app, button(page, "Edit split"))
+      await press(app, form.getByRole("button", { name: "Delete", exact: true }))
+      await form.waitFor({ state: "detached" })
+      const toast = page.locator("[data-sonner-toast]").filter({ hasText: "Deleted Studio crew" })
+      await toast.waitFor()
+      ensure(!(await chip(page, "Studio crew").count()), "Delete left the chip")
+      ensure(await chip(page, "All").isChecked(), "after Delete the Inbox is not on All")
+      await press(app, toast.getByRole("button", { name: "Undo", exact: true }))
+      await chip(page, "Studio crew").waitFor()
+      ensure(await chip(page, "Studio crew").isChecked(), "Undo did not bring the split back as the chosen chip")
+      for (const t of await page.locator("[data-sonner-toast]").all()) await t.waitFor({ state: "detached", timeout: 15_000 }).catch(() => {})
+      // The picture: Travel's form.
+      await edit("Travel")
+      await page.mouse.move(0, 0)
+      await app.settle()
+    },
+  },
+  {
+    // The Screener lane (brief M3): `SCREENER // 03 WAITING`, the rows as every lane. LET IN runs on a full swipe on a
+    // phone (from the row's menu on a desktop) and its toast's UNDO puts the sender back; SCREEN OUT opens and stops,
+    // its tile runs it, and its toast says what stays archived, with an UNDO that puts the sender back too.
+    name: "mail-screener",
+    sean: { kind: "undrawn", area: "mail", screen: "screener" },
+    path: "/?screener",
+    scenario: "screener-waiting",
+    run: async (app) => {
+      const { page } = app
+      await lane(app, "Screener")
+      const head = (await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()).trim()
+      ensure(/^SCREENER\s*\/\/\s*03 WAITING/.test(head), `the Screener's overline reads ${head}`)
+      const list = page.getByRole("list", { name: "Screener", exact: true })
+      const toast = (text) => page.locator("[data-sonner-toast]").filter({ hasText: text })
+      const row = rowOf(page, /Wholesale order for spring/, "Screener")
+      if (app.phone) await drag(app, row, 330)
+      else {
+        await row.hover()
+        await press(app, moreOf(row))
+        await press(app, menu(page).getByRole("menuitem", { name: "Let in", exact: true }))
+      }
+      await toast("Jonas Weber can reach your inbox").waitFor()
+      ensure(!(await list.getByRole("button", { name: /Wholesale order/ }).count()), "Let in left the sender in the Screener")
+      await press(app, toast("Jonas Weber can reach your inbox").getByRole("button", { name: "Undo", exact: true }))
+      await list.getByRole("button", { name: /Wholesale order/ }).first().waitFor()
+      // SCREEN OUT: on a phone its tile, once the swipe has opened the row; the row's menu on a desktop.
+      const out = rowOf(page, /Risograph proofs/, "Screener")
+      if (app.phone) {
+        await drag(app, out, -330)
+        await press(app, out.locator('[data-slot="swipe-action"]').filter({ hasText: /screen out/i }))
+      } else {
+        await out.hover()
+        await press(app, moreOf(out))
+        await press(app, menu(page).getByRole("menuitem", { name: "Screen out", exact: true }))
+      }
+      await toast("Screened out Lena Ortiz").waitFor()
+      ensure(await toast("Screened out Lena Ortiz").getByText("Mail already archived stays in Archive").isVisible(), "the Screen out toast does not say what stays archived")
+      ensure(!(await list.getByRole("button", { name: /Risograph proofs/ }).count()), "Screen out left the sender in the Screener")
+      await press(app, toast("Screened out Lena Ortiz").getByRole("button", { name: "Undo", exact: true }))
+      for (const t of await page.locator("[data-sonner-toast]").all()) await t.waitFor({ state: "detached", timeout: 15_000 }).catch(() => {})
+      // Undo forgets the decision; her mail, archived by screening out, stays in Archive as the toast said.
       await settings(app, "Mail")
-      await app.page.getByRole("switch", { name: "Screen first-time senders" }).click()
+      ensure(!(await page.getByText(/lena@printhaus\.example|Lena Ortiz/).count()), "Undo did not forget the Screen out decision")
+      // The picture: the lane as it starts.
+      await page.reload()
+      await app.settle()
+      await area(app, "Mail")
+      await lane(app, "Screener")
+    },
+  },
+  {
+    // The phone's pointer to the Screener (brief M3): a compact row at the top of the Inbox; a tap opens the lane.
+    name: "mail-screener-pointer",
+    sizes: ["phone", "medium"],
+    path: "/?screener",
+    scenario: "screener-waiting",
+    run: async (app) => {
+      const { page } = app
+      const pointer = screenerPointer(page)
+      ensure(await pointer.isVisible(), "no Screener pointer row on the Inbox")
+      await press(app, pointer)
+      ensure((await headTitle(page)) === "Screener", "the pointer did not open the Screener")
+      await page.getByRole("list", { name: "Screener", exact: true }).waitFor()
+      // The picture: the Inbox with the pointer.
+      await lane(app, "Inbox")
+    },
+  },
+  {
+    // The Screener off and empty is not listed; on and empty, brief 5.2's words (ADR-0018 turns it on in Settings).
+    name: "mail-screener-empty",
+    run: async (app) => {
+      const { page } = app
+      const folders = await groups(app)
+      ensure(!(await folders.locator('[aria-label="Screener"], [aria-label^="Screener, "]').count()), "the Screener is listed while it is off and empty")
+      if (await switcherLayer(page).count()) await leaveLayer(app)
+      await settings(app, "Mail")
+      await page.getByRole("switch", { name: "Screen first-time senders" }).click()
       await toastGone(app)
       await area(app, "Mail")
       await lane(app, "Screener")
+      const empty = page.getByRole("region", { name: "Mail", exact: true }).locator('[data-slot="empty"]')
+      ensure(/SCREENER\s*\/\/\s*00/.test(await empty.innerText()) && /No new senders\./.test(await empty.innerText()), "the empty Screener does not use brief 5.2's words")
     },
   },
   { name: "mail-unread", sean: { kind: "undrawn", area: "mail", screen: "lane-unread" }, run: (app) => lane(app, "Unread") },

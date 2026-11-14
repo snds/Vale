@@ -48,4 +48,41 @@ export const mail: DemoScenarios = {
         lastError: "Google refused the sign-in: the access was revoked.",
       })
   },
+  /**
+   * Two splits (ADR-0091; brief M2): Studio, for mail from the studio's domain, and Travel, for the ferry's bookings.
+   * Neither keeps its mail out of All, so the other lists stay as they were. Made through the client's own call, as the form does.
+   */
+  splits: ({ client }) => {
+    void client.saveSplit(null, { name: "Studio", senders: ["@studio.example"], subject: null, hasAttachments: false, accountId: null, exclusive: false })
+    void client.saveSplit(null, { name: "Travel", senders: ["@ferry.example"], subject: null, hasAttachments: false, accountId: null, exclusive: false })
+  },
+  /**
+   * Three first-time senders in the Screener (brief M3). Use with the `?screener` address, which turns the Screener on
+   * and brings the first; this adds two more, written to no one, within the last half hour.
+   */
+  "screener-waiting": ({ state }) => {
+    const first = state.messages.find((m) => m.from.email === "hi@growth.example")
+    if (!first) return
+    const t = nowSecs()
+    const more = [
+      { from: { name: "Jonas Weber", email: "jonas@kilnworks.example" }, subject: "Wholesale order for spring", body: "We stock a few small studios and would like to talk about a spring order. Is there a price list?", ago: 12 * 60 },
+      { from: { name: "Lena Ortiz", email: "lena@printhaus.example" }, subject: "Risograph proofs for the zine", body: "The proofs are ready. Two colours, 24 pages. Can you look before Friday?", ago: 20 * 60 },
+    ]
+    more.forEach((x, i) => {
+      const id = `demo-screener-${i + 1}`
+      state.messages.push({
+        ...first,
+        id,
+        threadId: id,
+        messageId: `${id}@demo.example`,
+        from: x.from,
+        subject: x.subject,
+        preview: x.body,
+        bodyText: x.body,
+        date: t - x.ago,
+        sortAt: t - x.ago,
+        files: {},
+      })
+    })
+  },
 }

@@ -20,6 +20,6 @@ export const LANES: { id: MailTab; label: string; empty: string }[] = [
 /** The inbox's filter chips (Spark's smart inbox). */
 export const CATEGORIES: { id: Category; label: string; empty: string }[] = [
   { id: "people", label: "People", empty: "No mail from people." },
-  { id: "updates", label: "Updates", empty: "No receipts, alerts, or notifications." },
+  { id: "updates", label: "Updates", empty: "No receipts or alerts." },
   { id: "newsletters", label: "Newsletters", empty: "No newsletters." },
 ]

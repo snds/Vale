@@ -8,13 +8,13 @@ import { useSectionBanner, type SectionBanner } from "@/app/section-banner"
 import { SectionSwitcher } from "@/app/section-switcher"
 import { pendingJump, useUi } from "@/app/ui-store"
 import { vertical } from "@/app/verticals"
-import { Icon, Button, EmptyState, type PageHeadSwipe } from "@unicron/ui"
+import { Icon, Button, EmptyState, formatListCount, type PageHeadSwipe } from "@unicron/ui"
 import { LoadState } from "@/components/load-state"
 import { MasterDetail } from "@/components/master-detail"
 import { ScreenHead } from "@/components/page"
 import { VirtualList } from "@/components/virtual-list"
 import { getCoreClient } from "@/core/client"
-import { useCore, useInboxOverview, useMailPrefs, useMe, useMessagePages, useSwipeActions, useThread } from "@/core/queries"
+import { useCore, useInboxOverview, useMailPrefs, useMe, useMessagePages, useSplits, useSwipeActions, useThread } from "@/core/queries"
 import type { Category, Lane, MessageSummary } from "@/core/types"
 
 import { useTriage } from "./actions"
@@ -27,7 +27,7 @@ import { MailNav } from "./mail-nav"
 import { useSenderActions } from "./sender-actions"
 import { ScheduledList } from "./scheduled-list"
 import { TeamList, TeamThreadView } from "../team/team-view"
-import { BundleRow, SplitChips } from "./splits"
+import { InboxChips, NewsletterBundle, ScreenerPointer } from "./splits"
 import { LaneConversation, LoadingRows, SnoozedBeside } from "./lane-list"
 import { rowTime } from "./row-time"
 import { useSnoozed } from "./use-snoozed"
@@ -38,7 +38,7 @@ import { useMailShortcuts } from "./use-shortcuts"
 export function MailView() {
   // Mail's place (ADR-0084): the lane and the account, in the UI store, so the sidebar, the page head's
   // sheet and the command menu all switch them. A lane or an account that is gone falls back to the first.
-  const { tab, account, accounts } = useMailPlace()
+  const { tab, account, accounts, waiting } = useMailPlace()
   const accountId = account?.id ?? null
   const lane: Lane = tab === "scheduled" || tab === "team" || tab === "mine" ? "inbox" : tab
   // A shared inbox (ADR-0063): "Assigned to me" lists what is yours.
@@ -51,6 +51,7 @@ export function MailView() {
   const setCategory = useUi((s) => s.setMailCategory)
   const split = useUi((s) => s.mailSplit)
   const senderActions = useSenderActions()
+  const { data: splits = [] } = useSplits()
   const now = useNowSecs()
   // Selection is a conversation. The row is remembered so the reader stays
   // open when the row leaves the current lane (e.g. read mail in "Unread").
@@ -117,7 +118,14 @@ export function MailView() {
 
   // What the shell says about this screen (ADR-0083): the place, the newest
   // conversation for the phone's scrolled strip, and when mail last arrived.
-  const where = [laneInfo.label, account ? account.displayName : multiAccount ? "All accounts" : null].filter(Boolean).join(" // ")
+  // The Screener says how many senders wait, a real count (brief M3): `SCREENER // 03 WAITING`.
+  const where = [
+    laneInfo.label,
+    tab === "screener" ? `${formatListCount(waiting)} waiting` : null,
+    account ? account.displayName : multiAccount && tab !== "screener" ? "All accounts" : null,
+  ]
+    .filter(Boolean)
+    .join(" // ")
   useScreenPlace(laneInfo.label)
   usePlaceStrip(where, tab === "scheduled" || tab === "team" ? null : (list[0]?.subject ?? null))
   const synced = syncedAt(account ? [account] : accounts)
@@ -206,26 +214,8 @@ export function MailView() {
               <SectionSwitcher state={switching} overline={["Mail", accountName].filter(Boolean).join(" // ")} title="Folders">
                 <MailNav layer more={switching.sheet} />
               </SectionSwitcher>
-              {tab === "inbox" && accounts.length > 0 && (
-                <div role="group" aria-label="Show" className="no-scrollbar flex gap-1.5 overflow-x-auto">
-                  {[{ id: null, label: "All" } as const, ...CATEGORIES].map((c) => (
-                    <Button
-                      key={c.label}
-                      size="xs"
-                      variant={category === c.id ? "secondary" : "ghost"}
-                      aria-pressed={category === c.id}
-                      shape="pill"
-                      onClick={() => (setCategory(c.id), setSelected(null))}
-                    >
-                      {c.label}
-                    </Button>
-                  ))}
-                  <SplitChips accountId={accountId} onPick={() => setSelected(null)} />
-                </div>
-              )}
-              {tab === "screener" && (
-                <p className="text-xs text-muted-foreground">First-time senders wait here. Let them in and their mail goes to your inbox; screen them out and it never does.</p>
-              )}
+              {/* The Inbox's filters (brief M2): All, the categories and the splits, one choice at a time. */}
+              {tab === "inbox" && accounts.length > 0 && <InboxChips accountId={accountId} onPick={() => setSelected(null)} />}
             </div>
           }
         />
@@ -247,7 +237,11 @@ export function MailView() {
           <LoadingRows count={5} label={`Loading ${laneInfo.label}`} />
         ) : (
           <LoadState place={laneInfo.label} overline={laneInfo.label} error={readError} hasData={list.length > 0} onRetry={() => void refetch()} retrying={isRefetching}>
-            {bundling && <BundleRow accountId={accountId} onOpen={() => (setCategory("newsletters"), setSelected(null))} />}
+            {/* Above the first conversation, at most two compact rows (brief M1): the Screener where the sidebar can't say it, and the newsletters. */}
+            {tab === "inbox" && !category && !split && waiting > 0 && switching.switcher && (
+              <ScreenerPointer waiting={waiting} onOpen={() => useUi.getState().setMailTab("screener")} />
+            )}
+            {bundling && <NewsletterBundle accountId={accountId} now={now} onOpen={() => (setCategory("newsletters"), setSelected(null))} />}
             {list.length === 0 && !(bundling && overview?.bundle) ? (
               inboxZero ? (
                 <EmptyState
@@ -258,7 +252,7 @@ export function MailView() {
                   onAction={() => useUi.getState().setMailTab("archive")}
                 />
               ) : (
-                <EmptyState {...emptyCopy(tab === "inbox" ? category : null, laneInfo.label, tab)} />
+                <EmptyState {...emptyCopy(tab === "inbox" ? category : null, laneInfo.label, tab, tab === "inbox" ? splits.find((s) => s.id === split)?.name : undefined)} />
               )
             ) : (
               <VirtualList
@@ -338,7 +332,8 @@ function comesBack(at: number, now: number) {
 }
 
 /** A lane's empty state, in brief 5.2's words: `{NAME} // 00`, a title, a line at most. */
-function emptyCopy(category: Category | null, label: string, tab: string): { overline: string; title: string; body?: string } {
+function emptyCopy(category: Category | null, label: string, tab: string, split?: string): { overline: string; title: string; body?: string } {
+  if (split) return { overline: `${split} // 00`, title: "Nothing in this split.", body: "Mail that matches it shows up here." }
   if (category) {
     const c = CATEGORIES.find((x) => x.id === category)!
     return { overline: `${c.label} // 00`, title: c.empty }

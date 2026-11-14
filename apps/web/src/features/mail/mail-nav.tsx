@@ -46,7 +46,8 @@ export function MailNav({ layer = false, more = false }: { layer?: boolean; more
       label={lane(id).label}
       icon={ICONS[id]}
       current={!settings && tab === id}
-      mark={id === "screener" && waiting > 0 ? { count: waiting, label: `${waiting} waiting` } : undefined}
+      // The Screener's count is the desktop's pointer to it (brief M3); a phone shows a row at the top of the Inbox.
+      mark={id === "screener" && waiting > 0 ? { count: waiting, label: `${waiting} new ${waiting === 1 ? "sender" : "senders"} waiting` } : undefined}
       onClick={() => go(id)}
     />
   )
