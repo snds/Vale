@@ -105,9 +105,10 @@ export const formPrimary = (form, name) => form.getByRole("button", { name, exac
  * A form in the form layer (ADR-0087; brief 3.2), checked the same way in every section:
  * its parts at this size, Esc closes it untouched, it asks once it holds writing, and
  * Ctrl+Enter runs its primary. `open` opens it and returns its dialog; `write` fills in
- * enough to save; `primary` is the primary's word. Leaves the form closed and saved.
+ * enough to save; `primary` is the primary's word; `cancel: false` for a form whose close
+ * button is its only way out (the composer). Leaves the form closed and saved.
  */
-export const formLayer = async (app, { open, write, primary, width = 640 }) => {
+export const formLayer = async (app, { open, write, primary, width = 640, cancel = true }) => {
   const { page } = app
   let form = await open(app)
   const box = await form.boundingBox()
@@ -126,7 +127,9 @@ export const formLayer = async (app, { open, write, primary, width = 640 }) => {
     const footer = form.locator('[data-slot="dialog-footer"]').getByRole("button")
     const words = (await footer.allInnerTexts()).map((w) => w.trim().toLowerCase()).filter(Boolean)
     const cancelAt = words.indexOf("cancel")
-    ensure(cancelAt >= 0 && words[cancelAt + 1] === primary.toLowerCase(), `the form's footer reads ${words.join(", ")}: not Cancel, then ${primary}`)
+    // The composer has no Cancel: its close button asks (brief M6).
+    if (cancel) ensure(cancelAt >= 0 && words[cancelAt + 1] === primary.toLowerCase(), `the form's footer reads ${words.join(", ")}: not Cancel, then ${primary}`)
+    else ensure(cancelAt < 0 && words.includes(primary.toLowerCase()), `the form's footer reads ${words.join(", ")}: not ${primary} without Cancel`)
   }
   // Untouched, Esc closes it at once.
   await page.keyboard.press("Escape")

@@ -18,8 +18,19 @@ import { cn } from "@/lib/utils"
  * on its bottom edge, the format bar. `fill` lets it take the room a form
  * leaves (the message). The editor carries the accessible name; the label
  * here is the same words for the eye, and a press on it goes to the text.
+ *
+ * `bare` draws the text with no label and no box, flush with the fields
+ * above it: the phone's message body (Mobile / 03). The bar, if any, then
+ * stands wherever the form puts it.
  */
-export function RichEditor({ editor, label, bar, fill = false }: { editor: Editor; label?: string; bar?: ReactNode; fill?: boolean }) {
+export function RichEditor({ editor, label, bar, fill = false, bare = false }: { editor: Editor; label?: string; bar?: ReactNode; fill?: boolean; bare?: boolean }) {
+  if (bare) {
+    return (
+      <div data-slot="rich-editor" data-bare="" className={cn("flex min-w-0 flex-col", fill && "min-h-0 flex-1")}>
+        <EditorContent editor={editor} className="flex min-h-0 flex-1 flex-col [&>div]:flex-1" />
+      </div>
+    )
+  }
   return (
     <div data-slot="rich-editor" className={cn("flex min-w-0 flex-col gap-1", fill && "min-h-0 flex-1")}>
       {label && (

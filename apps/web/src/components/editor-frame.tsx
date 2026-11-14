@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useId, useMemo, useState, type ComponentProps, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from "react"
+import { useCallback, useContext, useId, useMemo, useState, type ComponentProps, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from "react"
 
 import { FormStrip } from "@/app/status"
 import { Banner, Button, ConfirmDialog, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogOverline, DialogTitle, FloatButton, Sheet, SheetBody, SheetContent, TopBar, useAppFrame, type IconName } from "@unicron/ui"
+import { LayerContext, type Layer } from "./form-layer-context"
 import { LayerGuardContext, answerLeave, createLayerGuard, useLeaveQuestion } from "@/lib/leave-guard"
 
 /**
@@ -22,17 +23,12 @@ import { LayerGuardContext, answerLeave, createLayerGuard, useLeaveQuestion } fr
  * actions with `FormLayerForm`, which knows the form's state.
  */
 
-/** The field marked `data-form-focus` (or the composer's body) gets focus once the layer is open. */
-const firstField = () => document.querySelector<HTMLElement>("[data-form-focus], [data-composer-focus]") ?? true
+/**
+ * The field marked `data-form-focus` (or the composer's first field) gets focus once the layer is open.
+ * The newest layer's: one opened over another (Save as template over the message) comes later in the page.
+ */
+const firstField = () => [...document.querySelectorAll<HTMLElement>("[data-form-focus], [data-composer-focus]")].at(-1) ?? true
 
-interface Layer {
-  phone: boolean
-  /** Close, asking first when the form holds writing. */
-  close: () => void
-  overlineId: string
-  titleId: string
-}
-const LayerContext = createContext<Layer | null>(null)
 
 type FinalFocus = ComponentProps<typeof DialogContent>["finalFocus"]
 
@@ -128,6 +124,12 @@ export interface FormPrimary {
   disabled?: boolean
   /** The save is running: the button keeps its word and shows it. */
   loading?: boolean
+  /** The id of the line that says why it is off (brief 4.0): the phone's float button points at it. */
+  describedBy?: string
+  /** The phone's float button held (the composer's Send later); also Shift+Enter, the context-menu key or a right click. */
+  onLongPress?: () => void
+  /** What the long press does, in a few words ("Send later"). */
+  longPressLabel?: string
 }
 
 type FormProps = Omit<ComponentProps<"form">, "onSubmit" | "title" | "children" | "className" | "ref">
@@ -139,6 +141,7 @@ export function FormLayerForm({
   primary,
   primaryControl,
   footerStart,
+  cancel = true,
   error,
   onSubmit,
   children,
@@ -155,6 +158,8 @@ export function FormLayerForm({
   primaryControl?: ReactNode
   /** What else the form can do: the left of the footer on a desktop, a row at the foot on a phone (a text button "Delete", the composer's tools). */
   footerStart?: ReactNode
+  /** A desktop Cancel before the primary. The composer has none: its close button asks (brief M6). */
+  cancel?: boolean
   /** A failed save, in the server's words: a compact critical banner above the actions. The form stays open. */
   error?: string | null
   onSubmit: () => void
@@ -189,7 +194,22 @@ export function FormLayerForm({
             titleAs="h2"
             title={<span id={titleId}>{title}</span>}
             start={<FloatButton type="button" label="Close" icon="close" size="l" tooltip={false} onClick={close} />}
-            actions={<FloatButton type="submit" kind="primary" size="l" label={primary.label} icon={primary.icon ?? "checkmark"} disabled={primary.disabled || primary.loading} aria-keyshortcuts="Control+Enter Meta+Enter" />}
+            actions={
+              <FloatButton
+                type="submit"
+                kind="primary"
+                size="l"
+                label={primary.label}
+                icon={primary.icon ?? "checkmark"}
+                disabled={primary.disabled || primary.loading}
+                // Off with a reason: it points at the line that says why (brief 4.0). Unicron's FloatButton
+                // cannot yet stay a Tab stop while disabled (gap in ADR-0094).
+                aria-describedby={primary.disabled ? primary.describedBy : undefined}
+                onLongPress={primary.onLongPress}
+                longPressLabel={primary.longPressLabel}
+                aria-keyshortcuts={primary.onLongPress ? "Control+Enter Meta+Enter Shift+Enter" : "Control+Enter Meta+Enter"}
+              />
+            }
           />
           <span id={overlineId} hidden>
             {overline}
@@ -218,9 +238,11 @@ export function FormLayerForm({
       </DialogBody>
       <DialogFooter sticky>
         {footerStart && <div className="mr-auto flex min-w-0 flex-wrap items-center gap-2">{footerStart}</div>}
-        <Button type="button" variant="secondary" onClick={close}>
-          Cancel
-        </Button>
+        {cancel && (
+          <Button type="button" variant="secondary" onClick={close}>
+            Cancel
+          </Button>
+        )}
         {primaryControl ?? (
           <Button type="submit" disabled={primary.disabled} loading={primary.loading} aria-keyshortcuts="Control+Enter Meta+Enter">
             {primary.label}

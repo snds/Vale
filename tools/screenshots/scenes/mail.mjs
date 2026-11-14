@@ -139,6 +139,65 @@ const pressOutside = async (app) => {
   await app.settle()
 }
 
+/**
+ * One of the message's tools (ADR-0094; brief M6): a button of the footer's Toolbar on a desktop; on a
+ * phone, a row of More at the foot (a sheet). Returns what it opened, when it opened something.
+ */
+const messageTool = async (app, form, name) => {
+  const { page } = app
+  if (!app.phone) {
+    await press(app, form.getByRole("toolbar", { name: "Message tools" }).getByRole("button", { name, exact: true }))
+    return page.getByRole("menu", { name })
+  }
+  await press(app, form.getByRole("button", { name: "More", exact: true }))
+  const sheet = page.getByRole("dialog", { name: "More" })
+  const words = { Templates: "Templates…", "Remind me if no reply": "Remind me if no reply…", "Send later": "Send later…" }
+  if (name === "Formatting" || name === "Ask for a read receipt") {
+    await press(app, sheet.getByRole("checkbox", { name, exact: true }))
+    await page.keyboard.press("Escape")
+    await app.settle()
+    return null
+  }
+  await press(app, sheet.getByRole("button", { name: words[name] ?? name, exact: true }))
+  return page.getByRole("dialog", { name })
+}
+/** Turns Formatting on: the toolbar's toggle on a desktop, More's row on a phone. */
+const formatting = (app, form) => messageTool(app, form, "Formatting")
+/** Opens Send later: the chevron beside Send on a desktop; More's Send later… on a phone (or a long press on Send). */
+const sendLater = async (app, form) => {
+  if (app.phone) return messageTool(app, form, "Send later")
+  await press(app, form.getByRole("button", { name: "Send later", exact: true }))
+  return app.page.getByRole("menu")
+}
+/** A row of the message's menus: a menu item on a desktop, a sheet row on a phone. */
+const toolRow = (app, within, name, kind = "item") =>
+  within.getByRole(app.phone ? { item: "button", radio: "radio", check: "checkbox" }[kind] : { item: "menuitem", radio: "menuitemradio", check: "menuitemcheckbox" }[kind], { name, exact: true })
+/** Drags a file the scene makes over the message and drops it: `bytes` long, named `name`. `hold` stops before the drop. */
+const dropFile = async (app, form, name, bytes, hold = false) => {
+  await form.locator('[data-slot="rich-editor"]').evaluate(
+    (el, { name, bytes, hold }) => {
+      const data = new DataTransfer()
+      data.items.add(new File([new Uint8Array(bytes)], name, { type: "application/zip" }))
+      const fire = (type) => el.dispatchEvent(new DragEvent(type, { dataTransfer: data, bubbles: true, cancelable: true }))
+      fire("dragenter")
+      fire("dragover")
+      if (!hold) fire("drop")
+    },
+    { name, bytes, hold },
+  )
+  await app.settle()
+}
+/** Writes the drawn message (Desktop / 02, Mobile / 03), with the demo's own person: To, Subject and the words. */
+const writeMessage = async (app, form, { to = "Marcus", who = /Marcus Lee/, subject = "Saturday ferry", words = "The 08:15 crossing is booked. Shall we meet at the pier at 7:45?" } = {}) => {
+  await form.getByRole("combobox", { name: "To" }).pressSequentially(to)
+  await press(app, app.page.getByRole("option", { name: who }))
+  await form.getByRole("textbox", { name: "Subject" }).fill(subject)
+  await form.getByRole("textbox", { name: "Message" }).click()
+  await app.page.keyboard.type(words)
+}
+/** The form's Send: the footer's on a desktop, the top row's float button on a phone. */
+const sendButton = (form) => form.getByRole("button", { name: /^(Send|Schedule)$/ })
+
 export const scenes = [
   {
     // Mobile / 01 and Desktop / 01's list (ADR-0090; brief M1): message rows with no face, the time as the
@@ -941,29 +1000,60 @@ export const scenes = [
     },
   },
   {
+    // Desktop / 02 and Mobile / 03 (ADR-0094; brief M6): the 720 dialog over the scrim, NEW MESSAGE // PERSONAL, the
+    // subject as its title, FROM with CHANGE (two accounts), TO, SUBJECT, the message of six lines at least, and the
+    // footer: the tools at the left, SEND with its Send later half at the right. No Cancel and no Save draft (W2).
+    // A phone: close, the title and Send in the top row; FROM stacked; the body with no box; Attach and More at the foot.
     name: "mail-compose",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "drawn", area: "mail", screen: "compose" },
     run: async (app) => {
-      const dialog = await compose(app)
-      await dialog.getByRole("combobox", { name: "To" }).pressSequentially("Marcus")
-      await press(app, app.page.getByRole("option", { name: /Marcus Lee/ }))
-      await dialog.getByRole("textbox", { name: "Subject" }).fill("Saturday ferry")
-      await dialog.getByRole("textbox", { name: "Message" }).click()
-      await app.page.keyboard.type("The 08:15 crossing is booked. Shall we meet at the pier at 7:45?")
+      const form = await compose(app)
+      await writeMessage(app, form)
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async (app) => {
+      const { page } = app
+      const form = page.getByRole("dialog", { name: "New message" })
+      const overline = (await form.locator(app.phone ? '[id$="-overline"]' : '[data-slot="dialog-overline"]').first().textContent()).trim()
+      ensure(/^New message \/\/ Personal$/i.test(overline), `the overline reads “${overline}”, not New message // Personal`)
+      ensure(await form.getByRole("group", { name: "From", exact: true }).isVisible(), "the message has no FROM row")
+      ensure(await form.getByRole("group", { name: "From", exact: true }).getByRole("button", { name: /^Change/ }).isVisible(), "FROM has no Change with two accounts")
+      ensure(!(await form.getByRole("button", { name: "Cancel", exact: true }).count()), "the message has a Cancel besides its close button")
+      ensure(!(await form.getByRole("button", { name: /save draft/i }).count()), "the message offers Save draft, which has no store (W2)")
+      ensure(!(await form.getByRole("textbox", { name: /^Bcc/ }).count()), "the message has a Bcc field (W2)")
+      const body = await form.locator(".ProseMirror").boundingBox()
+      ensure(body.height >= 144, `the message is ${Math.round(body.height)} tall, not six lines (144) at least`)
+      ensure(/Demo\. Nothing leaves\./.test(await form.innerText()), "the demo does not say that nothing leaves")
+      if (app.phone) {
+        ensure((await form.locator('[data-slot="rich-editor"][data-bare]').count()) === 1, "the phone's body sits in a box")
+        ensure(await form.getByRole("button", { name: "Attach files", exact: true }).isVisible(), "the phone has no Attach at its foot")
+        ensure(await form.getByRole("button", { name: "More", exact: true }).isVisible(), "the phone has no More at its foot")
+        ensure(/Shift\+Enter/.test(await sendButton(form).getAttribute("aria-keyshortcuts")), "Send has no long press for Send later")
+      } else {
+        const tools = form.getByRole("toolbar", { name: "Message tools" })
+        const names = await tools.locator('[data-slot="toolbar-button"], [data-slot="toolbar-toggle"]').evaluateAll((list) => list.map((el) => el.getAttribute("aria-label")))
+        ensure(JSON.stringify(names) === JSON.stringify(["Attach files", "Formatting", "Templates", "Remind me if no reply", "More"]), `the tools read ${names.join(", ")}`)
+        ensure((await form.locator('[data-slot="split-button"]').count()) === 1, "Send is not the split button")
+        ensure((await form.locator('[data-slot="format-bar"]').count()) === 0, "the format bar shows before Formatting is on")
+      }
     },
   },
   {
+    // Send later from the message: the chevron's menu on a desktop; More's Send later… (a sheet) on a phone.
     name: "mail-send-later",
     run: async (app) => {
-      const dialog = await compose(app)
-      await press(app, dialog.getByRole("button", { name: "Send later" }))
+      const form = await compose(app)
+      await sendLater(app, form)
+      await app.page.mouse.move(0, 0)
     },
   },
   {
     name: "mail-send-later-time",
     run: async (app) => {
-      const dialog = await compose(app)
-      await press(app, dialog.getByRole("button", { name: "Send later" }))
-      await press(app, app.page.getByRole("menuitem", { name: "Pick a time…" }))
+      const form = await compose(app)
+      const later = await sendLater(app, form)
+      await press(app, toolRow(app, later, "Pick a time…"))
       await app.page.mouse.move(0, 0)
     },
   },
@@ -1000,8 +1090,8 @@ export const scenes = [
       // Esc in the question keeps editing: it answers the question and leaves the message alone.
       await esc()
       ensure(!(await question.count()) && (await message.isVisible()), "Esc in the question did not keep the message")
-      // The close button asks too (Cancel on a desktop does the same).
-      await press(app, message.getByRole("button", { name: app.phone ? "Close" : "Cancel", exact: true }))
+      // The close button asks too (the message has no Cancel: brief M6).
+      await press(app, message.getByRole("button", { name: "Close", exact: true }))
       ensure(await question.isVisible(), "closing a message with text by its button did not ask")
       // DISCARD closes it.
       await press(app, discard)
@@ -1131,10 +1221,16 @@ export const scenes = [
       // By its class, not its role: a phone's link sheet hides the message from roles while it is open.
       const text = form.locator(".ProseMirror")
       ensure((await text.getAttribute("aria-label")) === "Message", "the message field is not named Message")
+      // The bar shows once Formatting is on (brief M6): the toolbar's toggle on a desktop, More's row on a phone.
+      ensure(!(await form.locator('[data-slot="format-bar"]').count()), "the format bar shows before Formatting is on")
+      await formatting(app, form)
+      if (!app.phone) ensure((await form.getByRole("button", { name: "Formatting", exact: true }).getAttribute("aria-pressed")) === "true", "Formatting does not say it is on")
       await text.click()
       await page.keyboard.type("The 08:15 crossing is booked.")
       const bar = await formatBar(app, form, ["Bold", "Italic", "Link", "Bulleted list", "Numbered list", "Quote", "Code"])
-      ensure((await form.locator('[data-slot="format-bar"]').getAttribute("data-mode")) === "field", "the message's format bar is not on its field")
+      // On the message's box on a desktop; at the foot on a phone, where it takes the foot's place above the keyboard.
+      const mode = app.phone ? "keyboard" : "field"
+      ensure((await form.locator('[data-slot="format-bar"]').getAttribute("data-mode")) === mode, `the message's format bar is not in its ${mode} place`)
       // Link: its address in a layer of its own; a scheme that is not the web or mail is refused in words.
       await text.selectText()
       // The editor hears of a new selection a moment after the browser makes it.
@@ -1189,15 +1285,251 @@ export const scenes = [
         await page.keyboard.type("The 08:15 crossing is booked. Shall we meet at the pier at 7:45?")
       }
       // Ctrl+Enter from the message's own text sends it.
-      await formLayer(app, { open: compose, write, primary: "Send", width: 720 })
+      await formLayer(app, { open: compose, write, primary: "Send", width: 720, cancel: false })
       // Sent: take it back, so the picture is the form as it was written.
       await page.evaluate(() => document.activeElement?.blur())
       await page.keyboard.press("Control+KeyZ")
       await app.settle()
       ensure((await message.getByRole("textbox", { name: "Subject" }).inputValue()) === "Saturday ferry", "Ctrl+Enter did not send the message, or Undo did not bring it back")
       if (!app.phone) ensure(/Saturday ferry/.test(await message.locator('[data-slot="dialog-title"]').innerText()), "the header does not show the subject as typed")
-      // Send later is still there: beside Send on a desktop, in the tools on a phone.
-      ensure(await message.getByRole("button", { name: "Send later", exact: true }).isVisible(), "Send later is not reachable from the form")
+      // Send later is still there: beside Send on a desktop; held on Send, or from More, on a phone.
+      if (app.phone) ensure(/Shift\+Enter/.test(await message.getByRole("button", { name: "Send", exact: true }).getAttribute("aria-keyshortcuts")), "Send has no long press for Send later")
+      else ensure(await message.getByRole("button", { name: "Send later", exact: true }).isVisible(), "Send later is not reachable from the form")
+    },
+  },
+  {
+    // The composer sends what it holds (ADR-0094; brief M6): people as chips, Cc, a file dropped on it, a template.
+    // UNDO brings it all back. A file's own button takes it off.
+    name: "mail-compose-cc",
+    run: async (app) => {
+      const { page } = app
+      const form = await compose(app)
+      await writeMessage(app, form)
+      ensure(!(await form.getByRole("combobox", { name: "Cc" }).count()), "Cc shows before it is asked for")
+      await press(app, form.getByRole("button", { name: "Cc", exact: true }))
+      const cc = form.getByRole("combobox", { name: "Cc" })
+      ensure(await cc.isVisible(), "the Cc button did not add the Cc field")
+      ensure(!(await form.getByRole("button", { name: "Cc", exact: true }).count()), "the Cc button stayed once Cc shows")
+      await cc.pressSequentially("Ana")
+      await press(app, page.getByRole("option", { name: /Ana Duarte/ }))
+      // Two files dropped on the message; the second taken off by its own button.
+      await dropFile(app, form, "Ferry timetable.zip", 48 * 1024)
+      await dropFile(app, form, "Old timetable.zip", 12 * 1024)
+      const files = form.getByRole("list", { name: "Attachments" })
+      ensure((await files.locator('[data-slot="file-chip"]').count()) === 2, "the dropped files are not listed")
+      await press(app, files.getByRole("button", { name: "Remove Old timetable.zip", exact: true }))
+      ensure((await files.locator('[data-slot="file-chip"]').count()) === 1, "Remove did not take the file off")
+      // A template goes in where the writer is.
+      await form.getByRole("textbox", { name: "Message" }).press("Control+End")
+      const templates = await messageTool(app, form, "Templates")
+      await press(app, toolRow(app, templates, "Thanks, will reply soon"))
+      ensure(/Thanks for this/.test(await form.getByRole("textbox", { name: "Message" }).innerText()), "the template did not go into the message")
+      // Remind me if no reply: a delay after it goes out, then a chip with its own remove. A read receipt from More.
+      await press(app, toolRow(app, await messageTool(app, form, "Remind me if no reply"), "In 3 days", "radio"))
+      ensure(await form.getByText("Remind in 3 days", { exact: true }).isVisible(), "the reminder shows no chip")
+      if (app.phone) await messageTool(app, form, "Ask for a read receipt")
+      else {
+        const more = await messageTool(app, form, "More")
+        await press(app, toolRow(app, more, "Ask for a read receipt", "check"))
+        await page.keyboard.press("Escape")
+        await app.settle()
+      }
+      // Ctrl+Enter sends it, then UNDO brings it back as it was.
+      await form.getByRole("textbox", { name: "Subject" }).focus()
+      await page.keyboard.press("Control+Enter")
+      await form.waitFor({ state: "detached" })
+      await app.settle()
+      await page.evaluate(() => document.activeElement?.blur())
+      await page.keyboard.press("Control+KeyZ")
+      await app.settle()
+      const again = page.getByRole("dialog", { name: "New message" })
+      const chipsOf = async (name) => (await again.locator('[data-slot="recipient-field"]').filter({ has: page.getByRole("combobox", { name }) }).locator('[data-slot="chip"]').allInnerTexts()).map((t) => t.trim())
+      ensure((await chipsOf("To")).some((t) => /Marcus Lee/.test(t)), "Undo lost the To chip")
+      ensure((await chipsOf("Cc")).some((t) => /Ana Duarte/.test(t)), "Undo lost Cc")
+      ensure(/Ferry timetable\.zip/.test(await again.getByRole("list", { name: "Attachments" }).innerText()), "Undo lost the file")
+      ensure(/Thanks for this/.test(await again.getByRole("textbox", { name: "Message" }).innerText()), "Undo lost the template's words")
+      ensure(await again.getByText("Remind in 3 days", { exact: true }).isVisible(), "Undo lost the reminder")
+      if (app.phone) {
+        await press(app, again.getByRole("button", { name: "More", exact: true }))
+        ensure((await page.getByRole("dialog", { name: "More" }).getByRole("checkbox", { name: "Ask for a read receipt" }).getAttribute("aria-checked")) === "true", "Undo lost the read receipt")
+      } else {
+        await press(app, again.getByRole("toolbar", { name: "Message tools" }).getByRole("button", { name: "More", exact: true }))
+        ensure((await page.getByRole("menu", { name: "More" }).getByRole("menuitemcheckbox", { name: "Ask for a read receipt" }).getAttribute("aria-checked")) === "true", "Undo lost the read receipt")
+      }
+      await page.keyboard.press("Escape")
+      await app.settle()
+      // Focus returns to More: no ring in the picture.
+      await page.evaluate(() => document.activeElement?.blur())
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // A wrong address (brief M6, 4.0): a critical chip, the line under the field, and Send off with that line as its
+    // reason. On a desktop Send stays in the tab order and says the reason with its name.
+    name: "mail-compose-invalid",
+    run: async (app) => {
+      const { page } = app
+      const form = await compose(app)
+      await writeMessage(app, form)
+      const to = form.getByRole("combobox", { name: "To" })
+      await to.pressSequentially("the ferry people")
+      await to.press("Enter")
+      await app.settle()
+      await page.mouse.move(0, 0)
+    },
+    assert: async (app) => {
+      const { page } = app
+      const form = page.getByRole("dialog", { name: "New message" })
+      const reason = form.getByText("Fix or remove the address in red.")
+      const send = sendButton(form)
+      ensure(await reason.isVisible(), "the reason is not on screen")
+      ensure(await send.isDisabled(), "Send is on with a wrong address")
+      ensure((await send.getAttribute("aria-describedby"))?.split(" ").includes(await reason.getAttribute("id")), "Send does not point at its reason")
+      if (!app.phone) ensure(await send.evaluate((el) => (el.focus(), el === document.activeElement)), "Send left the tab order while it is off")
+      await page.evaluate(() => document.activeElement?.blur())
+    },
+  },
+  {
+    // Over 25 MB attached (brief M6): the critical line, and Send off with it as its reason. Files dragged over the
+    // message draw the 2 px primary edge and "Drop to attach" first. The file is made by the scene.
+    name: "mail-compose-big",
+    run: async (app) => {
+      const { page } = app
+      const form = await compose(app)
+      await writeMessage(app, form)
+      await dropFile(app, form, "Ferry terminal photos.zip", 1024, true)
+      const drop = page.locator('[data-slot="composer-drop"]')
+      ensure(await drop.isVisible() && /Drop to attach/.test(await drop.innerText()), "files over the message do not say Drop to attach")
+      await dropFile(app, form, "Ferry terminal photos.zip", 31 * 1024 * 1024)
+      await form.getByText("31 MB attached. Most servers take 25 MB.").waitFor()
+      ensure(!(await drop.count()), "Drop to attach stayed after the drop")
+      await page.mouse.move(0, 0)
+    },
+    assert: async (app) => {
+      const { page } = app
+      const form = page.getByRole("dialog", { name: "New message" })
+      const line = form.getByText("31 MB attached. Most servers take 25 MB.")
+      const send = sendButton(form)
+      ensure(await send.isDisabled(), "Send is on with 31 MB attached")
+      ensure((await send.getAttribute("aria-describedby"))?.split(" ").includes(await line.getAttribute("id")), "Send does not point at the 25 MB line")
+      if (!app.phone) ensure(await send.evaluate((el) => (el.focus(), el === document.activeElement)), "Send left the tab order while it is off")
+      await page.evaluate(() => document.activeElement?.blur())
+    },
+  },
+  {
+    // No account (brief M6): the info notice "Add an account to send." with OPEN ACCOUNTS, and Send off with it as its
+    // reason. OPEN ACCOUNTS leaves for the Accounts section.
+    name: "mail-compose-no-account",
+    scenario: "no-account",
+    run: async (app) => {
+      const { page } = app
+      const form = await compose(app)
+      const notice = form.getByRole("status").filter({ hasText: "Add an account to send." })
+      ensure(await notice.isVisible(), "no notice says to add an account")
+      const send = sendButton(form)
+      ensure(await send.isDisabled(), "Send is on with no account")
+      ensure((await send.getAttribute("aria-describedby"))?.split(" ").includes(await notice.getAttribute("id")), "Send does not point at the notice")
+      if (!app.phone) ensure(await send.evaluate((el) => (el.focus(), el === document.activeElement)), "Send left the tab order while it is off")
+      ensure(await notice.getByRole("button", { name: "Open accounts", exact: true }).isVisible(), "the notice has no Open accounts")
+      await page.evaluate(() => document.activeElement?.blur())
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // Closing asks (ADR-0087; brief X6) by the close button, the only way out: the message has no Cancel. A message
+    // reopened by UNDO asks too.
+    name: "mail-compose-discard",
+    run: async (app) => {
+      const { page } = app
+      const question = discardQuestion(page)
+      let form = await compose(app)
+      await writeMessage(app, form)
+      await press(app, form.getByRole("button", { name: "Close", exact: true }))
+      ensure(await question.isVisible(), "closing a written message did not ask")
+      await press(app, question.getByRole("button", { name: "Keep editing", exact: true }))
+      ensure(await form.isVisible(), "Keep editing closed the message")
+      await press(app, sendButton(form))
+      await form.waitFor({ state: "detached" })
+      await app.settle()
+      await page.evaluate(() => document.activeElement?.blur())
+      await page.keyboard.press("Control+KeyZ")
+      await app.settle()
+      form = page.getByRole("dialog", { name: "New message" })
+      ensure((await form.getByRole("textbox", { name: "Subject" }).inputValue()) === "Saturday ferry", "Undo did not reopen the message")
+      await press(app, form.getByRole("button", { name: "Close", exact: true }))
+      ensure(await question.isVisible(), "a message reopened by Undo closed without asking")
+      ensure(await question.getByRole("button", { name: "Keep editing", exact: true }).evaluate((el) => el === document.activeElement), "focus is not on Keep editing")
+    },
+  },
+  {
+    // The notices (brief M6), one at a time between the fields and the message: the server's error (critical), a
+    // send time with SEND NOW INSTEAD, and the hour where the recipient lives with their morning (useLocalTimes).
+    // The picture: the recipient's hour.
+    name: "mail-compose-notices",
+    scenario: "send-refused",
+    sean: { kind: "undrawn", area: "mail", screen: "compose-notices" },
+    run: async (app) => {
+      const { page } = app
+      const notices = (form) => form.locator('[data-slot="banner"]')
+      const priya = { to: "Priya", who: /Priya Raman/, subject: "Proofs for the catalogue", words: "The proofs are in. Can you look before Friday?" }
+      let form = await compose(app)
+      await writeMessage(app, form, priya)
+      await form.getByText(/for Priya\. Night there\./).waitFor()
+      ensure((await notices(form).count()) === 1, "more than one notice shows")
+      // The server refuses it: its words, in the critical notice, in place of the other.
+      await page.keyboard.press("Control+Enter")
+      await app.settle()
+      const refused = form.getByRole("alert").filter({ hasText: "Relay access denied" })
+      ensure(await refused.isVisible(), "the server's refusal does not show")
+      ensure((await notices(form).count()) === 1, "the refusal shows beside another notice")
+      await closeForm(app)
+      // A send time: "Sends …" with SEND NOW INSTEAD, and Send reads Schedule.
+      form = await compose(app)
+      await writeMessage(app, form, priya)
+      const theirs = form.getByRole("button", { name: /^Send 9:00 AM for Priya$/ })
+      await press(app, theirs)
+      ensure(await form.getByText(/^Sends .*\.$/).isVisible(), "a send time does not say when it sends")
+      ensure(await form.getByRole("button", { name: "Schedule", exact: true }).isVisible(), "Send does not read Schedule with a time set")
+      await press(app, form.getByRole("button", { name: "Send now instead", exact: true }))
+      ensure(await form.getByRole("button", { name: "Send", exact: true }).isVisible(), "Send now instead did not take the time off")
+      await form.getByText(/for Priya\. Night there\./).waitFor()
+      await page.evaluate(() => document.activeElement?.blur())
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // Save as template (brief M6), in the form layer over the message: NAME, then SAVE TEMPLATE; the toast "Saved
+    // {name}"; the template is then in Templates. The picture: the form, named as typed.
+    name: "mail-template-save",
+    sean: { kind: "undrawn", area: "mail", screen: "template" },
+    run: async (app) => {
+      const { page } = app
+      const form = await compose(app)
+      await form.getByRole("textbox", { name: "Message" }).click()
+      await page.keyboard.type("The 08:15 crossing is booked. Meet at the pier at 7:45.")
+      const save = page.getByRole("dialog", { name: /Save as template/ })
+      const open = async () => {
+        await press(app, toolRow(app, await messageTool(app, form, "Templates"), "Save as template…"))
+        await save.waitFor()
+      }
+      await open()
+      const primary = save.getByRole("button", { name: "Save template", exact: true })
+      ensure(await primary.isDisabled(), "Save template is on with no name")
+      const name = save.getByRole("textbox", { name: "Name" })
+      ensure(await name.evaluate((el) => el === document.activeElement), "the name does not take focus")
+      await name.fill("Ferry plans")
+      await press(app, primary)
+      await save.waitFor({ state: "detached" })
+      ensure(await page.locator("[data-sonner-toast]").filter({ hasText: /^Saved Ferry plans$/ }).count(), "no toast says Saved Ferry plans")
+      await toastGone(app)
+      const list = await messageTool(app, form, "Templates")
+      ensure(await toolRow(app, list, "Ferry plans").isVisible(), "the new template is not in Templates")
+      await page.keyboard.press("Escape")
+      await app.settle()
+      ensure(await form.isVisible(), "Esc in Templates closed the message")
+      await open()
+      await name.fill("Ferry plans for Saturday")
+      await page.mouse.move(0, 0)
     },
   },
   {

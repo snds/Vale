@@ -238,4 +238,13 @@ export const mail: DemoScenarios = {
       return (await invite(messageId)) ?? i
     })
   },
+  /** The mail server refuses the next message sent, once, in its own words (brief M6: the composer's critical notice). */
+  "send-refused": ({ wrap }) => {
+    let refused = false
+    wrap("queueSend", (original) => async (draft, undoSecs, sendAt) => {
+      if (refused) return original(draft, undoSecs, sendAt)
+      refused = true
+      throw new Error("The mail server refused the message: 554 5.7.1 Relay access denied.")
+    })
+  },
 }
