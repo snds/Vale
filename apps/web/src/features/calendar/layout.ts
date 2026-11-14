@@ -2,8 +2,8 @@ import type { Occurrence } from "@/core/types"
 
 import { minutesInto } from "./dates"
 
-/** Shortest drawn event, so a 5-minute call is still a tap target. */
-const MIN_MINUTES = 22
+/** Shortest drawn event: 30 minutes is 24 px at 48 px an hour, one compact event's line (brief C1), so a 5-minute call still reads. */
+const MIN_MINUTES = 30
 
 export const occurrenceKey = (o: Pick<Occurrence, "eventId" | "start">) => `${o.eventId}@${o.start}`
 

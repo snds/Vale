@@ -13,7 +13,7 @@ export type CalendarRange = "agenda" | "day" | "week" | "month"
  */
 export interface CalendarViewPrefs {
   range: CalendarRange
-  /** The week and the day as a grid of hours, not cards. The calendar lane reads it when it builds the card week. */
+  /** The week and the day as a grid of hours, not cards (brief C1, Q1: cards by default). A phone applies it to the day only. */
   hours: boolean
 }
 
@@ -22,12 +22,12 @@ const RANGES: readonly CalendarRange[] = ["agenda", "day", "week", "month"]
 const listeners = new Set<() => void>()
 let current: CalendarViewPrefs | null = null
 
-/** With nothing chosen yet: the agenda on a phone's shells, the week from medium up, as before. */
+/** With nothing chosen yet: the day on a phone's shells (Mobile / 08), the week from medium up (Desktop / 06); cards, not hours (Q1). */
 function first(): CalendarViewPrefs {
   const width = viewportWidthFor(window.innerWidth)
   // The frame's phone shells: the compact width, or a short screen under the expanded width.
   const phone = width === "compact" || (window.innerHeight < SHORT_HEIGHT && !isExpandedWidth(width))
-  return { range: phone ? "agenda" : "week", hours: true }
+  return { range: phone ? "day" : "week", hours: false }
 }
 
 function load(): CalendarViewPrefs {

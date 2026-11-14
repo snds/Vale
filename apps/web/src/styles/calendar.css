@@ -8,45 +8,292 @@
 .light,
 .dark,
 [data-theme] {
-  /* An event whose calendar has no color of its own: a neutral ink. */
+  /* An event whose calendar has no color of its own: a neutral ink (the menu-bar window's dot). */
   --c-event-fallback: var(--text-label);
-  /* How much of the calendar color tints an event's fill. */
-  --c-event-tint: 16%;
-  --c-event-tint-hover: 26%;
-  --c-calendar-hour-height: 3rem;
-  --c-calendar-gutter: 3.5rem;
-  /* Now and today are the identity color: the one mark of "you are here". */
-  --c-calendar-now: var(--primary-fill);
-  --c-calendar-today: var(--primary-fill);
-  /* Today's label as text, and its date chip: a filled block with its number. */
+  /* The time grid (ADR-0098; brief C1): 48 px an hour, the gutter's width, and the height of its
+     box of hours where it scrolls inside a list (a phone's Day, medium width): ten hours. */
+  --c-calendar-hour-height: calc(var(--spacing) * 12);
+  --c-calendar-gutter: calc(var(--spacing) * 16);
+  --c-calendar-grid-height: calc(var(--c-calendar-hour-height) * 10);
+  /* Today's label as text, and its date chip: a filled block with its number (the invitation card, the menu bar). */
   --c-calendar-today-text: var(--primary-text);
   --c-calendar-today-chip: var(--primary-fill);
   --c-calendar-today-chip-text: var(--primary-on-fill);
+  /* The card week (Desktop / 06): seven columns 12 apart (under 720 px of content they stand as sections). */
+  --c-week-cards-gap: calc(var(--spacing) * 3);
+  /* The desktop Month: a day's least height, room for its date, three events and "+2 more". */
+  --c-month-cell-min: calc(var(--spacing) * 32);
 }
 
-/* Event chips take one input, --event (the calendar's color), and derive
-   fill, edge, and text from it so any server color stays legible. */
+/* Event dots take one input, --event (the calendar's color): the menu-bar window's list. */
 @layer components {
-  .event-chip {
-    background: color-mix(in oklab, var(--event) var(--c-event-tint), var(--background));
-    border-left: 3px solid var(--event);
-    color: color-mix(in oklab, var(--event) 35%, var(--foreground));
-    &:hover {
-      background: color-mix(in oklab, var(--event) var(--c-event-tint-hover), var(--background));
-    }
-  }
   .event-dot {
     background: var(--event);
   }
-  /* Travel time before an event (ADR-0029): the same hue, hatched and
-     lighter, so it reads as "blocked" rather than as a second event. */
-  .travel-band {
-    border-color: color-mix(in oklab, var(--event) 45%, transparent);
-    background: repeating-linear-gradient(
-      -45deg,
-      color-mix(in oklab, var(--event) calc(var(--c-event-tint) * 0.6), var(--background)) 0 4px,
-      var(--background) 4px 8px
-    );
+}
+
+/* ── The week strip (features/calendar/week-strip.tsx; ADR-0098) ───────────
+   Mobile / 08: seven cells, a mono weekday over the date. The picked day is
+   the primary block; today, while another day is picked, has the 2 px edge
+   under it. */
+@layer components {
+  .week-strip {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+  .week-strip-day {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: calc(var(--spacing) * 14);
+    color: var(--text-body);
+    cursor: pointer;
+    outline: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    font-variant-numeric: tabular-nums;
+    @media (hover: hover) {
+      &:hover {
+        background: var(--state-hover);
+      }
+    }
+    &:active {
+      background: var(--state-pressed);
+    }
+    &[data-today] {
+      box-shadow: inset 0 calc(var(--stroke-emphasis) * -1) 0 0 var(--primary-fill);
+    }
+    &[data-block],
+    &[data-block]:hover,
+    &[data-block]:active {
+      background: var(--primary-fill);
+      color: var(--primary-on-fill);
+      box-shadow: none;
+    }
+    &:focus-visible {
+      outline: var(--stroke-emphasis) solid var(--ring);
+      outline-offset: var(--stroke-emphasis);
+      z-index: 1;
+    }
+  }
+}
+
+/* ── A day's head (the card week, the time grid; ADR-0098) ──────────────────
+   Desktop / 06: a mono weekday over the date in the index role; today is the
+   primary block. */
+@layer components {
+  .week-day-head {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing);
+    padding: calc(var(--spacing) * 2);
+    color: var(--text-body);
+    font-variant-numeric: tabular-nums;
+    &[data-today] {
+      background: var(--primary-fill);
+      color: var(--primary-on-fill);
+    }
+  }
+
+  /* The card week: seven columns (under 720 px of content WeekCards draws the phone's sections instead). */
+  .week-cards-days {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: var(--c-week-cards-gap);
+    align-items: start;
+  }
+  .week-cards-day {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 2);
+    min-width: 0;
+  }
+}
+
+/* ── The time grid (features/calendar/time-grid.tsx; ADR-0098) ─────────────
+   The gutters, then one column a day; one hairline an hour. */
+@layer components {
+  .time-grid {
+    --time-grid-columns: repeat(var(--time-grid-gutters), var(--c-calendar-gutter)) repeat(var(--time-grid-days), minmax(0, 1fr));
+    display: flex;
+    flex-direction: column;
+    &[data-fill] {
+      flex: 1;
+      min-height: 0;
+    }
+  }
+  .time-grid-row {
+    display: grid;
+    grid-template-columns: var(--time-grid-columns);
+    /* The rows above the hours keep the room the hours' scrollbar takes, so the columns line up. */
+    overflow-y: hidden;
+    scrollbar-gutter: stable;
+  }
+  .time-grid-head {
+    padding-bottom: calc(var(--spacing) * 2);
+  }
+  /* One day across the full width: its head keeps a week column's size, so today's block is not a band of color. */
+  .time-grid[data-one-day] .week-day-head {
+    justify-self: start;
+    min-width: calc(var(--spacing) * 36);
+  }
+  .time-grid-zone {
+    align-self: end;
+    padding-inline-end: calc(var(--spacing) * 2);
+    text-align: end;
+    color: var(--text-label);
+  }
+  .time-grid-all-day {
+    box-shadow: inset 0 calc(var(--stroke-rule) * -1) 0 0 var(--line-rule);
+    padding-block: var(--spacing);
+  }
+  .time-grid-all-day-label {
+    grid-column: span var(--time-grid-gutters);
+    align-self: center;
+    padding-inline-end: calc(var(--spacing) * 2);
+    text-align: end;
+    white-space: nowrap;
+  }
+  .time-grid-all-day-day {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing);
+    min-width: 0;
+    padding-inline: calc(var(--spacing) * 0.5);
+  }
+  .time-grid-scroll {
+    height: var(--c-calendar-grid-height);
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    box-shadow: inset 0 var(--stroke-rule) 0 0 var(--line-rule);
+  }
+  .time-grid[data-fill] .time-grid-scroll {
+    flex: 1;
+    min-height: 0;
+    height: auto;
+  }
+  .time-grid-body {
+    position: relative;
+    height: calc(var(--c-calendar-hour-height) * 24);
+    overflow: visible;
+  }
+  .time-grid-gutter {
+    position: relative;
+  }
+  .time-grid-hour {
+    position: absolute;
+    inset-inline-end: calc(var(--spacing) * 2);
+    translate: 0 -50%;
+    white-space: nowrap;
+  }
+  .time-grid-day {
+    position: relative;
+    box-shadow: inset var(--stroke-rule) 0 0 0 var(--line-rule);
+    &[data-create] {
+      cursor: cell;
+    }
+  }
+  .time-grid-line {
+    position: absolute;
+    inset-inline: 0;
+    height: 0;
+    box-shadow: 0 calc(var(--stroke-rule) * -1) 0 0 var(--line-rule);
+    pointer-events: none;
+  }
+  .time-grid-event {
+    position: absolute;
+    display: flex;
+    padding: var(--stroke-rule) calc(var(--spacing) * 0.5);
+    overflow: hidden;
+    z-index: 1;
+  }
+  .time-grid-travel {
+    position: absolute;
+    padding: 0 calc(var(--spacing) * 2);
+    border: var(--stroke-rule) dashed var(--line-rule);
+    color: var(--text-label);
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .time-grid-now {
+    position: absolute;
+    inset-inline: 0;
+    height: var(--stroke-emphasis);
+    translate: 0 -50%;
+    background: var(--primary-fill);
+    pointer-events: none;
+    z-index: 2;
+  }
+  .time-grid-now-mark {
+    position: absolute;
+    inset-inline-start: calc(var(--spacing) * -1);
+    top: 50%;
+    width: calc(var(--spacing) * 2);
+    height: calc(var(--spacing) * 2);
+    translate: 0 -50%;
+    background: var(--primary-fill);
+  }
+}
+
+/* On the primary block every line takes the on-fill ink, the overline and meta roles too. Outside a
+   layer, because those roles set their own ink as utilities, which win over components. */
+.month-cell-date {
+  color: var(--text-body);
+}
+.time-grid-hour {
+  color: var(--text-secondary);
+}
+.month-cell[data-outside] .month-cell-date {
+  color: var(--text-faint);
+}
+.week-strip-day[data-block] > *,
+.week-day-head[data-today] > *,
+.month-cell-date[data-today] {
+  color: var(--primary-on-fill);
+}
+.time-grid-hour[data-zone],
+.time-grid-zone,
+.time-grid-all-day-label,
+.time-grid-travel > * {
+  color: var(--text-label);
+}
+
+/* ── The desktop Month (features/calendar/month-grid.tsx; ADR-0098) ─────────
+   Six weeks of cells: the date in mono at the top left (today on the primary
+   block), up to three compact events, then "+2 more". Days outside the month
+   are faint. */
+@layer components {
+  .month-cells {
+    display: grid;
+  }
+  .month-cells-week {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+  .month-cells-head > * {
+    padding: calc(var(--spacing) * 2);
+    color: var(--text-label);
+    box-shadow: inset 0 calc(var(--stroke-rule) * -1) 0 0 var(--line-rule);
+  }
+  .month-cell {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 0.5);
+    min-width: 0;
+    min-height: var(--c-month-cell-min);
+    padding: var(--spacing);
+    box-shadow:
+      inset calc(var(--stroke-rule) * -1) 0 0 0 var(--line-rule),
+      inset 0 calc(var(--stroke-rule) * -1) 0 0 var(--line-rule);
+  }
+  .month-cell-date {
+    align-self: flex-start;
+    padding: 0 var(--spacing);
+    font-variant-numeric: tabular-nums;
+    &[data-today] {
+      background: var(--primary-fill);
+    }
   }
 }
 

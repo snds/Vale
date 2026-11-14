@@ -10,7 +10,7 @@ import { APP_JUMP_KEY } from "@/lib/app-jump"
 
 import { eventStyle } from "./colors"
 import { addDays, dayLabel, fmt, fromSecs, rangeLabel, secs, startOfDay, startOfWeek } from "./dates"
-import { QuickAdd } from "./index"
+import { QuickAdd } from "./quick-add-field"
 import { JoinButton } from "./join-button"
 import { occurrenceKey } from "./layout"
 import { placeLabel } from "./meeting"
@@ -117,7 +117,7 @@ export function MiniCalendar() {
         </div>
       </section>
 
-      <div className="border-t pt-3">
+      <div className="border-t px-4 pt-3 pb-3">
         <QuickAdd calendars={calendars} />
       </div>
     </div>
