@@ -841,13 +841,27 @@ mod tests {
     fn the_manifest_digest_is_read_only_when_well_formed() {
         let d = format!("sha256:{}", "a".repeat(64));
         assert_eq!(
+            digest_of(format!(r#"{{"version":"1.0.0","digest":"{d}"}}"#).as_bytes()),
+            Some(d.clone())
+        );
+        assert_eq!(digest_of(br#"{"version":"1.0.0"}"#), None);
+        assert_eq!(
+            digest_of(br#"{"version":"1.0.0","digest":"sha256:abc"}"#),
+            None
+        );
+        assert_eq!(digest_of(br#"{"version":"1.0.0","digest":"md5:00"}"#), None);
+        assert_eq!(digest_of(b"not json"), None);
+        // Since ADR-0090 the digest comes from a whole manifest only: without a
+        // version that reads, there is no offer for it to belong to.
+        assert_eq!(
             digest_of(format!(r#"{{"version":"1","digest":"{d}"}}"#).as_bytes()),
+            None
+        );
+        // The server shape's digest is read too.
+        assert_eq!(
+            digest_of(&server_shape("0.1.0-main.20261114093000", &d)),
             Some(d)
         );
-        assert_eq!(digest_of(br#"{"version":"1"}"#), None);
-        assert_eq!(digest_of(br#"{"version":"1","digest":"sha256:abc"}"#), None);
-        assert_eq!(digest_of(br#"{"version":"1","digest":"md5:00"}"#), None);
-        assert_eq!(digest_of(b"not json"), None);
     }
 
     struct FakeHelper;

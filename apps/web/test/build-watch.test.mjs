@@ -12,7 +12,7 @@ import {
   quietByTheClock,
   readBuild,
 } from "../src/lib/build-watch.ts"
-import { addReloadCheck, beforeReload, canReloadNow, holdReload, reloadBlockers, saveBeforeReload } from "../src/lib/can-reload.ts"
+import { addReloadCheck, beforeReload, canReloadNow, fieldHoldsWords, holdReload, reloadBlockers, saveBeforeReload } from "../src/lib/can-reload.ts"
 
 /** A page on build "a" with a fake clock, server, tab and session storage. */
 function page(over = {}) {
@@ -331,4 +331,20 @@ test("saveBeforeReload runs every saver, even after one fails", () => {
   b()
   saveBeforeReload()
   assert.deepEqual(ran, ["a", "b"])
+})
+
+test("fieldHoldsWords: any field with words in it, with or without the caret", () => {
+  const field = (over) => ({ type: "text", value: "", disabled: false, readOnly: false, ...over })
+  // A name typed on the booking page and left for the next field still counts.
+  assert.equal(fieldHoldsWords(field({ value: "Ada" })), true)
+  assert.equal(fieldHoldsWords(field({ type: "textarea", value: "Dear Sam," })), true)
+  assert.equal(fieldHoldsWords(field({ type: "password", value: "x" })), true)
+  assert.equal(fieldHoldsWords(field({ type: "email", value: "a@b.example" })), true)
+  // Nothing typed, or nothing a person can type in.
+  assert.equal(fieldHoldsWords(field()), false)
+  assert.equal(fieldHoldsWords(field({ value: "saved", disabled: true })), false)
+  assert.equal(fieldHoldsWords(field({ value: "shown", readOnly: true })), false)
+  for (const type of ["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"]) {
+    assert.equal(fieldHoldsWords(field({ type, value: "on" })), false, type)
+  }
 })

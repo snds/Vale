@@ -54,6 +54,27 @@ export function reloadBlockers(): string[] {
   return out
 }
 
+/** What the question below needs of a text field. An `<input>` and a `<textarea>` both fit. */
+export interface FieldLike {
+  type: string
+  value: string
+  disabled: boolean
+  readOnly: boolean
+}
+
+/** Kinds of `<input>` that never hold a person's words. */
+const NOT_WORDS = new Set(["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"])
+
+/**
+ * Whether a field holds words a reload would drop: any field a person can
+ * type in that is not empty, with or without the caret. A field can be
+ * filled and left (a visitor's name on a booking page, half of a new
+ * account's settings) while the form around it is still unsent. This cannot
+ * tell typed words from saved ones, so a screen of filled fields holds the
+ * reload too. That is the safe side: the page still offers Reload.
+ */
+export const fieldHoldsWords = (field: FieldLike): boolean => !field.disabled && !field.readOnly && !NOT_WORDS.has(field.type) && field.value !== ""
+
 /** Whether a reload now would lose nothing. */
 export const canReloadNow = (): boolean => reloadBlockers().length === 0
 

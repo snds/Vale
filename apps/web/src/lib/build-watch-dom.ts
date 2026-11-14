@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react"
 
 import { queryClient } from "@/core/queries"
 import { QUIET_EVERY_MS, RELOADED_KEY, createBuildWatch, type BuildWatch, type BuildWatchState } from "@/lib/build-watch"
-import { addReloadCheck, canReloadNow, saveBeforeReload } from "@/lib/can-reload"
+import { addReloadCheck, canReloadNow, fieldHoldsWords, saveBeforeReload } from "@/lib/can-reload"
 import { paneHoldsWriting } from "@/lib/leave-guard"
 
 /**
@@ -39,22 +39,24 @@ function session(): Storage | null {
   }
 }
 
-/** A field, a text box or an editor that holds writing and has the caret. */
-function writingHasFocus(): boolean {
-  const el = document.activeElement
-  if (!(el instanceof HTMLElement)) return false
-  if (el instanceof HTMLTextAreaElement) return el.value !== ""
-  if (el instanceof HTMLInputElement) {
-    const typed = !["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"].includes(el.type)
-    return typed && el.value !== ""
+/**
+ * Writing on the page that a reload would drop: any field with words in it
+ * (`fieldHoldsWords`), focused or not, and an editor that has the caret.
+ * An editor without the caret does not count: a note that is open shows its
+ * saved text. Fields a component keeps for itself (`aria-hidden`) are skipped.
+ */
+function writingOnThePage(): boolean {
+  for (const field of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")) {
+    if (field.getAttribute("aria-hidden") !== "true" && fieldHoldsWords(field)) return true
   }
-  return el.isContentEditable && (el.textContent ?? "") !== ""
+  const el = document.activeElement
+  return el instanceof HTMLElement && el.isContentEditable && (el.textContent ?? "") !== ""
 }
 
 /** The standing questions `canReloadNow()` asks in Vale. Screens add their own with `holdReload`. */
 function addChecks() {
   addReloadCheck("unsaved writing in a form", paneHoldsWriting)
-  addReloadCheck("writing in a field or an editor", writingHasFocus)
+  addReloadCheck("writing in a field or an editor", writingOnThePage)
   // The form layer, a question, a menu's sheet: anything open over the page.
   addReloadCheck("a dialog is open", () => document.querySelector('[role="dialog"], [role="alertdialog"], [aria-modal="true"]') !== null)
   // A send, a save, an upload: every change the app asks its core for.

@@ -33,7 +33,7 @@ Otherwise it waits and keeps offering **Reload**. Pressing Reload reloads at onc
 ### What `canReloadNow()` asks in Vale
 
 - **Unsaved writing in a form in the pane** (`paneHoldsWriting`, the leave guard).
-- **Writing in a field or an editor that has the caret.** Any text box, input or editor with text in it and the caret inside. This is wide on purpose: a note that is open and focused holds the reload until the caret leaves it.
+- **Words in any field, and an editor that has the caret.** Any text box or input that is not empty holds the reload, with or without the caret (`fieldHoldsWords`): a visitor's name on a booking page, or half of a new account's settings, is typed and then left while the form is still unsent. This is wide on purpose. It cannot tell typed words from saved ones, so a screen of filled fields holds the reload too, and the page keeps offering **Reload**. An editor (a note, a message body) counts while the caret is in it.
 - **Anything open over the page:** a dialog, the form layer, a question.
 - **A change being saved or sent:** any mutation in flight in the query client.
 - **Whatever a feature holds** with `holdReload(why)` (an upload, an answer still arriving).
@@ -58,7 +58,7 @@ If a file loaded on demand fails and a new build is known: reload if the moment 
 
 ## Verification
 
-- `pnpm --filter web test` (18 tests, `node --test`): what counts as a build id; quiet by the clock; same id, different id, going back; an unreadable answer never new and never clearing an offer; checks joined and spaced; asking every 15 minutes while visible and not while hidden; reload after five idle minutes with saving first; a hidden tab after a minute, cancelled by coming back; never while work would be lost; once per id; only offering where the note can't be kept; a failed file; `canReloadNow` with holds, standing checks and a broken check; the stamp's id, tag and `build.json` agreeing.
+- `pnpm --filter web test` (19 tests, `node --test`): what counts as a build id; quiet by the clock; same id, different id, going back; an unreadable answer never new and never clearing an offer; checks joined and spaced; asking every 15 minutes while visible and not while hidden; reload after five idle minutes with saving first; a hidden tab after a minute, cancelled by coming back; never while work would be lost; once per id; only offering where the note can't be kept; a failed file; `canReloadNow` with holds, standing checks and a broken check; a filled field with or without the caret; the stamp's id, tag and `build.json` agreeing.
 - A real browser against the built app, with its clock driven: one ask at load, another after 15 minutes, no reload on the same build, none on an HTML answer, none after 16 idle minutes with unsent words in a text box (the words still there), one reload once they were gone, and no second reload for the same id while the server still served the old page.
 - `tsc -b`, `oxlint` and `vite build` pass. Two builds of the same source gave the same id.
 - The gateway's handler and its test (`gateway_end_to_end`: 404 before, the file as it is now, `no-cache`, no sign-in) compile; **CI runs the test, it was not run here.** CI's image checks now also ask `/build.json` and compare it with the page's tag.
