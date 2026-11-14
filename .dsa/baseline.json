@@ -2,8 +2,8 @@
   "dsaVersion": "0.2.0",
   "updatedAt": "2026-11-15T00:00:00.000Z",
   "counts": {
-    "classNameOverrides": 106,
-    "styleOverrides": 1,
+    "classNameOverrides": 92,
+    "styleOverrides": 0,
     "spreadProps": 0,
     "lookAlikes": 0,
     "rawElements": 12

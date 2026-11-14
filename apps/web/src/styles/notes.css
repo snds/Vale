@@ -1,61 +1,33 @@
 /*
  * Notes: what only the notes area adds to Vale's layer (see shell.css for the
- * rules). The prose knobs a note shares with the composer are in shell.css.
+ * rules). The note's text has its own prose rules below (ADR-0106).
  */
-
-/* ── Tier 2 · Differs by ground ──────────────────────────────────────────── */
-/* Tinted surfaces (note cards). The two selector lists are the core's own
-   ground blocks, copied as they are (@unicron/tokens examples/app-extension.css),
-   so the tint turns with the core roles at any nesting the core reaches. */
-:root,
-.light,
-[data-theme] {
-  /* A light, soft wash behind dark text. */
-  --tint-l: 0.95;
-  --tint-c: 0.045;
-}
-.dark,
-.dark [data-theme]:not(.light):not(.dark .light *),
-.dark .light .dark [data-theme]:not(.light):not(.dark .light .dark .light *),
-.dark .light .dark .light .dark [data-theme]:not(.light):not(.dark .light .dark .light .dark .light *) {
-  /* Deep and quiet, so light text keeps its contrast. */
-  --tint-l: 0.3;
-  --tint-c: 0.05;
-}
 
 /* ── Tier 3 · Notes knobs ────────────────────────────────────────────────── */
 :root,
 .light,
 .dark,
 [data-theme] {
-  /* The first line is the title (Apple Notes convention). Checked items fade
-     instead of vanishing, so a list's progress stays visible. */
-  --c-note-title-size: 1.625rem;
-  --c-note-heading-size: 1.25rem;
-  --c-note-check-accent: var(--primary-fill);
-  --c-note-done-text: var(--muted-foreground);
-  /* The opaque highlight fill: `muted` is the raised surface itself now, and would not show on the note's pane. */
+  /* The note (brief N2; Mobile / 15). Its title is a field of its own above
+     the text (note-editor.tsx); the text below is the body role. */
+  /* Space between blocks of text, and the checklist row's padding: 52 tall
+     with a 24 px line, as Mobile / 15 draws it. */
+  --c-note-block-gap: calc(var(--spacing) * 3);
+  --c-note-check-pad: calc(var(--spacing) * 3.5);
+  --c-note-check-gap: calc(var(--spacing) * 3.5);
+  --c-note-check-rule: var(--line-rule);
+  /* Done items are struck through in the label ink. */
+  --c-note-done-text: var(--text-label);
+  /* Code on a wash a step off the ground, so it shows on the note's pane. */
   --c-note-code-bg: var(--accent);
-  /* [[Links]] between notes (ADR-0034): identity text on the soft tint. */
+  --c-note-quote-rule: var(--line-rule);
+  --c-note-quote-text: var(--text-secondary);
+  --c-note-link: var(--primary-text);
+  /* [[Links]] between notes (ADR-0034): the identity ink, underlined; a link
+     to a note that does not exist yet in the label ink. */
   --c-note-wikilink-text: var(--primary-text);
-  --c-note-wikilink-bg: var(--primary-soft);
-
-  /* Note tints (ADR-0038): one per color, theme-aware through tier 2. Cards
-     no longer use them (ADR-0105: a note's color is a tile's 4 px edge and a
-     row's square, from unicron's swatches); the note's own pane and its color
-     menu still do until the note is rebuilt (brief N2).
-     Brown and gray carry less chroma, as Keep's do. */
-  --c-note-card-red: oklch(var(--tint-l) var(--tint-c) var(--g-hue-red));
-  --c-note-card-orange: oklch(var(--tint-l) var(--tint-c) var(--g-hue-orange));
-  --c-note-card-yellow: oklch(var(--tint-l) calc(var(--tint-c) * 1.4) var(--g-hue-yellow));
-  --c-note-card-green: oklch(var(--tint-l) var(--tint-c) var(--g-hue-green));
-  --c-note-card-teal: oklch(var(--tint-l) var(--tint-c) var(--g-hue-teal));
-  --c-note-card-blue: oklch(var(--tint-l) var(--tint-c) var(--g-hue-blue));
-  --c-note-card-purple: oklch(var(--tint-l) var(--tint-c) var(--g-hue-purple));
-  --c-note-card-pink: oklch(var(--tint-l) var(--tint-c) var(--g-hue-pink));
-  --c-note-card-brown: oklch(var(--tint-l) calc(var(--tint-c) * 0.6) var(--g-hue-brown));
-  --c-note-card-gray: oklch(var(--tint-l) 0.008 var(--g-hue-gray));
-  --c-note-card-plain: var(--card);
+  --c-note-wikilink-missing: var(--text-label);
+  --c-note-placeholder: var(--text-faint);
 
   /* Scan: the page outline over a photo (ADR-0045). Must read on any photo, so it's the ring color, not a neutral. */
   --c-scan-edge: var(--ring);
@@ -67,84 +39,111 @@
 }
 
 @layer components {
-  /* Shares the composer's prose rules, plus what only notes have. */
+  /* The note's text (brief N2). Preflight strips list and quote styling, so
+     this puts back what a note needs, in the type roles. */
   .note-body {
     & > * + * {
-      margin-top: 0.4em;
+      margin-top: var(--c-note-block-gap);
     }
-    & > :first-child {
-      font-size: var(--c-note-title-size);
-      font-weight: 600;
-      line-height: 1.25;
-      letter-spacing: -0.01em;
+    /* The title block is the field above; hidden here while it is the title. */
+    &[data-title] > :first-child {
+      display: none;
     }
-    & h1,
+    &[data-title] > :nth-child(2) {
+      margin-top: 0;
+    }
+    & h1 {
+      font-family: var(--type-lead-family);
+      font-weight: var(--type-lead-weight);
+      font-size: var(--type-lead-size);
+      line-height: var(--type-lead-leading);
+      letter-spacing: var(--type-lead-tracking);
+      margin-top: calc(var(--spacing) * 6);
+    }
     & h2,
     & h3 {
-      font-size: var(--c-note-heading-size);
-      font-weight: 600;
-      margin-top: 0.9em;
+      font-family: var(--type-subtitle-family);
+      font-weight: var(--type-subtitle-weight);
+      font-size: var(--type-subtitle-size);
+      line-height: var(--type-subtitle-leading);
+      letter-spacing: var(--type-subtitle-tracking);
+      margin-top: calc(var(--spacing) * 6);
+    }
+    & strong {
+      font-weight: var(--type-body-strong-weight);
     }
     & ul:not([data-type="taskList"]) {
       list-style: disc;
-      padding-left: 1.5em;
+      padding-left: calc(var(--spacing) * 6);
     }
     & ol {
       list-style: decimal;
-      padding-left: 1.5em;
+      padding-left: calc(var(--spacing) * 6);
     }
     & blockquote {
-      border-left: 2px solid var(--c-composer-quote-border);
-      color: var(--c-composer-quote-text);
-      padding-left: 0.75em;
+      box-shadow: inset 2px 0 0 var(--c-note-quote-rule);
+      color: var(--c-note-quote-text);
+      padding-left: calc(var(--spacing) * 4);
     }
     & a {
-      color: var(--c-composer-link);
+      color: var(--c-note-link);
       text-decoration: underline;
+      text-underline-offset: 0.2em;
+    }
+    & a.wikilink {
+      color: var(--c-note-wikilink-text);
+      cursor: pointer;
+    }
+    & a.wikilink[data-missing] {
+      color: var(--c-note-wikilink-missing);
+    }
+    & a.wikilink.ProseMirror-selectednode {
+      outline: 2px solid var(--ring);
+      outline-offset: 2px;
     }
     & code {
-      font-family: var(--font-mono);
+      font-family: var(--type-code-inline-family, var(--font-mono));
       font-size: 0.9em;
     }
     & pre {
       background: var(--c-note-code-bg);
-      border-radius: var(--radius-md);
-      padding: 0.75em 1em;
+      border-radius: var(--radius);
+      padding: calc(var(--spacing) * 3) calc(var(--spacing) * 4);
       overflow-x: auto;
     }
+    /* Checklists as Mobile / 15: unicron's square Checkbox, the item's text,
+       a hairline under each row; done text struck through in the label ink. */
     & ul[data-type="taskList"] {
-      padding-left: 0.1em;
-      & li {
-        display: flex;
-        gap: 0.6em;
-        align-items: flex-start;
-      }
-      & li > label {
-        flex-shrink: 0;
-        margin-top: 0.2em;
-        user-select: none;
-      }
-      & li > label input {
-        width: 1.05em;
-        height: 1.05em;
-        accent-color: var(--c-note-check-accent);
-      }
-      & li > div {
-        flex: 1;
-        min-width: 0;
-      }
-      & li[data-checked="true"] > div {
-        color: var(--c-note-done-text);
-        text-decoration: line-through;
-      }
+      padding: 0;
     }
-    & .is-empty:first-child::before,
+    & li[data-type="taskItem"] > .note-check {
+      display: flex;
+      gap: var(--c-note-check-gap);
+      align-items: flex-start;
+      padding-block: var(--c-note-check-pad);
+      box-shadow: inset 0 -1px 0 var(--c-note-check-rule);
+    }
+    & .note-check-box {
+      display: flex;
+      flex-shrink: 0;
+      /* The 16 px box centred on the first 24 px line. */
+      padding-top: calc(var(--spacing) * 1);
+      user-select: none;
+    }
+    & .note-check-text {
+      flex: 1;
+      min-width: 0;
+    }
+    & li[data-checked="true"] > .note-check > .note-check-text > div > p {
+      color: var(--c-note-done-text);
+      text-decoration: line-through;
+    }
     & p.is-empty::before {
       content: attr(data-placeholder);
       float: left;
       height: 0;
       pointer-events: none;
-      color: var(--c-composer-placeholder);
+      color: var(--c-note-placeholder);
     }
   }
 }

@@ -1,30 +1,26 @@
 import { useQuery } from "@tanstack/react-query"
-import { useDeferredValue, useState } from "react"
+import { useDeferredValue, useState, type ReactNode } from "react"
 
-import { Icon, type IconName, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Input, Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@unicron/ui"
+import { AdaptiveDialog, Badge, EmptyState, SearchField, SectionHeader, Skeleton } from "@unicron/ui"
+import { OccurrenceCard } from "@/features/calendar/occurrence-card"
+import { PersonRow } from "@/features/contacts/person-row"
+import { MessageRow } from "@/features/mail/message-row"
 import { getCoreClient } from "@/core/client"
-import type { NoteLink, NoteLinkKind, NoteTarget } from "@/core/types"
-import { shortTime } from "@/lib/time"
+import type { ContactSummary, MessageSummary, NoteLink, NoteTarget, Occurrence } from "@/core/types"
 
 const DAY = 86_400
 
 interface Found {
-  target: NoteTarget
-  label: string
-  detail: string
+  event: Occurrence[]
+  contact: ContactSummary[]
+  thread: MessageSummary[]
 }
-
-const GROUPS: { kind: NoteLinkKind; heading: string; icon: IconName }[] = [
-  { kind: "event", heading: "Events", icon: "calendar" },
-  { kind: "contact", heading: "People", icon: "user" },
-  { kind: "thread", heading: "Conversations", icon: "email" },
-]
 
 /**
  * Events (a month back, three ahead), people, and conversations matching
- * the search, a few of each. Empty search: what's nearest in time.
+ * the search, five of each. Empty search: what is nearest in time.
  */
-async function search(q: string): Promise<Record<NoteLinkKind, Found[]>> {
+async function search(q: string): Promise<Found> {
   const core = await getCoreClient()
   const lower = q.toLowerCase()
   const now = Math.floor(Date.now() / 1000)
@@ -34,78 +30,126 @@ async function search(q: string): Promise<Record<NoteLinkKind, Found[]>> {
     core.listMessages({ lane: "inbox", search: q || null, limit: 8 }),
     q ? core.listMessages({ lane: "archive", search: q, limit: 8 }) : Promise.resolve([]),
   ])
-  const events = new Map<string, Found & { at: number }>()
+  // One occurrence an event: the one nearest now.
+  const events = new Map<string, Occurrence>()
   for (const o of occ) {
     // Birthdays and holidays aren't events a note can link to.
     if (o.contactId || o.eventId.startsWith("special:") || !o.title.toLowerCase().includes(lower)) continue
-    const at = Math.abs(o.start - now)
     const seen = events.get(o.eventId)
-    if (!seen || at < seen.at) events.set(o.eventId, { target: { kind: "event", id: o.eventId }, label: o.title, detail: shortTime(o.start), at })
+    if (!seen || Math.abs(o.start - now) < Math.abs(seen.start - now)) events.set(o.eventId, o)
   }
-  const threads = new Map<string, Found>()
-  for (const m of [...inbox, ...archive]) {
-    if (!threads.has(m.threadId)) threads.set(m.threadId, { target: { kind: "thread", id: m.threadId }, label: m.subject || "(no subject)", detail: m.from.name || m.from.email })
-  }
+  // One row a conversation.
+  const threads = new Map<string, MessageSummary>()
+  for (const m of [...inbox, ...archive]) if (!threads.has(m.threadId)) threads.set(m.threadId, m)
   return {
-    event: [...events.values()].sort((a, b) => a.at - b.at).slice(0, 5),
-    contact: people.slice(0, 5).map((c) => ({ target: { kind: "contact", id: c.id }, label: c.fullName || c.emails[0]?.value || "(no name)", detail: c.org ?? c.emails[0]?.value ?? "" })),
+    event: [...events.values()].sort((a, b) => Math.abs(a.start - now) - Math.abs(b.start - now)).slice(0, 5),
+    contact: people.slice(0, 5),
     thread: [...threads.values()].slice(0, 5),
   }
 }
 
 /**
- * Links this note to an event, a person, or a conversation, from the note
- * itself (ADR-0035). Before, links could only start from those items.
+ * "Link this note" (brief N2; ADR-0035): in the form layer's place, a
+ * dialog (form 640) on a desktop and the whole screen on a phone. A search
+ * field, then EVENTS, PEOPLE and CONVERSATIONS as the rows search shows
+ * them (ADR-0085's adapters). A row already linked carries the tag LINKED,
+ * and pressing it takes the link off. Pressing any other row links it.
  */
-export function LinkPicker({ open, onOpenChange, linked, onLink }: { open: boolean; onOpenChange: (o: boolean) => void; linked: NoteLink[]; onLink: (link: NoteLink) => void }) {
+export function LinkPicker({
+  open,
+  onOpenChange,
+  linked,
+  onLink,
+  onUnlink,
+}: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  linked: NoteLink[]
+  onLink: (link: NoteLink) => void
+  onUnlink: (link: NoteLink) => void
+}) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="md">{open && <Picker linked={linked} onLink={onLink} />}</DialogContent>
-    </Dialog>
+    <AdaptiveDialog open={open} onOpenChange={onOpenChange} size="form" height="full" overline="Note" title="Link this note" description="To an event, a person or a conversation. The note then shows with it.">
+      {open && <Picker linked={linked} onLink={onLink} onUnlink={onUnlink} />}
+    </AdaptiveDialog>
   )
 }
 
-function Picker({ linked, onLink }: { linked: NoteLink[]; onLink: (link: NoteLink) => void }) {
+function Picker({ linked, onLink, onUnlink }: { linked: NoteLink[]; onLink: (link: NoteLink) => void; onUnlink: (link: NoteLink) => void }) {
   const [q, setQ] = useState("")
   const query = useDeferredValue(q.trim())
-  const { data } = useQuery({ queryKey: ["notes", "link-picker", query], queryFn: () => search(query) })
-  const already = (t: NoteTarget) => linked.some((l) => l.kind === t.kind && l.target === t.id)
-  const pick = async (f: Found) => {
-    const link = await (await getCoreClient()).noteLinkFor(f.target)
+  const { data, isPending } = useQuery({ queryKey: ["notes", "link-picker", query], queryFn: () => search(query) })
+  const linkOf = (t: NoteTarget) => linked.find((l) => l.kind === t.kind && l.target === t.id) ?? null
+  const pick = async (t: NoteTarget) => {
+    const had = linkOf(t)
+    if (had) return onUnlink(had)
+    const link = await (await getCoreClient()).noteLinkFor(t)
     if (link) onLink(link)
   }
-  const empty = data && GROUPS.every((g) => data[g.kind].length === 0)
+  const empty = data && !data.event.length && !data.contact.length && !data.thread.length
   return (
-    <div className="flex flex-col gap-4">
-      <DialogHeader>
-        <DialogTitle>Link this note</DialogTitle>
-        <DialogDescription>To an event, a person, or a conversation. The note then shows up with it, and the link opens it from here.</DialogDescription>
-      </DialogHeader>
-      <Input autoFocus type="search" aria-label="Find something to link" placeholder="Search events, people, and mail" value={q} onChange={(e) => setQ(e.target.value)} />
-      {empty && <p className="text-sm text-muted-foreground">Nothing matches “{query}”.</p>}
-      {GROUPS.map((g) =>
-        data && data[g.kind].length > 0 ? (
-          <section key={g.kind} aria-label={g.heading} className="flex flex-col">
-            <h3 className="pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">{g.heading}</h3>
-            {data[g.kind].map((f) => {
-              const done = already(f.target)
-              return (
-                // A row, not a Button: a unicron 1.0 Button sets its label in mono capitals, and these are
-                // an event's title, a person's name and an address, shown as written.
-                <Item key={f.target.id} size="xs" render={<button type="button" disabled={done} onClick={() => void pick(f)} />}>
-                  <ItemMedia variant="icon">
-                    <Icon name={g.icon} />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>{f.label}</ItemTitle>
-                    <ItemDescription>{done ? "Linked already" : f.detail}</ItemDescription>
-                  </ItemContent>
-                </Item>
-              )
-            })}
-          </section>
-        ) : null,
+    <div className="flex flex-col gap-6">
+      <SearchField aria-label="Search events, people and mail" placeholder="Search events, people and mail" value={q} onValueChange={setQ} />
+      {isPending ? (
+        <div className="flex flex-col gap-5" aria-busy="true" aria-label="Looking">
+          <Skeleton variant="row" />
+          <Skeleton variant="row" />
+        </div>
+      ) : empty ? (
+        <EmptyState size="sm" overline="Link // 00" title={query ? `Nothing matches “${query}”` : "Nothing to link yet."} />
+      ) : (
+        data && (
+          <>
+            <Group title="Events" count={data.event.length}>
+              {data.event.map((o) => (
+                <Row key={o.eventId} linked={!!linkOf({ kind: "event", id: o.eventId })}>
+                  <OccurrenceCard occurrence={o} date onOpen={() => void pick({ kind: "event", id: o.eventId })} />
+                </Row>
+              ))}
+            </Group>
+            <Group title="People" count={data.contact.length}>
+              {data.contact.map((c) => (
+                <Row key={c.id} linked={!!linkOf({ kind: "contact", id: c.id })}>
+                  <PersonRow contact={c} onOpen={() => void pick({ kind: "contact", id: c.id })} />
+                </Row>
+              ))}
+            </Group>
+            <Group title="Conversations" count={data.thread.length}>
+              {data.thread.map((m) => (
+                <Row key={m.threadId} linked={!!linkOf({ kind: "thread", id: m.threadId })}>
+                  <MessageRow message={m} onOpen={() => void pick({ kind: "thread", id: m.threadId })} />
+                </Row>
+              ))}
+            </Group>
+          </>
+        )
       )}
+    </div>
+  )
+}
+
+function Group({ title, count, children }: { title: string; count: number; children: ReactNode }) {
+  if (!count) return null
+  return (
+    <section aria-label={title} className="flex flex-col gap-2">
+      <SectionHeader title={title} count={count} level={3} />
+      <div role="list" aria-label={title} className="flex flex-col">
+        {children}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * One result. A linked one carries LINKED in a column of its own at the end,
+ * since the adapters have no slot for it yet (a gap asked of their owners).
+ */
+function Row({ linked, children }: { linked: boolean; children: ReactNode }) {
+  if (!linked) return <div role="listitem">{children}</div>
+  return (
+    <div role="listitem" data-linked="" className="flex items-center gap-3">
+      <div className="min-w-0 flex-1">{children}</div>
+      <Badge>Linked</Badge>
     </div>
   )
 }

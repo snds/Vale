@@ -2,6 +2,7 @@ import { useMemo } from "react"
 
 import { useNoteTasks } from "@/core/queries"
 import type { NoteSummary } from "@/core/types"
+import { reminderLabel } from "@/lib/time"
 
 /**
  * What a note's row, card and map square say about it (brief N1): when it
@@ -68,3 +69,6 @@ export function noteDetail(n: NoteSummary, items: number | undefined): { text: s
   if (n.remindAt) return { reminder: n.remindAt }
   return null
 }
+
+/** The note's remind button's name: what it does, or when the note comes back (brief N2). */
+export const remindLabel = (value: number | null) => (value ? `Reminder: ${reminderLabel(value)}` : "Remind me")

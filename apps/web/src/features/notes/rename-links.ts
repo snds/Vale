@@ -1,4 +1,5 @@
 import * as Y from "yjs"
+import { create } from "zustand"
 
 import { getCoreClient } from "@/core/client"
 import { queryClient } from "@/core/queries"
@@ -51,4 +52,28 @@ export async function renameLinks(old: string, next: string, except: string): Pr
   }
   await queryClient.invalidateQueries({ queryKey: ["notes"] })
   return changed
+}
+
+/** A rename that left `[[links]]` in other notes pointing at the old title (brief N2). */
+export interface RenameQuestion {
+  /** The title the links name. */
+  old: string
+  /** The title the note has now. */
+  next: string
+  /** How many notes link to the old title. */
+  count: number
+}
+
+/**
+ * The open rename questions, by note id. The note's banner reads its own and
+ * stays until it is answered or dismissed: closing and opening the note again
+ * in this session shows it again.
+ */
+export const useRenameQuestions = create<Record<string, RenameQuestion>>(() => ({}))
+
+export function askRename(id: string, question: RenameQuestion | null) {
+  useRenameQuestions.setState((all) => {
+    const { [id]: _was, ...rest } = all
+    return question ? { ...rest, [id]: question } : rest
+  }, true)
 }

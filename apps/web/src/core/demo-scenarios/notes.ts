@@ -1,6 +1,9 @@
+import { loadDoc, seed, stateOf } from "@/features/notes/ydoc"
+
+import type { NoteShare } from "../types"
 import type { DemoScenarios } from "../demo-scenarios"
 
-/** Notes (ADR-0081, ADR-0105): notes, folders, locks and sync in states the sample data doesn't reach. */
+/** Notes (ADR-0081, ADR-0105, ADR-0106): notes, folders, locks, sharing and sync in states the sample data doesn't reach. */
 export const notes: DemoScenarios = {
   /** A reminder on the gift list passed earlier this morning, so the note stands under DUE until it's marked done. */
   "notes-due": ({ client, wrap }) => {
@@ -24,6 +27,23 @@ export const notes: DemoScenarios = {
   "notes-read-fails": ({ wrap }) => {
     wrap("listNotes", () => async () => {
       throw new Error("The notes store is locked by another Vale window.")
+    })
+  },
+  /**
+   * The design review agenda is a note Priya shared with you for reading (ADR-0056): its text is her
+   * document's, the share has no live relay here, and it can't be changed.
+   */
+  "notes-shared-read": ({ wrap }) => {
+    const share: NoteShare = { id: "share-agenda", role: "guest", mode: "view", from: "Priya Raman", relay: null, token: null }
+    const isAgenda = (title: string) => title.startsWith("Design review agenda")
+    wrap("listNotes", (list) => async (query) => (await list(query)).map((n) => (isAgenda(n.title) ? { ...n, share } : n)))
+    wrap("getNote", (get) => async (id) => {
+      const n = await get(id)
+      if (!isAgenda(n.title)) return n
+      // A guest's text arrives as the owner's document, never as a seed of its own.
+      const doc = loadDoc(null)
+      seed(doc, n.markdown, n.id)
+      return { ...n, share, ydoc: stateOf(doc) }
     })
   },
 }

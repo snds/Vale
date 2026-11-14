@@ -20,12 +20,45 @@ const section = (page, name) => notesList(page).getByRole("region", { name, exac
 const rowText = async (page, title) => (await notesList(page).getByRole("listitem").filter({ hasText: title }).first().textContent()) ?? ""
 /** The map's square for a note or a linked item, by the start of its name. */
 const square = (page, name) => page.locator(`[data-node][aria-label^="${name}"]`)
+/** The open note's More: a menu on a desktop, a sheet on a phone (ADR-0106). */
+const moreLayer = (app) => (app.phone ? app.page.getByRole("dialog", { name: "Note actions" }) : app.page.getByRole("menu", { name: "Note actions" }))
+/** A row of the open note's More: a menu item on a desktop, a sheet row on a phone. */
+const moreRow = (app, name) => moreLayer(app).getByRole(app.phone ? "button" : "menuitem", { name })
 /** Opens the sample checklist's note menu, and one of its items when given. */
 export const noteAction = async (app, item) => {
   await note(app, /Cabin packing list/)
   await press(app, button(app.page, "Note actions"))
-  if (item) await press(app, app.page.getByRole("menuitem", { name: item }))
+  if (item) await press(app, moreRow(app, item))
 }
+/** The open note's toolbar, on a desktop: Pin, Remind, Color, More. */
+const noteToolbar = (page) => page.getByRole("toolbar", { name: "Note", exact: true })
+/**
+ * Opens one of the note's own controls (ADR-0106): the toolbar's button on a desktop, or, on a phone,
+ * the row of that name in the More sheet. Both names may be patterns.
+ */
+const noteControl = async (app, name, sheetRow = name) => {
+  if (!app.phone) return press(app, noteToolbar(app.page).getByRole("button", { name }))
+  await press(app, button(app.page, "Note actions"))
+  await press(app, moreLayer(app).getByRole("button", { name: sheetRow }))
+}
+/** A row of a menu a note control opened: a menu item on a desktop, a sheet row on a phone. */
+const layerRow = (app, name) => (app.phone ? app.page.getByRole("dialog").last().getByRole("button", { name }) : app.page.getByRole("menuitem", { name }))
+/** The note's title and text, each a named field (brief N2). */
+const titleField = (page) => page.getByRole("textbox", { name: "Title", exact: true })
+const noteText = (page) => page.getByRole("textbox", { name: "Text", exact: true })
+/** A checklist item's box, named by its words. */
+const checkbox = (page, words) => noteText(page).getByRole("checkbox", { name: words, exact: true })
+/** A toast by its words. */
+const toastSaying = (page, words) => page.locator("[data-sonner-toast]").filter({ hasText: words })
+/** The format bar, docked or above the keyboard. */
+const formatting = (page) => page.getByRole("toolbar", { name: "Formatting" })
+/** Puts the cursor in the note's text, on a checklist item's words: on a phone the format bar then shows. */
+const writeIn = async (app, words = "Coffee + grinder") => {
+  await noteText(app.page).getByText(words, { exact: true }).click()
+  await app.settle()
+}
+/** Is the note open: its pane on a desktop, its pushed screen on a phone. */
+const noteOpen = async (page) => (await page.getByRole("article", { name: "Note" }).count()) > 0
 /** An item from the Notes area's More menu. */
 export const notesMenu = async (app, item) => {
   await area(app, "Notes")
@@ -258,25 +291,210 @@ export const scenes = [
       await menu()
     },
   },
-  { name: "notes-note", run: (app) => note(app, /Cabin packing list/) }, // a checklist, linked to an event, in a color
+  {
+    // The note (ADR-0106; Mobile / 15, Desktop / 11's detail): NOTE // EDITED, the title as its own field at
+    // the drawn size, the chips, the checklist as unicron's square boxes with a hairline under each row and
+    // the done one struck through; on a desktop the toolbar and the docked format bar, on a phone More and
+    // the add button. A checklist, linked to an event, tagged and in a color.
+    name: "notes-note",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "drawn", area: "notes", screen: "note", sizes: ["phone"] },
+    run: (app) => note(app, /Cabin packing list/),
+    assert: async (app) => {
+      const { page } = app
+      const overline = (await page.locator('[data-role="note-overline"]').textContent()) ?? ""
+      ensure(/^Note \/\/ Edited \d\d:\d\d$/.test(overline), `the overline reads “${overline}”`)
+      ensure((await titleField(page).inputValue()) === "Cabin packing list", "the title is not its own field")
+      const size = await titleField(page).evaluate((el) => getComputedStyle(el).fontSize)
+      ensure(size === (app.phone ? "32px" : "48px"), `the title is ${size}, not the drawn size`)
+      // The title block is not shown twice: the text starts with the checklist.
+      ensure(!(await noteText(page).getByText("Cabin packing list").isVisible().catch(() => false)), "the title shows in the text too")
+      ensure((await noteText(page).getByRole("checkbox").count()) === 4, "the checklist is not four checkboxes")
+      ensure(await checkbox(page, "Rain jackets").isChecked(), "the done item is not checked")
+      const done = await noteText(page).locator('li[data-checked="true"] p').first().evaluate((el) => ({ line: getComputedStyle(el).textDecorationLine, color: getComputedStyle(el).color }))
+      const open = await noteText(page).locator('li[data-checked="false"] p').first().evaluate((el) => getComputedStyle(el).color)
+      ensure(done.line === "line-through" && done.color !== open, "a done item is not struck through in the label ink")
+      const rule = await noteText(page).locator(".note-check").first().evaluate((el) => getComputedStyle(el).boxShadow)
+      ensure(rule.includes("inset"), "a checklist row has no hairline under it")
+      ensure(!(await page.locator('[style*="--c-note-card"], [style*="--note-surface"]').count()), "the note's color still tints the pane")
+      ensure((await page.getByRole("group", { name: "Reminder, links and tags" }).textContent()).includes("Cabin weekend"), "the link chip is missing")
+      if (app.phone) {
+        ensure(await button(page, "Note actions").isVisible(), "the top bar has no More")
+        ensure(await button(page, "Add line").isVisible(), "the drawn add button is missing")
+        ensure(!(await formatting(page).isVisible()), "the format bar shows while nothing is being written")
+      } else {
+        for (const name of ["Pin", "Remind me", "Color: Green", "Note actions"]) ensure(await noteToolbar(page).getByRole("button", { name, exact: true }).count(), `the note's toolbar has no ${name}`)
+        ensure((await noteToolbar(page).locator('[tabindex="0"]').count()) === 1, "the note's toolbar is not one Tab stop")
+        ensure(await formatting(page).isVisible(), "the format bar is not docked on a desktop")
+        ensure(!(await button(page, "Add line").count()), "a desktop shows the phone's add button")
+      }
+    },
+  },
+  {
+    // Desktop / 11 in full: the list beside the note.
+    name: "notes-note-list",
+    sizes: ["desktop"],
+    sean: { kind: "drawn", area: "notes", screen: "list-note", sizes: ["desktop"] },
+    run: (app) => note(app, /Cabin packing list/),
+  },
+  {
+    // A checklist item toggles, and stays so when the note is read again from the core (ADR-0106). The demo
+    // keeps its notes in memory, so "after a reload" is: close the note, open it again.
+    name: "notes-checklist",
+    run: async (app) => {
+      const { page } = app
+      await note(app, /Cabin packing list/)
+      await press(app, checkbox(page, "Board games"))
+      ensure(await checkbox(page, "Board games").isChecked(), "Board games did not check")
+      // The note saves a moment after the last change.
+      await page.waitForTimeout(800)
+      if (app.phone) await press(app, button(page, "Back"))
+      else await press(app, notesList(page).getByRole("button", { name: /Design review agenda/ }))
+      await note(app, /Cabin packing list/)
+      ensure(await checkbox(page, "Board games").isChecked(), "Board games was not checked when the note was opened again")
+      if (!app.phone) ensure((await rowText(page, "Cabin packing list")).includes("4 items"), "the row lost its item count")
+      // And off again, so the sample is as it was.
+      await press(app, checkbox(page, "Board games"))
+      ensure(!(await checkbox(page, "Board games").isChecked()), "Board games did not uncheck")
+      await page.waitForTimeout(800)
+    },
+  },
+  {
+    // Esc leaves the text, and a second Esc closes the note (brief N2).
+    name: "notes-esc",
+    run: async (app) => {
+      const { page } = app
+      await note(app, /Cabin packing list/)
+      await writeIn(app)
+      await page.keyboard.press("Escape")
+      await app.settle()
+      ensure(await noteOpen(page), "the first Esc closed the note")
+      ensure(await page.evaluate(() => document.activeElement?.getAttribute("aria-label") === "Note"), "the first Esc did not leave the text")
+      await page.keyboard.press("Escape")
+      await app.settle()
+      ensure(!(await noteOpen(page)), "the second Esc did not close the note")
+      if (!app.phone) ensure(await page.getByRole("region", { name: "Notes: nothing open" }).isVisible(), "the detail does not say nothing is open")
+      // The title field's Esc is the same first step.
+      await note(app, /Cabin packing list/)
+      await titleField(page).focus()
+      await page.keyboard.press("Escape")
+      await app.settle()
+      ensure(await noteOpen(page), "Esc in the title closed the note")
+    },
+  },
+  {
+    // Pin, a reminder and a color, from the toolbar on a desktop and from More on a phone (brief N2).
+    name: "notes-pin-remind-color",
+    run: async (app) => {
+      const { page } = app
+      await note(app, /Cabin packing list/)
+      // Unpin, then pin again.
+      if (app.phone) {
+        await noteControl(app, "Unpin")
+        await press(app, button(page, "Note actions"))
+        ensure(await moreRow(app, "Pin").count(), "More does not offer Pin once unpinned")
+        await press(app, moreRow(app, "Pin"))
+      } else {
+        const pin = noteToolbar(page).getByRole("button", { name: "Pin", exact: true })
+        ensure((await pin.getAttribute("aria-pressed")) === "true", "Pin is not on for a pinned note")
+        await press(app, pin)
+        ensure((await pin.getAttribute("aria-pressed")) === "false", "Pin did not turn off")
+        ensure(!(await section(page, "Pinned").count()), "the note is still listed under Pinned")
+        await press(app, pin)
+        ensure((await pin.getAttribute("aria-pressed")) === "true", "Pin did not turn back on")
+      }
+      // A reminder from a preset; DONE puts it away.
+      await noteControl(app, "Remind me", "Remind me…")
+      await press(app, layerRow(app, /^Tomorrow/))
+      const chip = page.locator('[data-role="note-reminder"]')
+      ensure((await chip.textContent()).includes("Tomorrow"), "the reminder chip does not say when")
+      await press(app, chip.getByRole("button", { name: "Done with this reminder" }))
+      ensure(!(await chip.count()), "Done did not take the reminder away")
+      // A color: the swatch picker, then back to green.
+      for (const [from, to] of [["Green", "Blue"], ["Blue", "Green"]]) {
+        await noteControl(app, `Color: ${from}`, `Color: ${from}…`)
+        await press(app, page.getByRole("radiogroup", { name: "Note color" }).getByRole("radio", { name: to, exact: true }))
+        ensure(!(await page.getByRole("radiogroup", { name: "Note color" }).count()), "a pick did not close the color layer")
+      }
+      if (!app.phone) ensure(await noteToolbar(page).getByRole("button", { name: "Color: Green" }).count(), "the color did not come back to green")
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // TAG and LINK (brief N2): a tag goes on and comes off; a person is linked, carries LINKED in the
+    // link form, and a press there takes the link off again.
+    name: "notes-tag-link",
+    run: async (app) => {
+      const { page } = app
+      await note(app, /Cabin packing list/)
+      const chips = page.getByRole("group", { name: "Reminder, links and tags" })
+      await press(app, chips.getByRole("button", { name: "Tag", exact: true }))
+      const tagLayer = page.getByRole("dialog", { name: "Tag" })
+      // The field offers the tags in use, so it is a combobox.
+      await tagLayer.getByRole("combobox", { name: "Tag" }).fill("packing")
+      await press(app, tagLayer.getByRole("button", { name: "Add tag" }))
+      ensure((await chips.textContent()).includes("#packing"), "the tag did not go on")
+      await press(app, chips.getByRole("button", { name: "Remove tag packing" }))
+      ensure(!(await chips.textContent()).includes("#packing"), "the tag did not come off")
+      const linkForm = page.getByRole("dialog", { name: "Link this note" })
+      const openForm = async () => {
+        await press(app, chips.getByRole("button", { name: "Link to an event, person or conversation" }))
+        await linkForm.getByRole("searchbox").or(linkForm.getByRole("textbox")).first().fill("Priya")
+        await page.waitForTimeout(300)
+        await app.settle()
+      }
+      await openForm()
+      const people = linkForm.getByRole("list", { name: "People" })
+      ensure(!(await people.locator("[data-linked]").count()), "Priya is linked before she is picked")
+      await press(app, people.getByRole("button", { name: /Priya Raman/ }).first())
+      ensure(!(await linkForm.count()), "picking a person did not close the form")
+      ensure((await chips.textContent()).includes("Priya Raman"), "the person's chip did not appear")
+      await openForm()
+      ensure(await people.locator("[data-linked]").filter({ hasText: "Priya Raman" }).count(), "a linked person does not carry LINKED")
+      await press(app, people.getByRole("button", { name: /Priya Raman/ }).first())
+      ensure(!(await chips.textContent()).includes("Priya Raman"), "a press on a linked row did not take the link off")
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // Archive and delete, each with UNDO in its toast (brief N2, decisions §1 and §10).
+    name: "notes-archive-delete",
+    run: async (app) => {
+      const { page } = app
+      for (const [item, words] of [["Archive", "Archived Cabin packing list"], ["Delete", "Deleted Cabin packing list"]]) {
+        await noteAction(app, item)
+        ensure(!(await noteOpen(page)), `${item} did not close the note`)
+        const toast = toastSaying(page, words)
+        ensure(await toast.count(), `no toast says “${words}”`)
+        if (app.phone) await area(app, "Notes")
+        ensure(!(await notesList(page).getByRole("button", { name: /Cabin packing list/ }).count()), `${item} left the note in the list`)
+        await press(app, toast.getByRole("button", { name: "Undo" }))
+        await page.waitForTimeout(300)
+        await app.settle()
+        ensure(await notesList(page).getByRole("button", { name: /Cabin packing list/ }).count(), `Undo did not bring the note back after ${item}`)
+        await page.mouse.move(0, 0)
+        await page.locator("[data-sonner-toast]").first().waitFor({ state: "detached", timeout: 15_000 }).catch(() => {})
+      }
+    },
+  },
   {
     // A reminder at any date and time (ADR-0088; brief N2): the shared picker from the note's bell.
     name: "notes-remind-time",
     run: async (app) => {
       await note(app, /Cabin packing list/)
-      await press(app, button(app.page, "Remind me"))
-      await press(app, app.page.getByRole("menuitem", { name: "Pick a date and time…" }))
-      const picker = app.page.getByRole("dialog", { name: "Remind me" })
+      await noteControl(app, "Remind me", "Remind me…")
+      await press(app, layerRow(app, "Pick a date and time…"))
+      const picker = app.page.getByRole("dialog", { name: "Remind me" }).last()
       await press(app, picker.getByRole("gridcell", { name: /^Friday, November 13/ }))
       await press(app, picker.getByRole("button", { name: "Set reminder", exact: true }))
       ensure(!(await picker.count()), "Set reminder did not close the picker")
       // The bell now says when; the picker opens from it again.
-      await press(app, app.page.getByRole("button", { name: /^Reminder: Tomorrow, 11:00/ }))
-      await press(app, app.page.getByRole("menuitem", { name: "Pick a date and time…" }))
+      await noteControl(app, /^Reminder: Tomorrow, 11:00/)
+      await press(app, layerRow(app, "Pick a date and time…"))
       await app.page.mouse.move(0, 0)
     },
     assert: async ({ page }) => {
-      const picker = page.getByRole("dialog", { name: "Remind me" })
+      const picker = page.getByRole("dialog", { name: "Remind me" }).last()
       ensure(await picker.getByRole("button", { name: "Set reminder", exact: true }).isVisible(), "the reminder picker has no Set reminder button")
       ensure((await picker.getByRole("gridcell", { name: /^Friday, November 13/ }).getAttribute("aria-selected")) === "true", "the picker did not open on the reminder already set")
     },
@@ -290,6 +508,12 @@ export const scenes = [
     run: async (app) => {
       const { page } = app
       await note(app, /Cabin packing list/)
+      // A phone shows the bar while you write, in the bottom row's place (ADR-0106).
+      if (app.phone) {
+        ensure(!(await formatting(page).isVisible()), "the phone's format bar shows before anything is being written")
+        await writeIn(app)
+        ensure(!(await button(page, "Add line").count()), "the add button stays while the format bar shows")
+      }
       const names = ["Heading", "Bold", "Italic", "Link", "Bulleted list", "Numbered list", "Checklist", "Quote", "Code", "Link to a note", "Add image", "Scan a document", "Sketch"]
       const bar = await formatBar(app, page, names)
       const wrap = page.locator('[data-slot="format-bar"]')
@@ -309,7 +533,7 @@ export const scenes = [
       } else ensure(room.scroll <= room.client, "the docked format bar is cut off")
       ensure(box.y + box.height <= app.viewport.height + 1 && box.y + box.height >= app.viewport.height - 64, `the format bar ends at ${Math.round(box.y + box.height)}: not docked at the foot of the note's column`)
       // A checklist row says so on the bar.
-      await page.locator(".ProseMirror li").first().click()
+      await noteText(page).locator("li p").first().click()
       await app.settle()
       ensure((await bar.getByRole("button", { name: "Checklist", exact: true }).getAttribute("aria-pressed")) === "true", "Checklist is not on in a checklist row")
     },
@@ -318,17 +542,162 @@ export const scenes = [
   { name: "notes-share", run: (app) => noteAction(app, "Share…") },
   { name: "notes-lock", run: (app) => noteAction(app, "Lock note") },
   {
+    // Link this note (brief N2): a dialog (form 640) on a desktop, the whole screen on a phone. A search
+    // field, then EVENTS, PEOPLE and CONVERSATIONS as search draws them; the linked event carries LINKED.
     name: "notes-link",
+    sean: { kind: "undrawn", area: "notes", screen: "link-form" },
     run: async (app) => {
       await note(app, /Cabin packing list/)
-      await press(app, button(app.page, "Link to an event, person, or conversation"))
+      await press(app, button(app.page, "Link to an event, person or conversation"))
+      // The linked event is a month away: a word from it brings it into the results.
+      const form = app.page.getByRole("dialog", { name: "Link this note" })
+      await form.getByRole("searchbox").or(form.getByRole("textbox")).first().fill("cabin")
+      await form.locator("[data-linked]").waitFor()
+      await app.settle()
+      await app.page.evaluate(() => document.activeElement?.blur())
+    },
+    assert: async (app) => {
+      const { page } = app
+      const form = page.getByRole("dialog", { name: "Link this note" })
+      ensure(await form.getByRole("searchbox", { name: "Search events, people and mail" }).or(form.getByRole("textbox", { name: "Search events, people and mail" })).count(), "the form has no search field")
+      // Each kind under its own header, and only the kinds that found something: "cabin" names an event and some mail.
+      const kinds = await form.getByRole("list").evaluateAll((lists) => lists.map((l) => l.getAttribute("aria-label")))
+      ensure(kinds.includes("Events") && kinds.every((k) => ["Events", "People", "Conversations"].includes(k)), `the form lists ${kinds.join(", ")}`)
+      ensure((await form.locator("[data-linked]").textContent()).includes("Cabin weekend"), "the linked event does not carry LINKED")
+      const box = await form.boundingBox()
+      if (!app.phone) ensure(Math.abs(box.width - 640) < 2, `the link form is ${Math.round(box.width)} wide, not 640`)
+      else ensure(box.height > app.viewport.height * 0.9, "the link form is not the whole screen on a phone")
+    },
+  },
+  {
+    // Nothing found (brief N2): Nothing matches "…".
+    name: "notes-link-none",
+    run: async (app) => {
+      await note(app, /Cabin packing list/)
+      await press(app, button(app.page, "Link to an event, person or conversation"))
+      const form = app.page.getByRole("dialog", { name: "Link this note" })
+      await form.getByRole("searchbox").or(form.getByRole("textbox")).first().fill("zebra crossing")
+      await form.getByText("Nothing matches “zebra crossing”").waitFor()
+      await app.settle()
     },
   },
   {
     name: "notes-sketch",
     run: async (app) => {
       await note(app, /Cabin packing list/)
-      await press(app, app.page.getByRole("toolbar", { name: "Formatting" }).getByRole("button", { name: "Sketch" }))
+      if (app.phone) await writeIn(app)
+      await press(app, formatting(app.page).getByRole("button", { name: "Sketch" }))
+    },
+  },
+  {
+    // The phone's add button (Mobile / 15): a checklist note grows by an item, with the cursor in it; while
+    // you write, the format bar takes the bottom row's place.
+    name: "notes-add-line",
+    sizes: ["phone"],
+    sean: { kind: "undrawn", area: "notes", screen: "add-line", sizes: ["phone"] },
+    run: async (app) => {
+      const { page } = app
+      await note(app, /Cabin packing list/)
+      await press(app, button(page, "Add line"))
+      ensure((await noteText(page).getByRole("checkbox").count()) === 5, "the add button did not add a checklist item")
+      ensure(await page.evaluate(() => !!document.activeElement?.closest(".ProseMirror")), "the cursor is not in the new item")
+      await page.keyboard.type("Headlamps")
+      await app.settle()
+      ensure(await checkbox(page, "Headlamps").count(), "the new item does not hold what was typed")
+      ensure(await formatting(page).isVisible(), "the format bar does not show while writing")
+      ensure(!(await button(page, "Add line").count()), "the add button stays while writing")
+      // The bar came up under the finger that pressed the add button: no tooltip from it in the picture.
+      await page.mouse.move(0, 0)
+      await page.locator('[data-slot="tooltip-content"]').waitFor({ state: "detached" })
+    },
+  },
+  {
+    // A rename that leaves links behind (brief N2): a compact info banner on the note that stays until it is
+    // answered, also after the note is closed and opened again; the old link now names no note.
+    name: "notes-rename-banner",
+    sean: { kind: "undrawn", area: "notes", screen: "rename-banner" },
+    run: async (app) => {
+      const { page } = app
+      await note(app, /Icon axis ideas/)
+      await titleField(page).fill("Icon axis notes")
+      const banner = page.locator('[data-slot="banner"]').filter({ hasText: "1 note links to “Icon axis ideas”." })
+      await banner.waitFor({ timeout: 8000 })
+      // The agenda still names the old title: a link to a note that is not there, in the label ink.
+      if (app.phone) await press(app, button(page, "Back"))
+      await note(app, /Design review agenda/)
+      ensure(await noteText(page).locator("a.wikilink[data-missing]").filter({ hasText: "Icon axis ideas" }).count(), "the link to the old title is not marked as missing")
+      if (app.phone) await press(app, button(page, "Back"))
+      await note(app, /Icon axis notes/)
+      await banner.waitFor()
+      await page.evaluate(() => document.activeElement?.blur())
+      await app.settle()
+    },
+    assert: async ({ page }) => {
+      const banner = page.locator('[data-slot="banner"]').filter({ hasText: "1 note links to" })
+      ensure(await banner.getByRole("button", { name: "Update links" }).count(), "the banner has no Update links")
+      ensure(await banner.getByRole("button", { name: "Dismiss" }).count(), "the banner cannot be dismissed")
+    },
+  },
+  {
+    // UPDATE LINKS points the other note's link at the new title, and the banner goes (brief N2).
+    name: "notes-rename-update",
+    run: async (app) => {
+      const { page } = app
+      await note(app, /Icon axis ideas/)
+      await titleField(page).fill("Icon axis notes")
+      const banner = page.locator('[data-slot="banner"]').filter({ hasText: "1 note links to “Icon axis ideas”." })
+      await banner.waitFor({ timeout: 8000 })
+      await press(app, banner.getByRole("button", { name: "Update links" }))
+      ensure(await toastSaying(page, "Updated links in 1 note").count(), "no toast says the links were updated")
+      ensure(!(await banner.count()), "the banner stayed after Update links")
+      if (app.phone) await press(app, button(page, "Back"))
+      await note(app, /Design review agenda/)
+      const link = noteText(page).locator("a.wikilink").filter({ hasText: "Icon axis notes" })
+      ensure((await link.count()) === 1 && (await link.getAttribute("data-missing")) === null, "the agenda's link does not name the new title")
+    },
+  },
+  {
+    // A note shared with you for reading (brief N2): the banner, no format bar, and nothing to change.
+    name: "notes-readonly",
+    scenario: "notes-shared-read",
+    sean: { kind: "undrawn", area: "notes", screen: "readonly" },
+    run: (app) => note(app, /Design review agenda/),
+    assert: async (app) => {
+      const { page } = app
+      ensure(await page.locator('[data-slot="banner"]').filter({ hasText: "Shared with you for reading." }).isVisible(), "no banner says the note is shared for reading")
+      ensure(!(await formatting(page).count()), "a note shared for reading has a format bar")
+      ensure(await titleField(page).evaluate((el) => el.readOnly), "the title of a note shared for reading can be changed")
+      ensure((await noteText(page).getAttribute("contenteditable")) === "false", "the text of a note shared for reading can be changed")
+      ensure(/Shared \/\/ You can read/.test(await page.locator('[data-role="note-overline"]').textContent()), "the overline does not say it is shared for reading")
+      if (app.phone) ensure(!(await button(page, "Add line").count()), "a note shared for reading has the add button")
+    },
+  },
+  {
+    // The color layer (brief N2): the swatch picker, No color then the ten colors with their squares.
+    name: "notes-color",
+    sean: { kind: "undrawn", area: "notes", screen: "color" },
+    run: async (app) => {
+      await note(app, /Cabin packing list/)
+      await noteControl(app, "Color: Green", "Color: Green…")
+    },
+    assert: async ({ page }) => {
+      const group = page.getByRole("radiogroup", { name: "Note color" })
+      ensure((await group.getByRole("radio").count()) === 11, "the color layer is not No color and ten colors")
+      ensure(await group.getByRole("radio", { name: "Green", exact: true }).isChecked(), "the note's color is not the one picked")
+    },
+  },
+  {
+    // Remind (brief N2): REMIND ME, the presets with their times, and Pick a date and time….
+    name: "notes-remind",
+    sean: { kind: "undrawn", area: "notes", screen: "remind" },
+    run: async (app) => {
+      await note(app, /Cabin packing list/)
+      await noteControl(app, "Remind me", "Remind me…")
+    },
+    assert: async (app) => {
+      ensure(await layerRow(app, /^Tomorrow/).count(), "the remind layer has no presets")
+      ensure(await layerRow(app, "Pick a date and time…").count(), "the remind layer has no Pick a date and time…")
+      ensure(!(await layerRow(app, "Remove reminder").count()), "Remove reminder shows with no reminder set")
     },
   },
   {
