@@ -10,7 +10,6 @@ import {
   AdaptivePopover,
   AppFrameColumn,
   AppFrameInset,
-  AppFramePeek,
   Button,
   EmptyState,
   FilterChip,
@@ -35,7 +34,7 @@ import { moveBetweenEvents, type CardContext } from "./card-context"
 import { CalendarNav } from "./calendar-nav"
 import { SaveSetDialog } from "./calendar-sets"
 import { addDays, addMonths, dateInput, eventsOn, folio, fromSecs, monthDay, rangeFact, sameDay, secs, startOfDay, startOfWeek, timeInput, weekNumber } from "./dates"
-import { EventDetailPane } from "./event-detail"
+import { EventDetailPane, EventReview } from "./event-detail"
 import { useCalendars } from "./use-calendars"
 import { MonthGrid } from "./month-grid"
 import { BookingLinks } from "./booking-links"
@@ -367,7 +366,6 @@ export function CalendarView() {
   )
 
   if (wide && !tool) {
-    const open = selected && occurrences.find((o) => occurrenceKey(o) === selectedKey)
     return (
       <>
         <AppFrameColumn aria-label="Calendar" data-scroll-root="">
@@ -381,10 +379,8 @@ export function CalendarView() {
             </div>
           </div>
         </AppFrameColumn>
-        {/* An event over the right of the full-width views; the review dialog of brief C2 replaces it. */}
-        <AppFramePeek open={!!selected} onOpenChange={(o) => !o && setSelected(null)} title={open ? open.title || "(no title)" : "Event"} overline={open ? `Event // ${folio(fromSecs(open.start))}` : "Event"}>
-          {detail}
-        </AppFramePeek>
+        {/* An event from the Week, the Month or the Day's hours: the review dialog of 560 (brief C2, Q2). */}
+        <EventReview eventId={selected?.eventId ?? null} start={selected?.start ?? 0} calendars={calendars} onClose={() => setSelected(null)} />
         {forms}
       </>
     )

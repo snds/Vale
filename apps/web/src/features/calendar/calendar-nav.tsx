@@ -8,7 +8,6 @@ import { calendarSwatches } from "@/lib/swatches"
 import { openAddCalendars } from "./open-add-calendars"
 import { useCalendars } from "./use-calendars"
 import { openSaveSet, useSets } from "./use-sets"
-import { QuickAdd } from "./quick-add-field"
 import { setCalendarHours, useCalendarViewPrefs } from "./view-prefs"
 
 /**
@@ -17,8 +16,8 @@ import { setCalendarHours, useCalendarViewPrefs } from "./view-prefs"
  * and the two tools, Tasks and Booking links, which are places. `standalone`
  * (the page head's sheet and popover, where APPS is not beside it) adds the
  * calendar itself as the first place, so there is a row to return by.
- * On a phone's sheet a last group, MORE, holds the Hours switch (brief C1);
- * every form of the list ends with Quick add (ADR-0098).
+ * On a phone's sheet a last group, MORE, holds the Hours switch (brief C1).
+ * Quick add left the list for the event form's title (ADR-0099; brief C4, Q5).
  */
 export function CalendarNav({ standalone = false }: { standalone?: boolean }) {
   const calendars = useCalendars()
@@ -112,11 +111,8 @@ export function CalendarNav({ standalone = false }: { standalone?: boolean }) {
           <SectionHeader title="More" />
           {/* Hours on a phone turns the Day into the time grid; the Week keeps its day sections (brief C1). */}
           <ToggleRow label="Hours" description="The Day as a grid of hours." checked={hours} onCheckedChange={setCalendarHours} />
-          <QuickAdd calendars={calendars} />
         </section>
-      ) : (
-        <QuickAdd calendars={calendars} />
-      )}
+      ) : null}
     </>
   )
 }

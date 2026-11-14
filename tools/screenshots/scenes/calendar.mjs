@@ -1,5 +1,5 @@
 // Calendar: every view, an event and its editor, the calendars list, booking links, and the menu-bar window.
-import { area, button, ensure, formLayer, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, sidebar, switcherLayer, toastGone } from "./helpers.mjs"
+import { area, button, closeForm, ensure, formLayer, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, sidebar, switcherLayer, toastGone } from "./helpers.mjs"
 import { compose } from "./mail.mjs"
 import { settings } from "./settings.mjs"
 
@@ -39,6 +39,25 @@ export const newEvent = async (app) => {
   await press(app, button(app.page, "New event"))
   return app.page.getByRole("dialog", { name: "New event" })
 }
+
+/** The open event: the detail column or a pushed screen, or the review dialog. */
+const eventPane = (page) => page.locator('[data-slot="event-detail"]:visible').first()
+/** One of the event's Field Rows, by its label. */
+const rowOf = (within, label) => within.locator('[data-slot="field-row"]').filter({ has: within.page().getByText(label, { exact: true }) })
+/**
+ * Opens an event by its title: from Upcoming on a desktop and at medium width (the detail column, or a
+ * pushed screen), from the Day's cards on a phone (pushed).
+ */
+export const openEvent = async (app, title) => {
+  await calendarView(app, app.phone ? "Day" : "Upcoming")
+  const card = app.page.getByRole("button", { name: new RegExp(`^${title}, `) }).first()
+  await card.scrollIntoViewIfNeeded()
+  await press(app, card)
+  await app.page.mouse.move(0, 0)
+}
+/** EDIT and DELETE: in the pane from medium up, in the top bar on a phone. */
+const editButton = (app) => app.page.getByRole("button", { name: "Edit", exact: true }).first()
+const deleteButton = (app) => app.page.getByRole("button", { name: "Delete", exact: true }).first()
 
 /** The events on screen, as their look says: the primary tone, and which is selected (`aria-current`). */
 const looks = (page) =>
@@ -306,55 +325,265 @@ export const scenes = [
     },
   },
   {
-    // An event open (Desktop / 07): from Upcoming, in the detail column beside the list, where it is the
-    // selected card and the next event is neutral with its NEXT line. A phone's Day pushes it.
+    // An event open (Desktop / 07, Mobile / 09; brief C2): from Upcoming, in the detail column beside the
+    // list, where it is the selected card and the next event is neutral with its NEXT line. A phone's Day
+    // pushes it: Edit and Delete in the top bar, the place button in the bottom row.
     name: "calendar-event",
-    run: async (app) => {
-      await calendarView(app, app.phone ? "Day" : "Upcoming")
-      await press(app, app.page.getByRole("button", { name: /^Token audit review, / }).first())
-    },
-    assert: async ({ page, phone }) => {
-      if (phone) return
+    sean: { kind: "drawn", area: "calendar", screen: "event" },
+    run: (app) => openEvent(app, "Lunch with Ana"),
+    assert: async (app) => {
+      const { page, phone } = app
+      const pane = eventPane(page)
+      ensure((await page.locator('[data-slot="page-head-title"]:visible', { hasText: "Lunch with Ana" }).count()) > 0, "the event's head does not name it")
+      ensure(/^Event \/\/ Thu 11\.12$/i.test((await page.locator('[data-slot="page-head-overline"]:visible').last().innerText()).trim()), "the head's overline is not EVENT // THU 11.12")
+      for (const row of ["When", "Where", "Calendar"]) ensure(await rowOf(pane, row).count(), `the event has no ${row} row`)
+      ensure((await rowOf(pane, "When").evaluate((el) => el.textContent)).includes("12:30 – 13:30"), "WHEN is not 12:30 – 13:30")
+      ensure(await rowOf(pane, "Where").getByRole("link", { name: /^Map of Café Lisboa/ }).count(), "WHERE has no MAP")
+      for (const row of ["Repeats", "Travel", "Time zone", "Alert", "Link"]) ensure(!(await rowOf(pane, row).count()), `the event shows an empty ${row} row`)
+      if (phone) {
+        const bar = page.locator('[data-slot="top-bar"]:visible').first()
+        for (const name of ["Edit", "Delete"]) ensure(await bar.getByRole("button", { name, exact: true }).count(), `the top bar has no ${name}`)
+        ensure(await page.getByRole("button", { name: "Map of Café Lisboa" }).count(), "the bottom row has no place button")
+        ensure(!(await page.getByRole("button", { name: "Join call" }).count()), "an event with no call shows Join call")
+        return
+      }
+      for (const name of ["Edit", "Delete"]) ensure(await pane.getByRole("button", { name, exact: true }).count(), `the event has no ${name.toUpperCase()}`)
+      if (app.size === "medium") return
       const { selected, all } = await oneEmphasis(page, "Upcoming with an event open")
-      ensure(selected.length === 1 && /^Token audit review/.test(selected[0].name), "the open event is not the selected card")
+      ensure(selected.length === 1 && /^Lunch with Ana/.test(selected[0].name), "the open event is not the selected card")
       const next = all.find((e) => /^Standup/.test(e.name))
       ensure(next && !next.primary, "the next event takes the selected look")
       ensure(await page.locator('[data-slot="calendar-event"]', { hasText: "Next // in" }).count(), "the next event does not say so")
     },
   },
   {
-    name: "calendar-event-new",
-    run: async (app) => {
-      const dialog = await newEvent(app)
-      await dialog.getByRole("textbox", { name: "Title" }).fill("Pick up the rental car")
+    // An event with every row (brief C2): a call with its ID, passcode and numbers, guests and their
+    // answers, travel and another zone. JOIN is the one primary; on a phone, the bottom row's Join call.
+    name: "calendar-event-call",
+    scenario: "event-call",
+    sean: { kind: "undrawn", area: "calendar", screen: "event-call" },
+    run: (app) => openEvent(app, "Token audit review"),
+    assert: async (app) => {
+      const { page, phone } = app
+      const pane = eventPane(page)
+      const rows = { "Video call": "Zoom", "Meeting ID": "812 3456 7890", Passcode: "271828", "Call in": "+1 669 900 6833", When: "12:00 – 13:00", Where: "Studio, room 4", Travel: "20 min // leave by 11:40", "Time zone": "New York time: 15:00 – 16:00 EST", Alert: "10 minutes before", Calendar: "Work" }
+      for (const [label, value] of Object.entries(rows)) {
+        ensure(await rowOf(pane, label).count(), `the event has no ${label} row`)
+        const text = await rowOf(pane, label).first().evaluate((el) => el.textContent)
+        ensure(text.includes(value), `${label} reads "${text}", not "${value}"`)
+      }
+      for (const label of ["Meeting ID", "Passcode"]) ensure(await rowOf(pane, label).getByRole("button", { name: "Copy" }).count(), `${label} has no COPY`)
+      ensure(await rowOf(pane, "Call in").first().getByRole("link", { name: /^Call in on / }).count(), "CALL IN has no CALL")
+      const guests = pane.getByRole("region", { name: "Guests" })
+      ensure(/03/.test(await guests.getByRole("heading").first().innerText()), "GUESTS does not count three")
+      ensure(await guests.getByText("Organizer", { exact: true }).count(), "the organizer has no badge")
+      for (const answer of ["Going", "No reply", "Maybe"]) ensure(await guests.getByText(answer, { exact: true }).count(), `no guest says ${answer}`)
+      if (phone) {
+        ensure(await page.getByRole("button", { name: "Join call" }).count(), "the bottom row has no Join call")
+        ensure(!(await pane.getByRole("link", { name: /^Join / }).count()), "a phone shows JOIN twice")
+      } else {
+        ensure((await pane.getByRole("link", { name: "Join Zoom" }).count()) === 1, "the event has no JOIN")
+        ensure(await pane.getByRole("link", { name: "Open in browser" }).count(), "JOIN that opens the app has no OPEN IN BROWSER")
+        // COPY says "Copied" in its own place for 2 s, and raises no toast.
+        // The clipboard as it is when the browser allows the copy (a headless page in the background may not).
+        await page.evaluate(() => Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => {} }, configurable: true }))
+        const copy = rowOf(pane, "Passcode").getByRole("button", { name: "Copy" })
+        await copy.click()
+        ensure(await rowOf(pane, "Passcode").getByRole("button", { name: "Copied" }).count(), "COPY does not say Copied")
+        ensure(!(await page.locator("[data-sonner-toast]").count()), "COPY raised a toast")
+        await page.waitForTimeout(2100)
+        await page.mouse.move(0, 0)
+      }
     },
   },
   {
-    // An event in the form layer (ADR-0087; brief 3.2): the title as typed in the header, Cancel then Add.
+    // From the Week on a desktop (brief C2, Q2): a review dialog of 560. Its footer: EDIT and DELETE, then JOIN.
+    name: "calendar-event-dialog",
+    sizes: ["desktop"],
+    sean: { kind: "undrawn", area: "calendar", screen: "event-dialog" },
+    run: async (app) => {
+      await calendarView(app, "Week")
+      await press(app, app.page.getByRole("button", { name: /^Design review, / }).first())
+    },
+    assert: async ({ page }) => {
+      const dialog = page.getByRole("dialog", { name: /Design review/ })
+      ensure(await dialog.isVisible(), "the event did not open in a dialog")
+      ensure(Math.round((await dialog.boundingBox()).width) === 560, `the dialog is ${Math.round((await dialog.boundingBox()).width)} wide, not 560`)
+      const footer = dialog.locator('[data-slot="dialog-footer"]')
+      const words = (await footer.locator("a, button").allInnerTexts()).map((w) => w.trim().toLowerCase())
+      ensure(words.join(",") === "edit,delete,join google meet", `the footer reads ${words.join(", ")}`)
+      ensure(!(await dialog.locator('[data-slot="event-detail"]').getByRole("button", { name: "Edit", exact: true }).count()), "EDIT shows in the body as well as the footer")
+    },
+  },
+  {
+    // A read-only calendar (brief C2): no EDIT or DELETE, and one line with a lock.
+    name: "calendar-event-readonly",
+    run: (app) => openEvent(app, "Bank holiday"),
+    assert: async ({ page }) => {
+      const pane = eventPane(page)
+      ensure(await pane.getByText("Holidays is read-only.").isVisible(), "the read-only line is missing")
+      for (const name of ["Edit", "Delete"]) ensure(!(await page.getByRole("button", { name, exact: true }).count()), `a read-only event offers ${name}`)
+    },
+  },
+  {
+    // Edit one event of a series (brief C3): EDIT is a menu of scopes; "This event" opens the form with one
+    // notice and without REPEAT, CALENDAR or INVITE.
+    name: "calendar-event-edit-series",
+    run: async (app) => {
+      const { page } = app
+      await openEvent(app, "Standup")
+      await press(app, editButton(app))
+      // A menu on a desktop, a sheet of rows on a phone.
+      await press(app, page.getByText("This event", { exact: true }).last())
+    },
+    assert: async ({ page }) => {
+      const form = page.getByRole("dialog", { name: /^Edit event/ })
+      ensure(await form.isVisible(), "This event did not open the form")
+      ensure((await form.locator('[data-slot="banner"]').innerText()).includes("Changes apply to this event only."), "the form does not say only this event changes")
+      for (const label of ["Repeat", "Calendar"]) ensure(!(await rowOf(form, label).count()), `one event of a series shows ${label}`)
+      ensure(!(await form.getByRole("combobox", { name: "Invite" }).count()), "one event of a series shows INVITE")
+      ensure(/^Edit event \/\/ Work/i.test((await form.innerText()).trim()) || (await form.getByText(/^Edit event \/\/ Work$/i).count()), "the overline is not EDIT EVENT // WORK")
+    },
+  },
+  {
+    // Delete a repeating event (brief X6, DC10): the question names it, with three scopes as RadioRows, and
+    // focus starts on Cancel. Then the pane closes with "Deleted Standup".
+    name: "calendar-delete-series",
+    sean: { kind: "undrawn", area: "calendar", screen: "delete-series" },
+    run: async (app) => {
+      await openEvent(app, "Standup")
+      await press(app, deleteButton(app))
+    },
+    assert: async ({ page }) => {
+      const question = page.getByRole("dialog", { name: "Delete Standup?" })
+      ensure(await question.isVisible(), "DELETE did not ask")
+      const radios = question.getByRole("radio")
+      ensure(JSON.stringify(await radios.evaluateAll((list) => list.map((r) => r.getAttribute("aria-checked")))) === '["true","false","false"]', "the scopes do not start on This event")
+      for (const name of ["This event", "This and following", "All events"]) ensure(await question.getByRole("radio", { name }).count(), `no scope ${name}`)
+      ensure(await question.getByText("Only Thu 11.12.").count(), "This event does not say which day")
+      ensure(await page.evaluate(() => document.activeElement?.textContent?.trim() === "Cancel"), "focus does not start on Cancel")
+      ensure(await question.getByRole("button", { name: "Delete", exact: true }).count(), "the yes is not DELETE")
+    },
+  },
+  {
+    // DELETE runs: the pane closes, with the toast "Deleted Lunch with Ana".
+    name: "calendar-delete-one",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await openEvent(app, "Lunch with Ana")
+      await press(app, deleteButton(app))
+      const question = page.getByRole("dialog", { name: "Delete Lunch with Ana?" })
+      ensure(!(await question.getByRole("radio").count()), "a one-off event asks for a scope")
+      await press(app, question.getByRole("button", { name: "Delete", exact: true }))
+    },
+    assert: async ({ page }) => {
+      ensure(await page.locator("[data-sonner-toast]", { hasText: "Deleted Lunch with Ana" }).count(), "no toast Deleted Lunch with Ana")
+      ensure(await page.getByText("Nothing open.").isVisible(), "the pane did not close")
+      ensure(!(await page.getByRole("button", { name: /^Lunch with Ana, / }).count()), "the event is still listed")
+    },
+  },
+  {
+    // The form (Desktop / 08, Mobile / 10; brief C3): what and when first, the rest under MORE.
+    name: "calendar-event-new",
+    sean: { kind: "drawn", area: "calendar", screen: "new-event" },
+    run: async (app) => {
+      const dialog = await newEvent(app)
+      await dialog.getByRole("textbox", { name: "Title" }).fill("Pick up the rental car")
+      await dialog.getByRole("textbox", { name: "Location" }).fill("Airport rental center, level 2")
+      await app.page.evaluate(() => document.activeElement?.blur())
+    },
+    assert: async ({ page, phone }) => {
+      const form = page.getByRole("dialog", { name: /^New event/ })
+      const labels = await form.locator('[data-slot="event-form"] > *').evaluateAll((list) => list.map((el) => el.getAttribute("data-slot") ?? el.querySelector("label, [role=group]")?.getAttribute("aria-label") ?? el.querySelector("label")?.textContent?.trim() ?? ""))
+      ensure(labels.length > 6, `the form holds ${labels.length} parts`)
+      for (const name of ["Title", "Location"]) ensure(await form.getByRole("textbox", { name }).count(), `the form has no ${name}`)
+      ensure(await form.getByRole("switch", { name: "All day" }).count(), "the form has no All day")
+      for (const name of ["Starts", "Ends"]) ensure(await form.getByRole("group", { name }).count(), `the form has no ${name}`)
+      ensure(await form.getByRole("button", { name: "Find a time" }).count(), "the form has no FIND A TIME")
+      ensure(await form.getByRole("heading", { name: /^More/ }).count(), "the form has no MORE")
+      for (const label of ["Repeat", "Alert", "Calendar", "Travel", "Time zone"]) ensure(await rowOf(form, label).count(), `MORE has no ${label}`)
+      ensure((await form.locator('[data-slot="invite-note"]').innerText()).trim() === "Invitations go out from Personal when you save.", "INVITE's helper is not the real case")
+      if (!phone) {
+        // Desktop: STARTS and ENDS side by side, four fields on one line.
+        const a = await form.getByRole("group", { name: "Starts" }).boundingBox()
+        const b = await form.getByRole("group", { name: "Ends" }).boundingBox()
+        ensure(Math.abs(a.y - b.y) < 2 && b.x > a.x + a.width, "STARTS and ENDS are not side by side")
+      }
+    },
+  },
+  {
+    // An event in the form layer (ADR-0087; brief 3.2): the title as typed in the header, Cancel then Save event.
     name: "form-layer-event",
     sizes: ["desktop", "phone", "medium"],
     run: async (app) => {
       const write = (form) => form.getByRole("textbox", { name: "Title" }).fill("Pick up the rental car")
-      await formLayer(app, { open: newEvent, write, primary: "Add" })
+      await formLayer(app, { open: newEvent, write, primary: "Save event" })
       await toastGone(app)
       const form = await newEvent(app)
       await write(form)
       if (!app.phone) ensure(/Pick up the rental car/.test(await form.locator('[data-slot="dialog-title"]').innerText()), "the header does not show the title as typed")
     },
-  },
-  {
-    name: "calendar-find-time",
-    run: async (app) => {
-      const dialog = await newEvent(app)
-      await press(app, dialog.getByRole("button", { name: "Find a time" }))
+    assert: async ({ page }) => {
+      // Enter in TITLE does not save (brief C4).
+      const form = page.getByRole("dialog", { name: /^New event/ })
+      await form.getByRole("textbox", { name: "Title" }).press("Enter")
+      ensure(await form.isVisible(), "Enter in TITLE saved the event")
+      // No title: the field says so, and nothing is saved.
+      await form.getByRole("textbox", { name: "Title" }).fill("")
+      await page.keyboard.press("Control+Enter")
+      ensure(await form.getByText("Give the event a title.").isVisible(), "an event with no title does not say so")
     },
   },
   {
-    // Quick add stands at the end of the calendars list until the event form reads a sentence (brief C4, Q5).
-    name: "calendar-quick-add",
+    // FIND A TIME (brief C3): free slots as single-choice chips; picking one sets both times.
+    name: "calendar-find-time",
     run: async (app) => {
-      const list = await calendars(app)
-      await list.getByRole("textbox", { name: "Quick add event" }).fill("Dinner with Marcus Friday 7pm")
+      const dialog = await newEvent(app)
+      await dialog.getByRole("textbox", { name: "Title" }).fill("Planning call")
+      await press(app, dialog.getByRole("button", { name: "Find a time" }))
+    },
+    assert: async ({ page }) => {
+      const form = page.getByRole("dialog", { name: /^New event/ })
+      const chips = form.getByRole("radiogroup", { name: "Free times" }).getByRole("radio")
+      ensure((await chips.count()) > 0, "FIND A TIME found no free times as chips")
+      await chips.first().click()
+      const picked = (await chips.first().innerText()).trim()
+      const start = await form.getByRole("textbox", { name: "Start time" }).inputValue()
+      ensure(picked.endsWith(start), `picking ${picked} set the start to ${start}`)
+      ensure((await chips.first().getAttribute("aria-checked")) === "true", "the picked chip is not on")
+    },
+  },
+  {
+    // Quick add in the form (brief C4, Q5): TITLE reads a sentence and offers USE THIS, which fills the times
+    // and the place and trims the title. The picture: the helper, reading.
+    name: "calendar-quick-add",
+    sean: { kind: "undrawn", area: "calendar", screen: "quick-add" },
+    run: async (app) => {
+      const { page } = app
+      const form = await newEvent(app)
+      const title = form.getByRole("textbox", { name: "Title" })
+      await title.fill("Lunch with Ana tomorrow 1pm at Bricks Cafe")
+      await app.settle()
+      const read = form.locator('[data-slot="quick-read"]')
+      ensure((await read.innerText()).startsWith("Lunch with Ana // Tomorrow 13:00 // Bricks Cafe"), `the helper reads "${await read.innerText()}"`)
+      await press(app, read.getByRole("button", { name: "Use this" }))
+      ensure((await title.inputValue()) === "Lunch with Ana", `USE THIS left the title "${await title.inputValue()}"`)
+      ensure((await form.getByRole("textbox", { name: "Start time" }).inputValue()) === "13:00", "USE THIS did not set the start")
+      ensure((await form.getByRole("textbox", { name: "End time" }).inputValue()) === "14:00", "USE THIS did not set the end")
+      ensure(/Friday, November 13/.test(await form.getByRole("button", { name: /^Start date/ }).getAttribute("aria-label")), "USE THIS did not set the day")
+      ensure((await form.getByRole("textbox", { name: "Location" }).inputValue()) === "Bricks Cafe", "USE THIS did not set the place")
+      ensure(!(await read.count()), "the helper stays after USE THIS")
+      // Once a time is changed by hand, it reads no more.
+      await form.getByRole("textbox", { name: "End time" }).fill("14:30")
+      await title.fill("Dinner friday 7pm")
+      await app.settle()
+      ensure(!(await read.count()), "quick add still reads after a time was changed by hand")
+      await closeForm(app)
+      // The picture: a fresh form, reading a sentence.
+      const again = await newEvent(app)
+      await again.getByRole("textbox", { name: "Title" }).fill("Lunch with Ana tomorrow 1pm at Bricks Cafe")
+      await page.evaluate(() => document.activeElement?.blur())
     },
   },
   {
@@ -381,8 +610,9 @@ export const scenes = [
       ensure(!(await list.locator('[role="checkbox"][aria-current]').count()), "a calendar says it is the current place: it is a filter")
       // One current place: the calendar itself, which the sidebar names under Apps and the layer in its own list.
       ensure((await oneCurrent((await switcherLayer(page).count()) ? list : sidebar(page), "the calendars list")) === "Calendar", "Calendar is not the current place")
-      // Quick add is in the list; the month f3 left in the list column is "Go to date" now (ADR-0098).
-      ensure(await list.getByRole("textbox", { name: "Quick add event" }).count(), "Quick add is gone")
+      // Quick add left the list for the event form's title (ADR-0099; brief C4, Q5); the month f3 left in the
+      // list column is "Go to date" now (ADR-0098).
+      ensure(!(await list.getByRole("textbox", { name: "Quick add event" }).count()), "Quick add is still in the calendars list")
       if (app.phone) ensure(await list.getByRole("switch", { name: "Hours" }).count(), "the phone's calendars have no Hours switch")
       else ensure(await page.getByRole("button", { name: "Go to date", exact: true }).count(), "Go to date is gone")
     },
@@ -597,7 +827,7 @@ export const scenes = [
       await press(app, options.first())
       ensure(!(await picker.count()), "picking a zone did not close the picker")
       ensure(/^Lisbon \(/.test((await form.locator('[data-slot="event-zone"]').innerText()).trim()), "the event does not show Lisbon")
-      ensure(/your time \(Los Angeles\)/.test(await form.locator('[data-slot="zone-note"]').innerText()), "the event does not say what that is on your clock")
+      ensure(/your time\.$/.test((await form.locator('[data-slot="zone-note"]').innerText()).trim()), "the event does not say what that is on your clock")
       // The picture: the list open again, narrowed, with the picked zone marked.
       picker = await open()
       await picker.getByRole("combobox", { name: "Search time zones" }).fill("lis")

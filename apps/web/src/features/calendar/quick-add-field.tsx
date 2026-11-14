@@ -10,9 +10,9 @@ import { parseQuickAdd, quickToInput } from "./quick-add"
 /**
  * Natural-language add: "Lunch with Ana tomorrow 1pm at Café". One field,
  * Enter adds the event to the first calendar that takes new events, and the
- * helper line says what it read. It stands in the calendars list (ADR-0098)
- * and the menu-bar window, until the event form reads a sentence itself
- * (brief C4, Q5).
+ * helper line says what it read. It stands in the menu-bar window only
+ * (brief C4, C8): in the app, the event form's TITLE reads the sentence
+ * (ADR-0099, Q5).
  */
 export function QuickAdd({ calendars }: { calendars: Map<string, Collection> }) {
   const [text, setText] = useState("")
