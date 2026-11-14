@@ -40,7 +40,10 @@
   --c-note-wikilink-text: var(--primary-text);
   --c-note-wikilink-bg: var(--primary-soft);
 
-  /* Note cards (ADR-0038): one tint per color, theme-aware through tier 2.
+  /* Note tints (ADR-0038): one per color, theme-aware through tier 2. Cards
+     no longer use them (ADR-0105: a note's color is a tile's 4 px edge and a
+     row's square, from unicron's swatches); the note's own pane and its color
+     menu still do until the note is rebuilt (brief N2).
      Brown and gray carry less chroma, as Keep's do. */
   --c-note-card-red: oklch(var(--tint-l) var(--tint-c) var(--g-hue-red));
   --c-note-card-orange: oklch(var(--tint-l) var(--tint-c) var(--g-hue-orange));
@@ -53,11 +56,6 @@
   --c-note-card-brown: oklch(var(--tint-l) calc(var(--tint-c) * 0.6) var(--g-hue-brown));
   --c-note-card-gray: oklch(var(--tint-l) 0.008 var(--g-hue-gray));
   --c-note-card-plain: var(--card);
-  --c-note-card-radius: 0.875rem;
-  /* Cards are at least this wide; the grid fits as many as the pane holds.
-     In a narrow pane (under 32rem) they shrink so two still fit. */
-  --c-note-card-min: 15rem;
-  --c-note-card-min-compact: 9.25rem;
 
   /* Scan: the page outline over a photo (ADR-0045). Must read on any photo, so it's the ring color, not a neutral. */
   --c-scan-edge: var(--ring);
