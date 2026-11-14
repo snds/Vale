@@ -42,6 +42,48 @@ export const newEvent = async (app) => {
 
 /** The toasts on screen. */
 const toasts = (page) => page.locator("[data-sonner-toast]")
+/** The demo's booking pages (core/demo-scenarios/calendar.ts): the intro call, and Rui Costa's booking of it. */
+const INTRO = "/book/4f1c9a7e2b6d4e8a9c3f5b7d1e2a6c48"
+const CHANGE = `${INTRO}/b/9b2e7c4a1f6d3e8b5a0c2d4f6e8a1b3c`
+/** A Field Row by its label, in a page or a part of one. */
+const rowIn = (within, label) => within.locator('[data-slot="field-row"]').filter({ has: (within.page ? within.page() : within).getByText(label, { exact: true }) })
+/** Opens Booking links, Calendar's place (brief C7). */
+const bookingLinks = async (app) => {
+  await area(app, "Calendar")
+  await pick(app, "Booking links")
+  await app.page.getByRole("region", { name: "Booking links" }).first().waitFor()
+  await app.page.mouse.move(0, 0)
+}
+/** The open link: beside the list, or pushed. */
+const linkPane = (page) => page.locator('[data-slot="booking-link"]:visible').first()
+/** Opens a link by its title. */
+const openLink = async (app, title) => {
+  await bookingLinks(app)
+  await press(app, app.page.getByRole("list", { name: "Your booking links" }).getByRole("button", { name: title, exact: true }))
+  await linkPane(app.page).waitFor()
+  await app.page.mouse.move(0, 0)
+}
+/** The link's form on the form layer. */
+const linkForm = (page) => page.getByRole("dialog", { name: /booking link|Office hours/ })
+/** The preview layer. */
+const previewLayer = (page) => page.locator('[data-slot="booking-preview"]').locator("xpath=ancestor::*[@role='dialog'][1]")
+/** PREVIEW from the open link: its button beside the list, or MORE in a phone's top bar. */
+const previewIt = async (app) => {
+  const { page } = app
+  if (app.phone) {
+    await press(app, page.locator('[data-slot="top-bar"]:visible').getByRole("button", { name: "More", exact: true }))
+    await press(app, page.locator('[data-slot="adaptive-menu-item"], [role="menuitem"]').filter({ hasText: "Preview" }).first())
+  } else await press(app, linkPane(page).getByRole("button", { name: "Preview", exact: true }))
+  await previewLayer(page).getByRole("radiogroup", { name: "Free times" }).waitFor()
+  await page.mouse.move(0, 0)
+}
+/** Books the first free time on a booking page (or in the preview) as this visitor. */
+const book = async (app, within, name, email) => {
+  await press(app, within.getByRole("radiogroup", { name: "Free times" }).getByRole("radio").first())
+  await within.getByRole("textbox", { name: "Name" }).fill(name)
+  await within.getByRole("textbox", { name: "Email" }).fill(email)
+  await press(app, within.getByRole("button", { name: /^Book( \(preview\))?$/ }))
+}
 /** Add calendars (brief C5): the form layer's dialog, or a sheet on a phone. */
 const addCalendars = (page) => page.getByRole("dialog", { name: "Add calendars" })
 /** Opens Tasks, Calendar's place (brief C6). */
@@ -862,28 +904,6 @@ export const scenes = [
     },
   },
   {
-    name: "calendar-booking-link",
-    run: async (app) => {
-      await area(app, "Calendar")
-      await pick(app, "Booking links")
-      await press(app, button(app.page, "New booking link"))
-      await app.page.getByRole("dialog", { name: "New booking link" }).getByRole("textbox", { name: "Title" }).fill("Intro call")
-    },
-  },
-  {
-    name: "calendar-booking-page", // the public booking page (ADR-0026), as the demo previews it
-    run: async (app) => {
-      await area(app, "Calendar")
-      await pick(app, "Booking links")
-      await press(app, button(app.page, "New booking link"))
-      const form = app.page.getByRole("dialog", { name: "New booking link" })
-      await form.getByRole("textbox", { name: "Title" }).fill("Intro call")
-      await form.getByRole("button", { name: "Add link" }).click()
-      await toastGone(app)
-      await press(app, button(app.page, "Preview Intro call"))
-    },
-  },
-  {
     // Tasks is a place of its own (ADR-0084, ADR-0100; brief C6): TASKS // NN, rows with a checkbox,
     // the note's title, PLAN; checking one ticks it in its note, with UNDO.
     name: "places-tasks",
@@ -921,21 +941,269 @@ export const scenes = [
     },
   },
   {
-    // Booking links, a place too (brief C7). On the way: the second time zone, which left the
-    // calendar's side list for Settings › Calendar.
+    // Booking links, a place too (ADR-0101; brief C7): BOOKING LINKS // 02, NEW LINK, a row per link with
+    // its length, days and hours. On the way: the second time zone, which left the calendar's side list
+    // for Settings › Calendar.
     name: "places-booking-links",
     sizes: ["phone", "desktop", "medium"],
+    scenario: "booking-links",
+    sean: { kind: "undrawn", area: "calendar", screen: "booking-links" },
     run: async (app) => {
       await settings(app, "Calendar")
       ensure(await app.page.getByRole("group", { name: "Second time zone" }).isVisible(), "Settings › Calendar has no second time zone")
-      await area(app, "Calendar")
-      await pick(app, "Booking links")
+      await bookingLinks(app)
     },
     assert: async (app) => {
       const { page } = app
       ensure(await page.getByRole("region", { name: "Booking links" }).first().isVisible(), "the Booking links panel is not showing")
-      ensure(await button(page, "New booking link").first().isVisible(), "a booking link cannot be made from here")
+      ensure(await button(page, "New link").first().isVisible(), "a booking link cannot be made from here")
+      const overline = (await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()).trim()
+      ensure(/^BOOKING LINKS \/\/ 02$/i.test(overline), `the head's overline reads "${overline}"`)
+      ensure((await headTitle(page)) === "Booking links", "the page head does not name Booking links")
+      const rows = page.getByRole("list", { name: "Your booking links" }).getByRole("listitem")
+      ensure((await rows.count()) === 2, `${await rows.count()} rows, not the demo's two links`)
+      ensure(/30 min \/\/ weekdays \/\/ 09:00 – 17:00/i.test(await rows.first().innerText()), "the intro call's row does not say 30 MIN // WEEKDAYS // 09:00 – 17:00")
       if (await sidebar(page).locator('[aria-label="Booking links"]').count()) ensure((await oneCurrent(sidebar(page), "the sidebar")) === "Booking links", "Booking links is not the sidebar's current place")
+      if (app.size === "desktop") ensure(await page.getByText("Pick a booking link to see it here.").isVisible(), "the empty detail column does not say what to pick")
+    },
+  },
+  {
+    // One link (brief C7): LINK cut in the middle with COPY LINK, LENGTH, HOURS, DAYS AHEAD, CALENDAR and
+    // NOTE; PREVIEW, EDIT and DELETE beside the list, or EDIT and MORE in a phone's top bar.
+    name: "calendar-booking-link",
+    sizes: ["phone", "desktop", "medium"],
+    scenario: "booking-links",
+    sean: { kind: "undrawn", area: "calendar", screen: "booking-link" },
+    run: async (app) => {
+      await openLink(app, "Intro call")
+    },
+    assert: async (app) => {
+      const { page } = app
+      const pane = linkPane(page)
+      for (const label of ["Link", "Length", "Hours", "Days ahead", "Calendar", "Note"]) ensure(await rowIn(pane, label).count(), `the link has no ${label} row`)
+      ensure(await rowIn(pane, "Link").getByRole("button", { name: "Copy link" }).isEnabled(), "COPY LINK cannot be used on a gateway")
+      ensure((await rowIn(pane, "Link").textContent()).includes("/book/4f1c9a7e2b6d4e8a9c3f5b7d1e2a6c48"), "the LINK row does not hold the page's address")
+      if (app.phone) {
+        const bar = page.locator('[data-slot="top-bar"]:visible')
+        ensure(await bar.getByRole("button", { name: "Edit", exact: true }).isVisible(), "the top bar has no Edit")
+        ensure(await bar.getByRole("button", { name: "More", exact: true }).isVisible(), "the top bar has no More")
+      } else for (const name of ["Preview", "Edit", "Delete"]) ensure(await pane.getByRole("button", { name, exact: true }).isVisible(), `the link has no ${name}`)
+    },
+  },
+  {
+    // The form (brief C7) on the form layer, checked as every form is: TITLE, LENGTH, FROM and TO,
+    // Weekdays only, DAYS AHEAD as chips, CALENDAR with its helper, NOTE; CREATE LINK. Saved, it opens.
+    name: "booking-link-form",
+    scenario: "booking-links",
+    sean: { kind: "undrawn", area: "calendar", screen: "booking-link-form" },
+    run: async (app) => {
+      await bookingLinks(app)
+      const open = async () => {
+        await press(app, button(app.page, "New link"))
+        return linkForm(app.page)
+      }
+      await formLayer(app, { open, write: (form) => form.getByRole("textbox", { name: "Title" }).fill("Office hours"), primary: "Create link" })
+      ensure(await linkPane(app.page).getByText("Office hours").count(), "the new link did not open")
+      await toastGone(app)
+      // A phone and medium width pushed it over the list: back to the list for the next one.
+      if (!(await button(app.page, "New link").count())) await goBack(app)
+      await press(app, button(app.page, "New link").first())
+      await linkForm(app.page).getByRole("textbox", { name: "Title" }).fill("Office hours")
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async (app) => {
+      const form = linkForm(app.page)
+      for (const label of ["Length", "Days ahead", "Calendar"]) ensure(await rowIn(form, label).count(), `the form has no ${label} row`)
+      ensure(await form.getByRole("switch", { name: "Weekdays only" }).isChecked(), "Weekdays only is not on for a new link")
+      ensure((await form.getByRole("radiogroup", { name: "Days ahead" }).getByRole("radio", { checked: true }).innerText()).trim().toLowerCase() === "7 days", "a new link does not offer 7 days ahead")
+      ensure(await form.getByText("A calendar on a mail account also emails the booker.").isVisible(), "CALENDAR has no helper line")
+    },
+  },
+  {
+    // The preview (brief C7): viewer 960, a sheet on a phone, the info banner above the real page, whose
+    // button reads BOOK (PREVIEW).
+    name: "booking-preview",
+    scenario: "booking-links",
+    sean: { kind: "undrawn", area: "calendar", screen: "booking-preview" },
+    run: async (app) => {
+      await openLink(app, "Intro call")
+      await previewIt(app)
+    },
+    assert: async (app) => {
+      const layer = previewLayer(app.page)
+      ensure(await layer.getByText("Preview: what visitors see. Booking here adds a real event.").isVisible(), "the preview has no banner")
+      ensure(await layer.getByRole("button", { name: "Book (preview)" }).isVisible(), "the preview's button does not read BOOK (PREVIEW)")
+      // The viewer's 960 on a desktop; narrower than its width plus 48, the dialog takes the screen (contract 5.1c C10).
+      if (app.size === "desktop") ensure(Math.round((await layer.boundingBox()).width) === 960, "the preview is not the viewer's 960")
+    },
+  },
+  {
+    // Asserting: a link is created, previewed (the banner shows), booked, then moved and canceled
+    // through the booker's page; canceling asks, with focus on its no.
+    name: "booking-flow",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await bookingLinks(app)
+      // No links yet: the empty state's NEW LINK, as a first-time owner finds it.
+      await press(app, page.locator('section[aria-label="Booking links"]').getByRole("button", { name: "New link", exact: true }).last())
+      const form = linkForm(page)
+      await form.getByRole("textbox", { name: "Title" }).fill("Office hours")
+      await press(app, formPrimary(form, "Create link"))
+      await toastGone(app)
+      await linkPane(page).waitFor()
+      await previewIt(app)
+      const layer = previewLayer(page)
+      ensure(await layer.getByText("Preview: what visitors see. Booking here adds a real event.").isVisible(), "the preview has no banner")
+      await book(app, layer, "Ines Duarte", "ines.duarte@example.com")
+      ensure(await layer.getByText("You're booked.").isVisible(), "booking did not confirm")
+      await press(app, layer.getByRole("button", { name: "See their page" }))
+      const before = (await rowIn(layer, "When").innerText()).trim()
+      await press(app, layer.getByRole("button", { name: "Pick a new time" }))
+      await press(app, layer.getByRole("radiogroup", { name: "New times" }).getByRole("radio").nth(1))
+      await press(app, layer.getByRole("button", { name: "Move", exact: true }))
+      await layer.getByText(/^Moved to /).waitFor()
+      ensure((await rowIn(layer, "When").innerText()).trim() !== before, "MOVE did not change the time")
+      await press(app, layer.getByRole("button", { name: "Cancel booking" }))
+      const ask = page.getByRole("dialog", { name: "Cancel this booking?" })
+      ensure(await ask.isVisible(), "canceling did not ask")
+      ensure(await ask.getByRole("button", { name: "Keep it" }).evaluate((el) => el === document.activeElement), "the question's focus is not on its no")
+      await press(app, ask.getByRole("button", { name: "Cancel booking" }))
+      await layer.getByText("This booking is canceled.").waitFor()
+      ensure(!(await layer.getByRole("button", { name: "Pick a new time" }).count()), "a canceled booking can still move")
+    },
+  },
+  {
+    // The visitor's page (brief C7, B), in the focus frame at 432: BOOK // 30 MIN, the title, "With …"
+    // and the note; FREE TIMES as one chip group across the days; YOUR DETAILS; one primary BOOK.
+    name: "calendar-booking-page",
+    path: INTRO,
+    scenario: "booking-links",
+    sean: { kind: "undrawn", area: "booking", screen: "page" },
+    assert: async (app) => {
+      const { page } = app
+      const frame = page.locator('[data-slot="app-frame-focus-column"]')
+      const box = await frame.boundingBox()
+      ensure(Math.round(box.width) === (app.phone ? app.viewport.width : 432), `the column is ${Math.round(box.width)} wide`)
+      ensure(/^BOOK \/\/ 30 MIN$/i.test((await page.locator('[data-slot="page-head-overline"]').first().innerText()).trim()), "the head's overline is not BOOK // 30 MIN")
+      ensure((await page.getByRole("heading", { level: 1 }).innerText()).trim() === "Intro call", "the head does not name the link")
+      ensure(await page.getByText(/^With /).isVisible(), "the page does not say who it is with")
+      ensure(await page.getByText(/^Times are in your time zone \(.+\)\.$/).isVisible(), "the page does not name the visitor's zone")
+      ensure((await page.getByRole("radiogroup", { name: "Free times" }).count()) === 1, "the free times are not one chip group")
+      ensure((await page.getByRole("radiogroup", { name: "Free times" }).getByRole("radio").count()) > 4, "the page offers almost no times")
+      for (const name of ["Name", "Email", "Note"]) ensure(await page.getByRole("textbox", { name }).isVisible(), `YOUR DETAILS has no ${name}`)
+      ensure((await page.getByRole("button", { name: "Book", exact: true }).count()) === 1, "the page has no BOOK")
+    },
+  },
+  {
+    // Booked (brief C7): BOOKED, "You're booked.", the time, the host's-calendar line, and CHANGE OR
+    // CANCEL with the private link and COPY LINK.
+    name: "booking-booked",
+    path: INTRO,
+    scenario: "booking-links",
+    sean: { kind: "undrawn", area: "booking", screen: "booked" },
+    run: async (app) => {
+      await book(app, app.page, "Ines Duarte", "ines.duarte@example.com")
+    },
+    assert: async ({ page }) => {
+      ensure(await page.getByText("You're booked.").isVisible(), "booking did not confirm")
+      const row = rowIn(page, "Change or cancel")
+      ensure(await row.getByRole("button", { name: "Copy link" }).isVisible(), "the private link has no COPY LINK")
+      ensure(await row.getByText("Keep it. It's only for you.").isVisible(), "the private link has no warning")
+    },
+  },
+  {
+    // The booker's change page (brief C7, C): BOOKING, the title, WHEN in their zone, BOOKED BY; PICK A NEW
+    // TIME and CANCEL BOOKING.
+    name: "booking-change",
+    path: CHANGE,
+    scenario: "booking-booked",
+    sean: { kind: "undrawn", area: "booking", screen: "change" },
+    assert: async ({ page }) => {
+      ensure(/^BOOKING$/i.test((await page.locator('[data-slot="page-head-overline"]').first().innerText()).trim()), "the head's overline is not BOOKING")
+      ensure((await rowIn(page, "Booked by").textContent()).includes("Rui Costa"), "BOOKED BY does not name the booker")
+      ensure(await rowIn(page, "When").getByText(/^In your time zone \(.+\)$/).isVisible(), "WHEN does not name the zone")
+      ensure(await page.getByRole("button", { name: "Pick a new time" }).isEnabled(), "the booking cannot move")
+      ensure(await page.getByRole("button", { name: "Cancel booking" }).isVisible(), "the booking cannot be canceled")
+    },
+  },
+  {
+    name: "booking-change-new-times",
+    path: CHANGE,
+    scenario: "booking-booked",
+    run: async (app) => {
+      await press(app, app.page.getByRole("button", { name: "Pick a new time" }))
+      await press(app, app.page.getByRole("radiogroup", { name: "New times" }).getByRole("radio").first())
+    },
+    assert: async ({ page }) => ensure(await page.getByRole("button", { name: "Move", exact: true }).isEnabled(), "MOVE cannot be used with a time picked"),
+  },
+  {
+    // A link that is off, deleted, or was never one: the critical empty state.
+    name: "booking-link-off",
+    path: "/book/00000000000000000000000000000000",
+    assert: async ({ page }) => ensure(await page.getByText("This link isn't active.").isVisible(), "an unknown link does not say it isn't active"),
+  },
+  {
+    name: "booking-no-times",
+    path: INTRO,
+    scenario: "booking-no-times",
+    assert: async ({ page }) => {
+      ensure(await page.getByText("No free times right now.").isVisible(), "a link with no times does not say so")
+      ensure(!(await page.getByRole("button", { name: "Book", exact: true }).count()), "BOOK shows with nothing to book")
+    },
+  },
+  {
+    // Asserting: someone else took the time first. The page says so in a compact critical banner, and
+    // the times load again without it.
+    name: "booking-just-taken",
+    path: INTRO,
+    scenario: "booking-just-taken",
+    run: async (app) => {
+      const { page } = app
+      const first = page.getByRole("radiogroup", { name: "Free times" }).getByRole("radio").first()
+      const gone = await first.getAttribute("aria-label")
+      await book(app, page, "Ines Duarte", "ines.duarte@example.com")
+      await page.getByText("That time was just taken. Pick another.").waitFor()
+      await app.settle()
+      ensure(!(await page.getByRole("radio", { name: gone, exact: true }).count()), "the times did not reload without the taken one")
+      ensure(!(await page.getByRole("radiogroup", { name: "Free times" }).getByRole("radio", { checked: true }).count()), "a time is still picked")
+      await page.mouse.move(0, 0)
+    },
+  },
+  { name: "booking-loading", path: INTRO, scenario: "booking-loading", loading: true, assert: async ({ page }) => ensure(await page.getByRole("status").filter({ hasText: "Loading free times…" }).count(), "the loading page says nothing to a screen reader") },
+  {
+    name: "booking-canceled",
+    path: CHANGE,
+    scenario: "booking-canceled",
+    assert: async ({ page }) => {
+      ensure(await page.getByText("This booking is canceled.").isVisible(), "a canceled booking does not say so")
+      ensure(await rowIn(page, "Was").count(), "a canceled booking does not say when it was")
+      ensure(!(await page.getByRole("button", { name: "Pick a new time" }).count()), "a canceled booking can still move")
+    },
+  },
+  {
+    name: "booking-started",
+    path: CHANGE,
+    scenario: "booking-started",
+    assert: async ({ page }) => ensure(await page.getByText("This booking has started, so it can't be changed here.").isVisible(), "a started booking does not say it can't change"),
+  },
+  {
+    name: "booking-moved-out",
+    path: CHANGE,
+    scenario: "booking-moved-out",
+    assert: async ({ page }) => {
+      ensure(await page.getByText("It has moved as often as it can. Write to Me.").isVisible(), "a booking moved five times does not say so")
+      ensure(await page.getByRole("button", { name: "Cancel booking" }).isVisible(), "a booking moved five times cannot be canceled")
+    },
+  },
+  {
+    // The desktop app has no public address (ADR-0026): Booking links says the pages need the gateway.
+    name: "booking-desktop-app",
+    scenario: "booking-desktop",
+    run: (app) => bookingLinks(app),
+    assert: async ({ page }) => {
+      ensure(await page.getByText("Booking pages need the gateway.").isVisible(), "the desktop app does not say booking pages need the gateway")
+      ensure(!(await button(page, "New link").count()), "the desktop app offers NEW LINK")
     },
   },
   {

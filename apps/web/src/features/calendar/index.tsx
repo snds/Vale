@@ -23,7 +23,7 @@ import { useRefresh, useScreenFact, useScreenPlace, useScreenRoot } from "@/app/
 import { MonthGrid as MonthPicker } from "@/components/month-grid"
 import { MasterDetail } from "@/components/master-detail"
 import { ScreenHead } from "@/components/page"
-import { useAccounts, useCollections, useKeyBindings, useOccurrences } from "@/core/queries"
+import { useAccounts, useBookingLinks, useCollections, useKeyBindings, useOccurrences } from "@/core/queries"
 import type { Occurrence } from "@/core/types"
 import { useNowSecs } from "@/hooks/use-now"
 import { ariaKey, commandFor } from "@/lib/keys"
@@ -37,7 +37,8 @@ import { addDays, addMonths, dateInput, eventsOn, folio, fromSecs, monthDay, ran
 import { EventDetailPane, EventReview } from "./event-detail"
 import { useCalendars } from "./use-calendars"
 import { MonthGrid } from "./month-grid"
-import { BookingLinks } from "./booking-links"
+import { BookingLinkPane, BookingLinks, BookingHeadAction } from "./booking-links"
+import { BOOKING_PICK, bookingOverline, openBookingLink, useBooking } from "./booking-store"
 import { AddCalendarsDialog } from "./interesting"
 import { TaskPlanPane, TasksPanel } from "./tasks"
 import { tasksOverline, useOpenTasks, usePlanning } from "./planning"
@@ -152,6 +153,8 @@ export function CalendarView() {
   const { data: accounts = [] } = useAccounts()
   const { data: keys } = useKeyBindings()
   const { data: openTasks = [] } = useOpenTasks()
+  const { data: bookingLinks } = useBookingLinks()
+  const bookingOpen = useBooking((s) => s.open)
   // Planning a task takes the detail column (TasksPanel's onPlan closes an event open there).
   const planning = usePlanning((s) => s.task)
 
@@ -252,6 +255,7 @@ export function CalendarView() {
   const toRoot = () => {
     setPlace("calendar")
     setSelected(null)
+    openBookingLink(null)
   }
   useScreenRoot(toRoot)
 
@@ -320,8 +324,14 @@ export function CalendarView() {
   )
   const head = tool ? (
     <>
-      {/* Tasks counts its open items (brief C6): `TASKS // 07`. */}
-      <ScreenHead overline={place === "tasks" ? tasksOverline(openTasks.length) : "Calendar"} title={tool} switcher={switching.switcher} below={switcherLayer} />
+      {/* Tasks counts its open items (brief C6): `TASKS // 07`; Booking links its links, with NEW LINK (brief C7). */}
+      <ScreenHead
+        overline={place === "tasks" ? tasksOverline(openTasks.length) : bookingOverline(bookingLinks?.length)}
+        title={tool}
+        switcher={switching.switcher}
+        actions={place === "booking" ? <BookingHeadAction /> : undefined}
+        below={switcherLayer}
+      />
     </>
   ) : (
     <ScreenHead overline={overline} title={title} meta={meta} switcher={switching.switcher} actions={wide ? chips : undefined} below={below} />
@@ -362,7 +372,14 @@ export function CalendarView() {
   )
 
   // A task's plan stands in the detail column on a desktop (brief C6); an event opened from Tasks, otherwise.
-  const detail = place === "tasks" && planning && frame.split ? <TaskPlanPane onOpen={openEvent} /> : selected && <EventDetailPane key={selectedKey} eventId={selected.eventId} start={selected.start} calendars={calendars} onDeleted={() => setSelected(null)} />
+  const detail =
+    place === "booking" ? (
+      bookingOpen && <BookingLinkPane />
+    ) : place === "tasks" && planning && frame.split ? (
+      <TaskPlanPane onOpen={openEvent} />
+    ) : (
+      selected && <EventDetailPane key={selectedKey} eventId={selected.eventId} start={selected.start} calendars={calendars} onDeleted={() => setSelected(null)} />
+    )
   const forms = (
     <>
       {/* What the calendars list opens (brief X1): the holidays picker by its intent, and the form that names a set. */}
@@ -396,7 +413,7 @@ export function CalendarView() {
     <>
       <MasterDetail
         section={tool ?? "Calendar"}
-        pick={place === "tasks" ? "Plan a task to block time for it here." : vertical("calendar").pick}
+        pick={place === "tasks" ? "Plan a task to block time for it here." : place === "booking" ? BOOKING_PICK : vertical("calendar").pick}
         header={head}
         list={
           <AppFrameInset>
@@ -404,7 +421,7 @@ export function CalendarView() {
           </AppFrameInset>
         }
         detail={detail}
-        onBack={() => setSelected(null)}
+        onBack={() => (place === "booking" ? openBookingLink(null) : setSelected(null))}
         onRoot={toRoot}
       />
       {forms}
