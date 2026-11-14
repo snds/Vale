@@ -1,6 +1,6 @@
 # ADR-0077 · The gateway says when a newer image is out
 
-- **Status:** Accepted
+- **Status:** Accepted; one choice, where the manifest lives ("On snds/Vale itself, not snds/releases"), is replaced by [ADR-0090](0090-gateway-feed-on-the-shared-releases.md) (proposed: the feed on snds/releases, this one kept as the bridge). The rest stands.
 - **Date:** 2026-11-08
 - **Builds on:** [ADR-0016](0016-web-gateway.md) (the web gateway), [ADR-0063](0063-shared-inbox.md) (the owner and the team), [ADR-0076](0076-automatic-updates.md) (desktop updates through the shared kit)
 

@@ -44,6 +44,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 mod members;
 pub use members::Members;
+pub mod feed;
 pub mod helper;
 pub mod updates;
 

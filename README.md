@@ -71,9 +71,11 @@ The public key is committed as `apps/web/src-tauri/updater.pub` (key ID `98E8E6D
 2. In this repo's Actions secrets, add `TAURI_SIGNING_PRIVATE_KEY` (the secret key file's contents), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, and `RELEASES_TOKEN` (a fine-grained token with Contents: read and write on snds/releases only).
 3. That's all: CI's `release-main` job publishes each push to `main` once the secrets are there. Until then it's a dry run that says which secret is missing. snds/releases needs at least one commit (a README) before its first release.
 
+A pull request that touches `apps/web/src-tauri/`, a lock file or `ci.yml` runs the same job as a dry run: a throwaway key, nothing published.
+
 Local builds (`pnpm tauri build`) carry the version `0.1.0` and don't check for updates: only CI's `0.1.0-main.<time>` builds follow the main channel.
 
-The web gateway is a server, so it doesn't replace itself ([ADR-0077](docs/decisions/0077-gateway-updates.md)). Every push to `main` publishes its image, `ghcr.io/snds/vale-gateway` (`main` and the build's version), and then the rolling [`gateway-main`](https://github.com/snds/Vale/releases/tag/gateway-main) pre-release names that version. The gateway checks at start and every six hours, and its owner's **Settings → Gateway updates** says when a newer image is out and shows `docker compose pull && docker compose up -d`.
+The web gateway is a server, so it doesn't replace itself ([ADR-0077](docs/decisions/0077-gateway-updates.md)). Every push to `main` publishes its image, `ghcr.io/snds/vale-gateway` (`main` and the build's version), and then two rolling pre-releases name that version: [`vale-gateway-main`](https://github.com/snds/releases/releases/tag/vale-gateway-main) on snds/releases, where every app's feed lives, and [`gateway-main`](https://github.com/snds/Vale/releases/tag/gateway-main) here, which older gateways read ([ADR-0090](docs/decisions/0090-gateway-feed-on-the-shared-releases.md)). The gateway checks at start and every six hours, and its owner's **Settings → Gateway updates** says when a newer image is out and shows `docker compose pull && docker compose up -d`.
 
 ### The design system (unicron)
 

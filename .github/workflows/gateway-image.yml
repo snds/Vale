@@ -1,4 +1,4 @@
-# The gateway's image on its main channel (ADR-0077). Every push to main:
+# The gateway's image on its main channel (ADR-0077, ADR-0090). Every push to main:
 #
 # 1. builds apps/gateway/Dockerfile with the version stamped,
 #    `<apps/gateway/Cargo.toml version>-main.<commit time, UTC, YYYYMMDDHHMMSS>`,
@@ -8,12 +8,23 @@
 # 3. only then writes `latest.json` ({"version", "image", "digest", "commit"})
 #    to the rolling `gateway-main` pre-release of this repository. A running
 #    gateway reads that file (apps/gateway/src/updates.rs), so it can only
-#    ever offer an image that's already in the registry.
+#    ever offer an image that's already in the registry. This is the bridge:
+#    gateways built before ADR-0090 read only this file;
+# 4. then writes the same build, in the shared server shape ({"app",
+#    "version", "commit", "pubDate", "images"}), to `latest.json` on the
+#    rolling `vale-gateway-main` pre-release of snds/releases, where every
+#    app's feed lives (tools/gateway-feed/manifest.py). A gateway reads both
+#    files and offers the newer of the two.
 #
-# It needs no secret: GITHUB_TOKEN with `packages: write` and `contents: write`.
+# Steps 1 to 3 need no secret: GITHUB_TOKEN with `packages: write` and
+# `contents: write`. Step 4 writes to another repository, so it needs the
+# secret RELEASES_TOKEN (a fine-grained token: snds/releases only, Contents
+# read and write). Without it step 4 is skipped with a notice and the run
+# still passes: the bridge alone keeps every gateway updating.
+#
 # A run for an older commit (a re-run) pushes its version tag but never moves
-# :main or the manifest backwards. Pull requests don't run it; CI's `images`
-# job checks the image builds.
+# :main or either manifest backwards. Pull requests don't run it; CI's `images`
+# job checks the image builds, and `core` runs the manifest script's tests.
 name: Gateway image
 
 on:
@@ -106,6 +117,9 @@ jobs:
           fi
           # Every version here is `x.y.z-main.<14 digits>`, which sort -V orders as semver does.
           newest=$(printf '%s\n%s\n' "$published" "$VERSION" | sed '/^$/d' | sort -V | tail -1)
+          # The shared feed has its own never-backwards check; it is only tried for a build
+          # that is the bridge's newest (this run's, or a re-run of it).
+          if [ "$newest" = "$VERSION" ]; then echo "current=true" >> "$GITHUB_OUTPUT"; fi
           if [ "$newest" = "$VERSION" ] && [ "$published" != "$VERSION" ]; then
             echo "move=true" >> "$GITHUB_OUTPUT"
           else
@@ -165,3 +179,56 @@ jobs:
               --title "Vale gateway $VERSION" --notes-file notes.md
           fi
           echo "::notice::gateway-main now names $VERSION"
+      # The shared feed (ADR-0090): the same build on snds/releases, in the server shape. Last,
+      # so it too never names an image that isn't in the registry or a build :main isn't at.
+      - name: Announce it in vale-gateway-main on snds/releases
+        if: steps.newest.outputs.current == 'true'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          FEED_REPO: snds/releases
+          FEED_TAG: vale-gateway-main
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice title=Shared feed skipped::the secret RELEASES_TOKEN isn't set, so $FEED_TAG on $FEED_REPO wasn't written. gateway-main on this repository was, and gateways read both."
+            echo "The shared feed \`$FEED_TAG\` on $FEED_REPO was **not** written: the secret \`RELEASES_TOKEN\` isn't set." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # A release needs a commit to tag, and the token must reach the repository.
+          gh api "repos/$FEED_REPO/commits?per_page=1" > /dev/null 2>&1 || {
+            echo "::error::RELEASES_TOKEN can't read $FEED_REPO (expired, or not scoped to it), or the repository has no commits."
+            exit 1
+          }
+          mkdir -p feed
+          previous=()
+          exists=false
+          if gh release view "$FEED_TAG" --repo "$FEED_REPO" > /dev/null 2>&1; then
+            exists=true
+            # A manifest that is there must be read: never write over one that couldn't be compared.
+            if gh release view "$FEED_TAG" --repo "$FEED_REPO" --json assets -q '.assets[].name' | grep -qx latest.json; then
+              gh release download "$FEED_TAG" --repo "$FEED_REPO" -p latest.json -O feed/published.json
+              previous=(--previous feed/published.json)
+            fi
+          fi
+          code=0
+          python3 tools/gateway-feed/manifest.py --version "$VERSION" --commit "$GITHUB_SHA" \
+            --image "$IMAGE@$DIGEST" "${previous[@]}" --out feed/latest.json || code=$?
+          case "$code" in
+            0) ;;
+            3|4) echo "::notice::$FEED_TAG on $FEED_REPO already names this build or a newer one: it stays"; exit 0 ;;
+            *) echo "::error::the feed's manifest couldn't be written"; exit 1 ;;
+          esac
+          cat feed/latest.json
+          title="Vale gateway main ($VERSION)"
+          notes="The newest image of the Vale web gateway: $IMAGE:$VERSION ($DIGEST), built from $GITHUB_REPOSITORY@$GITHUB_SHA. A running gateway reads latest.json here and says in Settings when a newer image is out. Not a release."
+          if [ "$exists" = true ]; then
+            gh release edit "$FEED_TAG" --repo "$FEED_REPO" --prerelease --latest=false --title "$title" --notes "$notes"
+          else
+            gh release create "$FEED_TAG" --repo "$FEED_REPO" --prerelease --latest=false --title "$title" --notes "$notes"
+          fi
+          gh release upload "$FEED_TAG" --repo "$FEED_REPO" --clobber feed/latest.json
+          echo "::notice::$FEED_TAG on $FEED_REPO now names $VERSION"
+          echo "Published $VERSION to [\`$FEED_TAG\`](https://github.com/$FEED_REPO/releases/tag/$FEED_TAG)." >> "$GITHUB_STEP_SUMMARY"
