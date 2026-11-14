@@ -1,21 +1,22 @@
 import type { ReactNode } from "react"
 
-import { Button, Dialog, DialogContent, DialogTitle, Sheet, SheetContent, SheetTitle } from "@unicron/ui"
-import { useIsTabletUp } from "@/hooks/use-media-query"
+import { Button, Dialog, DialogContent, DialogTitle, Sheet, SheetContent, SheetTitle, useAppFrame } from "@unicron/ui"
 
 /** The field marked `data-editor-focus` gets focus once the frame is open. */
 const firstField = () => document.querySelector<HTMLElement>("[data-editor-focus]") ?? true
 
 /**
- * A full-screen sheet on phones and a dialog from tablet up, like the
- * composer: editors are tasks, so they take over the small screen.
+ * A full-screen sheet in the phone's shells (compact width, or a short
+ * screen) and a dialog from medium width up, like the composer: editors are
+ * tasks, so they take over the small screen. The frame's width class decides
+ * (ADR-0083).
  */
 export function EditorFrame({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
-  const tabletUp = useIsTabletUp()
+  const tabletUp = !useAppFrame().phone
   if (tabletUp) {
     return (
       <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-        <DialogContent size="lg" className="flex max-h-[min(46rem,calc(100dvh-2rem))] flex-col gap-0 p-0" showCloseButton={false} initialFocus={firstField}>
+        <DialogContent size="lg" className="flex max-h-[min(46rem,calc(100dvh-2rem))] flex-col gap-0 [--c-dialog-padding:0]" showCloseButton={false} initialFocus={firstField}>
           <DialogTitle className="sr-only">{title}</DialogTitle>
           {children}
         </DialogContent>

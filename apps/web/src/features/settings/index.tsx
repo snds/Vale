@@ -1,13 +1,16 @@
 import type { ReactNode } from "react"
 
+import { useScreenPlace } from "@/app/screen"
 import { useUi, type SettingsSection } from "@/app/ui-store"
 import { Button, Icon, type IconName, Item, ItemContent, ItemMedia, ItemTitle } from "@unicron/ui"
-import { MasterDetail, PaneHeader } from "@/components/master-detail"
+import { MasterDetail } from "@/components/master-detail"
+import { ScreenHead } from "@/components/page"
 import { isMember, isTauri, signOutOfGateway } from "@/core/client"
 import { useAccounts, useCore } from "@/core/queries"
 import { AccountsSection } from "@/features/accounts"
 import { AdvancedMail } from "@/features/advanced-mail"
 import { AiSettingsForm } from "@/features/ai-settings"
+import { AppearanceSettings } from "@/features/appearance-settings"
 import { GatewayUpdatesSection } from "@/features/gateway-updates"
 import { ShortcutSettings } from "@/features/grammar"
 import { MeetingSettingsSection } from "@/features/meeting-settings"
@@ -18,7 +21,7 @@ import { Members } from "@/features/team-members"
 import { AboutSection } from "@/features/updates/about-section"
 import { WritingSettings } from "@/features/writing-settings"
 
-import { SectionHeader } from "./section-header"
+import { SettingsHeading } from "./section-header"
 
 interface Section {
   id: SettingsSection
@@ -39,14 +42,17 @@ export function SettingsView() {
   const current = sections.find((s) => s.id === settings) ?? null
   const remote = useCore().data?.remote
 
+  // The breadcrumb's last part (ADR-0083): SETTINGS // MAIL.
+  useScreenPlace(current?.title ?? null)
+
   return (
     <MasterDetail
-      emptyIcon="settings"
-      emptyLabel="Choose a section to see its settings."
+      section="Settings"
+      pick="Pick a section to see its settings here."
       onBack={() => useUi.setState({ settings: "index" })}
-      header={<PaneHeader title="Settings" />}
+      header={<ScreenHead overline="Settings" title="Settings" />}
       list={
-        <nav aria-label="Settings sections" className="flex flex-col gap-1 px-2 pb-4">
+        <nav aria-label="Settings sections" className="flex flex-col gap-1 pb-4">
           {sections.map((s) => (
             <Item
               key={s.id}
@@ -91,31 +97,31 @@ function useSections(): Section[] {
   const all: (Section & { when: boolean })[] = [
     {
       id: "accounts",
-      icon: "manage_accounts",
+      icon: "user--settings",
       title: "Accounts",
       when: true,
       body: () => <AccountsSection />,
     },
     {
       id: "writing",
-      icon: "edit_note",
+      icon: "edit",
       title: "Signatures and templates",
       when: hasAccount && !member,
       body: () => (
         <>
-          <SectionHeader title="Signatures and templates" description="Signatures go on new messages and replies. Templates are text you reuse, inserted from the composer." />
+          <SettingsHeading title="Signatures and templates" description="Signatures go on new messages and replies. Templates are text you reuse, inserted from the composer." />
           <WritingSettings />
         </>
       ),
     },
     {
       id: "mail",
-      icon: "mail",
+      icon: "email",
       title: "Mail",
       when: hasAccount && !member,
       body: () => (
         <>
-          <SectionHeader title="Mail" description="The defaults keep your reading private. Change them here if you want more control." />
+          <SettingsHeading title="Mail" description="The defaults keep your reading private. Change them here if you want more control." />
           <AdvancedMail />
           <ScreenerSettingsSection />
         </>
@@ -123,15 +129,28 @@ function useSections(): Section[] {
     },
     {
       id: "calendar",
-      icon: "calendar_month",
+      icon: "calendar",
       title: "Calendar",
       when: !member,
       body: () => (
         <>
-          <SectionHeader title="Calendar" description={remote ? "How meetings open." : "How meetings open, and what the menu bar shows."} />
+          <SettingsHeading title="Calendar" description={remote ? "How meetings open." : "How meetings open, and what the menu bar shows."} />
           <MeetingSettingsSection />
           {/* The menu bar is the desktop's; the demo stands in for it. */}
           {!remote && <MenuBarSettingsSection />}
+        </>
+      ),
+    },
+    {
+      // Everyone has it, a team member too: the theme is this device's, not the gateway's (ADR-0082).
+      id: "appearance",
+      icon: "contrast",
+      title: "Appearance",
+      when: true,
+      body: () => (
+        <>
+          <SettingsHeading title="Appearance" description="How Vale looks on this device." />
+          <AppearanceSettings />
         </>
       ),
     },
@@ -142,7 +161,7 @@ function useSections(): Section[] {
       when: true,
       body: () => (
         <>
-          <SectionHeader
+          <SettingsHeading
             title="Shortcuts and gestures"
             description="The same actions three ways: a key, a swipe on a phone, or the command menu. Every swipe can also have a key, so nothing is gesture-only."
           />
@@ -152,12 +171,12 @@ function useSections(): Section[] {
     },
     {
       id: "ai",
-      icon: "wand_stars",
+      icon: "bot",
       title: "AI summaries and replies",
       when: hasAccount && !member,
       body: () => (
         <>
-          <SectionHeader title="AI summaries and replies" description="Off unless you turn it on. A conversation goes to the model only when you ask for its summary or replies." />
+          <SettingsHeading title="AI summaries and replies" description="Off unless you turn it on. A conversation goes to the model only when you ask for its summary or replies." />
           <AiSettingsForm />
         </>
       ),
@@ -169,7 +188,7 @@ function useSections(): Section[] {
       when: hasAccount && !remote && !member,
       body: () => (
         <>
-          <SectionHeader title="New mail on your phone" description="How mail reaches your phone while the app is closed. The desktop app keeps its own connection open while it runs." />
+          <SettingsHeading title="New mail on your phone" description="How mail reaches your phone while the app is closed. The desktop app keeps its own connection open while it runs." />
           <PushSettingsSection />
         </>
       ),
@@ -177,24 +196,24 @@ function useSections(): Section[] {
     {
       // The gateway's own updates (ADR-0077), for its owner: it says when a newer image is out.
       id: "gateway",
-      icon: "dns",
+      icon: "bare-metal-server",
       title: "Gateway updates",
       when: remote && !member,
       body: () => (
         <>
-          <SectionHeader title="Gateway updates" description="This gateway's version, and whether a newer image is out. The gateway never restarts itself: you update it on its server." />
+          <SettingsHeading title="Gateway updates" description="This gateway's version, and whether a newer image is out. The gateway never restarts itself: you update it on its server." />
           <GatewayUpdatesSection />
         </>
       ),
     },
     {
       id: "team",
-      icon: "group",
+      icon: "user--multiple",
       title: "Team members",
       when: remote && !member,
       body: () => (
         <>
-          <SectionHeader
+          <SettingsHeading
             title="Team members"
             description="People you add work this gateway's mail with you: they read and reply from its accounts, assign conversations, and leave each other notes. Your accounts, settings, calendars, contacts, and notes stay yours."
           />
@@ -205,12 +224,12 @@ function useSections(): Section[] {
     {
       // Updates are the desktop app's (ADR-0076): not on the web, a gateway, or Vale Demo.
       id: "about",
-      icon: "info",
+      icon: "information",
       title: "About",
       when: isTauri(),
       body: () => (
         <>
-          <SectionHeader title="About" description="This version of Vale, and its updates. A newer build downloads quietly, and Vale offers to restart for it." />
+          <SettingsHeading title="About" description="This version of Vale, and its updates. A newer build downloads quietly, and Vale offers to restart for it." />
           <AboutSection />
         </>
       ),
