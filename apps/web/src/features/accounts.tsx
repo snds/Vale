@@ -1,14 +1,16 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 
-import { type IconName, Button, Field, FieldDescription, FieldGroup, FieldLabel, FieldRow, FieldRowAction, Input, NativeSelect, NativeSelectOption, NavItem, SectionHeader, Skeleton, toast, useAppFrame } from "@unicron/ui"
+import { type IconName, Button, Field, FieldLabel, FieldRow, FieldRowAction, NativeSelect, NativeSelectOption, NavItem, SectionHeader, Skeleton, TextField, toast, useAppFrame } from "@unicron/ui"
 import { usePushedScreen } from "@/app/places"
-import { gatewayMe, getCoreClient, isMember, signOutOfGateway } from "@/core/client"
+import { gatewayMe, getCoreClient, isDesktopApp, isMember, signOutOfGateway } from "@/core/client"
 import { useAccounts, useCore } from "@/core/queries"
 import type { Account, AccountConfig, DavConfig, JmapConfig, OAuthIssuer, Provider, Security, ServerConfig } from "@/core/types"
 import { useConfirm } from "@/lib/confirm"
 
 import { OAuthSignIn } from "./oauth-sign-in"
+import { AccountFormEnd, AccountFormTop, AddPlaceProvider, FormFailed } from "./onboarding/add-form"
+import { useAddPlace, type AddPlace } from "./onboarding/add-place"
 import { AccountScreenHead } from "./settings/account-screen-head"
 import { setAccountStep, useAccountStep } from "./settings/account-step"
 import { SaveFailed } from "./settings/save-failed"
@@ -16,6 +18,8 @@ import { SaveFailed } from "./settings/save-failed"
 interface Preset {
   id: string
   label: string
+  /** What step 2's title adds: "Add Gmail", "Add IMAP account". */
+  name: string
   icon: IconName
   provider: Provider
   /** Why it can't be added yet. Shown instead of hiding the option. */
@@ -38,10 +42,10 @@ interface Preset {
 
 // In the order first run lists them (brief X8).
 const PRESETS: Preset[] = [
-  { id: "google", label: "Gmail", icon: "email", provider: "google", passwordLabel: "", oauth: "google" },
-  { id: "microsoft", label: "Outlook / Microsoft 365", icon: "email", provider: "microsoft", passwordLabel: "", oauth: "microsoft" },
+  { id: "google", label: "Gmail", name: "Gmail", icon: "email", provider: "google", passwordLabel: "", oauth: "google" },
+  { id: "microsoft", label: "Outlook / Microsoft 365", name: "Outlook", icon: "email", provider: "microsoft", passwordLabel: "", oauth: "microsoft" },
   {
-    id: "icloud", label: "iCloud", icon: "cloud", provider: "i_cloud",
+    id: "icloud", label: "iCloud", name: "iCloud", icon: "cloud", provider: "i_cloud",
     imap: { host: "imap.mail.me.com", port: 993, security: "tls" },
     smtp: { host: "smtp.mail.me.com", port: 587, security: "start_tls" },
     passwordLabel: "App-specific password",
@@ -50,7 +54,7 @@ const PRESETS: Preset[] = [
     dav: { calendarUrl: "https://caldav.icloud.com/", contactsUrl: "https://contacts.icloud.com/" },
   },
   {
-    id: "fastmail", label: "Fastmail", icon: "flash", provider: "jmap",
+    id: "fastmail", label: "Fastmail", name: "Fastmail", icon: "flash", provider: "jmap",
     // Fastmail is the JMAP reference server: faster sync, no IMAP/SMTP.
     jmap: { sessionUrl: "https://api.fastmail.com/jmap/session", bearer: true },
     passwordLabel: "API token",
@@ -60,14 +64,14 @@ const PRESETS: Preset[] = [
     davPasswordHelp: { text: "Optional. In Fastmail: Settings → Privacy & Security → App passwords, with access to calendars and contacts.", href: "https://www.fastmail.help/hc/en-us/articles/1500000278342" },
   },
   {
-    id: "other", label: "Other (IMAP)", icon: "bare-metal-server", provider: "generic", custom: "imap",
+    id: "other", label: "Other (IMAP)", name: "IMAP account", icon: "bare-metal-server", provider: "generic", custom: "imap",
     imap: { host: "", port: 993, security: "tls" },
     smtp: { host: "", port: 465, security: "tls" },
     passwordLabel: "Password",
     dav: "ask",
   },
   {
-    id: "jmap", label: "Other (JMAP)", icon: "api", provider: "jmap", custom: "jmap",
+    id: "jmap", label: "Other (JMAP)", name: "JMAP account", icon: "api", provider: "jmap", custom: "jmap",
     jmap: { sessionUrl: "", bearer: false },
     passwordLabel: "Password",
     dav: "ask",
@@ -147,11 +151,8 @@ export function AccountsSection() {
   if (isMember()) return <MemberBlock />
   if (isPending) return <SkeletonRows />
   const back = () => setAccountStep({ kind: "list" })
-  if (step.kind === "add") {
-    const preset = PRESETS.find((p) => p.id === step.preset)
-    if (preset?.oauth) return <OAuthSignIn issuer={preset.oauth} onBack={back} onDone={back} />
-    if (preset) return <AddAccountForm preset={preset} onBack={back} onDone={back} />
-  }
+  // First run's step 2, in this column (brief T1, X8; ADR-0107).
+  if (step.kind === "add" && PRESETS.some((p) => p.id === step.preset)) return <AddAccountStep preset={step.preset} where="settings" onBack={back} onAdded={(a) => (toast.success(`Added ${a.address}`), back())} />
   const account = step.kind === "manage" || step.kind === "connect" ? accounts.find((a) => a.id === step.id) : undefined
   if (step.kind === "connect" && account) return <ConnectDavForm account={account} onBack={() => setAccountStep({ kind: "manage", id: account.id })} />
   if (step.kind === "manage" && account) return <ManageAccount account={account} onBack={back} />
@@ -169,16 +170,16 @@ function SkeletonRows() {
   )
 }
 
-/** Where mail and passwords are kept, by build: one line (brief T1). Kept in full: it is about privacy. */
-function StorageLine() {
+/** Where mail and passwords are kept, by build: one line (brief T1). Kept in full: it is about privacy. First run's step 1 says it too (brief X8). */
+export function StorageLine({ bare = false }: { bare?: boolean }) {
   const { data: core } = useCore()
   const line =
-    core?.kind === "demo"
+    core?.kind === "demo" && !isDesktopApp()
       ? "You're using the web preview with sample mail. Connecting real accounts needs the desktop app for now."
       : core?.remote
         ? "Mail is kept on your gateway. Passwords are sealed there with its key."
         : "Mail stays on this device. Passwords are kept in your system keychain."
-  return <p className="type-body pb-6 text-text-secondary">{line}</p>
+  return <p className={bare ? "type-body text-text-secondary" : "type-body pb-6 text-text-secondary"}>{line}</p>
 }
 
 /**
@@ -260,16 +261,9 @@ function AccountList() {
 
       <section ref={add} aria-label="Add an account">
         <SectionHeader title="Add an account" level={3} />
-        <ul role="list" className="flex flex-col gap-1 pt-2">
-          {PRESETS.map((preset) => {
-            const unavailable = core?.remote && preset.oauth && !SAME_COMPUTER ? OAUTH_REMOTE : core?.kind === "demo" && !preset.oauth ? DEMO_ONLY : preset.unavailable
-            return (
-              <li key={preset.id}>
-                <NavItem label={preset.label} icon={preset.icon} disabled={!!unavailable} description={unavailable} onClick={() => setAccountStep({ kind: "add", preset: preset.id })} />
-              </li>
-            )
-          })}
-        </ul>
+        <div className="pt-2">
+          <ProviderList onPick={(preset) => setAccountStep({ kind: "add", preset })} />
+        </div>
       </section>
 
       {/* Signing out of the gateway, for its owner, last (brief T1; it was a button under the section list). */}
@@ -361,6 +355,44 @@ function MemberBlock() {
   )
 }
 
+/**
+ * The six providers, in the order first run lists them (brief X8): step 1's
+ * rows and Settings' ADD AN ACCOUNT (brief T1). One this build cannot add is
+ * off, with its reason as a visible line, and stays in the tab order (#37).
+ */
+export function ProviderList({ onPick }: { onPick: (preset: string) => void }) {
+  const { data: core } = useCore()
+  return (
+    <ul role="list" aria-label="Providers" className="flex flex-col gap-1">
+      {PRESETS.map((preset) => {
+        const unavailable = core?.remote && preset.oauth && !SAME_COMPUTER ? OAUTH_REMOTE : core?.kind === "demo" && !isDesktopApp() && !preset.oauth ? DEMO_ONLY : preset.unavailable
+        return (
+          <li key={preset.id}>
+            <NavItem label={preset.label} icon={preset.icon} disabled={!!unavailable} description={unavailable} onClick={() => !unavailable && onPick(preset.id)} />
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+/**
+ * Step 2 of adding an account (brief X8): the provider's form, in first
+ * run's focus frame or in Settings › Accounts' column. `onAdded` gets the
+ * new account; the place says it was added (a toast, or the Inbox's).
+ */
+export function AddAccountStep({ preset: id, where, onBack, onAdded }: { preset: string; where: AddPlace; onBack: () => void; onAdded: (a: Account) => void }) {
+  const preset = PRESETS.find((p) => p.id === id)
+  if (!preset) return null
+  return (
+    <AddPlaceProvider where={where} onBack={onBack}>
+      {preset.oauth ? <OAuthSignIn issuer={preset.oauth} title={`Add ${preset.name}`} onAdded={onAdded} /> : <AddAccountForm preset={preset} onAdded={onAdded} />}
+    </AddPlaceProvider>
+  )
+}
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
 const DEMO_ONLY = "Needs the desktop app"
 
 /**
@@ -379,26 +411,50 @@ const SECURITY: { value: Security; label: string }[] = [
   { value: "plain", label: "None (this computer only)" },
 ]
 
+/** A server's three fields, under its header: SERVER · PORT · SECURITY (brief X8). */
 function ServerFields({ label, value, onChange, idPrefix }: { label: string; value: ServerConfig; onChange: (v: ServerConfig) => void; idPrefix: string }) {
   return (
-    <fieldset className="grid grid-cols-[1fr_6rem] gap-2">
-      <legend className="mb-1.5 text-sm font-medium">{label}</legend>
-      <Input aria-label={`${label} server`} placeholder="mail.example.com" value={value.host} onChange={(e) => onChange({ ...value, host: e.target.value.trim() })} id={`${idPrefix}-host`} autoCapitalize="none" />
-      <Input aria-label={`${label} port`} inputMode="numeric" value={value.port} onChange={(e) => onChange({ ...value, port: Number(e.target.value.replace(/\D/g, "")) || 0 })} />
-      <div className="col-span-2 flex flex-col">
-        <NativeSelect aria-label={`${label} security`} value={value.security} onChange={(e) => onChange({ ...value, security: e.target.value as Security })}>
+    <section aria-label={label} className="flex flex-col gap-4">
+      <SectionHeader title={label} level={3} />
+      <div className="grid grid-cols-[1fr_6rem] gap-4">
+        <TextField label="Server" placeholder="mail.example.com" value={value.host} onChange={(e) => onChange({ ...value, host: e.target.value.trim() })} id={`${idPrefix}-host`} autoCapitalize="none" autoComplete="off" />
+        <TextField label="Port" inputMode="numeric" value={value.port} onChange={(e) => onChange({ ...value, port: Number(e.target.value.replace(/\D/g, "")) || 0 })} id={`${idPrefix}-port`} />
+      </div>
+      <Field>
+        <FieldLabel htmlFor={`${idPrefix}-security`}>Security</FieldLabel>
+        <NativeSelect id={`${idPrefix}-security`} value={value.security} onChange={(e) => onChange({ ...value, security: e.target.value as Security })}>
           {SECURITY.map((s) => (
             <NativeSelectOption key={s.value} value={s.value}>
               {s.label}
             </NativeSelectOption>
           ))}
         </NativeSelect>
-      </div>
-    </fieldset>
+      </Field>
+    </section>
   )
 }
 
-function AddAccountForm({ preset, onBack, onDone }: { preset: Preset; onBack: () => void; onDone: () => void }) {
+/** A help line with its link, as the provider writes it. */
+function Help({ text, href }: { text: string; href: string }) {
+  return (
+    <>
+      {text}{" "}
+      <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+        How
+      </a>
+    </>
+  )
+}
+
+/**
+ * Step 2 for a provider that takes a password (brief X8): EMAIL ADDRESS,
+ * NAME ON SENT MAIL and the provider's secret; Other adds its servers, JMAP
+ * its session; calendars and contacts only where the preset asks. ADD
+ * ACCOUNT checks with the server before it saves; what the server says when
+ * it refuses stays in a compact critical Banner above it.
+ */
+function AddAccountForm({ preset, onAdded }: { preset: Preset; onAdded: (a: Account) => void }) {
+  const { block } = useAddPlace()
   const [address, setAddress] = useState("")
   const [displayName, setDisplayName] = useState("")
   const [password, setPassword] = useState("")
@@ -411,6 +467,7 @@ function AddAccountForm({ preset, onBack, onDone }: { preset: Preset; onBack: ()
   const [contactsUrl, setContactsUrl] = useState("")
   const custom = preset.custom
   const qc = useQueryClient()
+  const title = `Add ${preset.name}`
 
   const add = useMutation({
     mutationFn: async () => {
@@ -428,81 +485,68 @@ function AddAccountForm({ preset, onBack, onDone }: { preset: Preset; onBack: ()
     },
     onSuccess: (a) => {
       void qc.invalidateQueries()
-      toast.success(`Added ${a.address}`)
-      onDone()
+      onAdded(a)
     },
   })
+  const separateDav = typeof preset.dav === "object" && preset.dav.separateSecret
 
   return (
-    <form onSubmit={(e) => (e.preventDefault(), add.mutate())} className="flex flex-col gap-4">
-      <AccountScreenHead title={`Add // ${preset.label}`} onBack={onBack} />
-      <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="acct-address">Email address</FieldLabel>
-          <Input id="acct-address" type="email" required autoComplete="email" value={address} onChange={(e) => setAddress(e.target.value)} />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="acct-name">Name on sent mail</FieldLabel>
-          <Input id="acct-name" placeholder="Your name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoComplete="name" />
-        </Field>
+    <form aria-label={title} onSubmit={(e) => (e.preventDefault(), add.mutate())} className="flex flex-1 flex-col gap-8">
+      <AccountFormTop title={title} />
+      <div className="flex flex-col gap-4">
+        <TextField id="acct-address" label="Email address" type="email" required autoComplete="email" autoCapitalize="none" value={address} onChange={(e) => setAddress(e.target.value)} />
+        <TextField id="acct-name" label="Name on sent mail" placeholder="Your name" autoComplete="name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         {custom === "jmap" && (
-          <Field>
-            <FieldLabel htmlFor="acct-session">JMAP session URL</FieldLabel>
-            <Input id="acct-session" type="url" required placeholder="https://mail.example.com/jmap/session" value={sessionUrl} onChange={(e) => setSessionUrl(e.target.value)} autoCapitalize="none" />
-            <FieldDescription>Often https://your-server/.well-known/jmap</FieldDescription>
-          </Field>
+          <TextField id="acct-session" label="Session URL" type="url" required placeholder="https://mail.example.com/jmap/session" helper="Often https://your-server/.well-known/jmap" autoCapitalize="none" value={sessionUrl} onChange={(e) => setSessionUrl(e.target.value)} />
         )}
-        {custom && (
-          <Field>
-            <FieldLabel htmlFor="acct-user">Username</FieldLabel>
-            <Input id="acct-user" placeholder="Usually your email address" value={username} onChange={(e) => setUsername(e.target.value)} autoCapitalize="none" />
-          </Field>
-        )}
-        <Field>
-          <FieldLabel htmlFor="acct-password">{preset.passwordLabel}</FieldLabel>
-          <Input id="acct-password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
-          {preset.passwordHelp && (
-            <FieldDescription>
-              {preset.passwordHelp.text}{" "}
-              <a href={preset.passwordHelp.href} target="_blank" rel="noreferrer" className="underline underline-offset-2">
-                How
-              </a>
-            </FieldDescription>
-          )}
-        </Field>
-        {custom === "imap" && (
-          <>
-            <ServerFields label="Incoming (IMAP)" value={imap} onChange={setImap} idPrefix="imap" />
-            <ServerFields label="Outgoing (SMTP)" value={smtp} onChange={setSmtp} idPrefix="smtp" />
-          </>
-        )}
-        {typeof preset.dav === "object" && preset.dav.separateSecret && (
-          <Field>
-            <FieldLabel htmlFor="acct-dav-password">App password for calendars and contacts</FieldLabel>
-            <Input id="acct-dav-password" type="password" value={davPassword} onChange={(e) => setDavPassword(e.target.value)} autoComplete="off" />
-            {preset.davPasswordHelp && (
-              <FieldDescription>
-                {preset.davPasswordHelp.text}{" "}
-                <a href={preset.davPasswordHelp.href} target="_blank" rel="noreferrer" className="underline underline-offset-2">
-                  How
-                </a>
-              </FieldDescription>
-            )}
-          </Field>
-        )}
-        {preset.dav === "ask" && <DavUrlFields calendarUrl={calendarUrl} setCalendarUrl={setCalendarUrl} contactsUrl={contactsUrl} setContactsUrl={setContactsUrl} />}
-        {typeof preset.dav === "object" && !preset.dav.separateSecret && (
-          <p className="type-caption text-text-secondary">Calendars and contacts connect with the same password.</p>
-        )}
-      </FieldGroup>
-
-      <SaveFailed message={add.error?.message ?? null} />
-      <div className="flex flex-col items-end gap-2">
-        <Button type="submit" loading={add.isPending}>
-          Add account
-        </Button>
-        <p className="type-caption text-text-secondary">Checked before saving.</p>
+        {custom && <TextField id="acct-user" label="Username" placeholder="Usually your email address" autoCapitalize="none" value={username} onChange={(e) => setUsername(e.target.value)} />}
+        <TextField
+          id="acct-password"
+          label={preset.passwordLabel}
+          type="password"
+          required
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          helper={preset.passwordHelp && <Help {...preset.passwordHelp} />}
+        />
       </div>
+      {custom === "imap" && (
+        <>
+          <ServerFields label="Incoming (IMAP)" value={imap} onChange={setImap} idPrefix="imap" />
+          <ServerFields label="Outgoing (SMTP)" value={smtp} onChange={setSmtp} idPrefix="smtp" />
+        </>
+      )}
+      {(separateDav || preset.dav === "ask") && (
+        <section aria-label="Calendars and contacts" className="flex flex-col gap-4">
+          <SectionHeader title="Calendars and contacts" level={3} />
+          {separateDav ? (
+            <TextField
+              id="acct-dav-password"
+              label="App password for calendars and contacts"
+              type="password"
+              autoComplete="off"
+              value={davPassword}
+              onChange={(e) => setDavPassword(e.target.value)}
+              helper={preset.davPasswordHelp && <Help {...preset.davPasswordHelp} />}
+            />
+          ) : (
+            <DavUrlFields calendarUrl={calendarUrl} setCalendarUrl={setCalendarUrl} contactsUrl={contactsUrl} setContactsUrl={setContactsUrl} />
+          )}
+        </section>
+      )}
+      {typeof preset.dav === "object" && !preset.dav.separateSecret && <p className="type-caption text-text-secondary">Calendars and contacts connect with the same password.</p>}
+
+      <FormFailed message={add.error ? errorText(add.error) : null} />
+      <AccountFormEnd
+        primary={
+          <Button type="submit" block={block} loading={add.isPending}>
+            Add account
+          </Button>
+        }
+      >
+        <p className="type-caption text-text-secondary">Checked before saving.</p>
+      </AccountFormEnd>
     </form>
   )
 }
@@ -522,15 +566,17 @@ function davFor(preset: Preset, calendarUrl: string, contactsUrl: string, davPas
 function DavUrlFields({ calendarUrl, setCalendarUrl, contactsUrl, setContactsUrl }: { calendarUrl: string; setCalendarUrl: (v: string) => void; contactsUrl: string; setContactsUrl: (v: string) => void }) {
   return (
     <>
-      <Field>
-        <FieldLabel htmlFor="acct-caldav">Calendar server (CalDAV)</FieldLabel>
-        <Input id="acct-caldav" type="url" placeholder="https://dav.example.com/" value={calendarUrl} onChange={(e) => setCalendarUrl(e.target.value)} autoCapitalize="none" />
-        <FieldDescription>Optional. The server address is enough; we find your calendars from there.</FieldDescription>
-      </Field>
-      <Field>
-        <FieldLabel htmlFor="acct-carddav">Contacts server (CardDAV)</FieldLabel>
-        <Input id="acct-carddav" type="url" placeholder="https://dav.example.com/" value={contactsUrl} onChange={(e) => setContactsUrl(e.target.value)} autoCapitalize="none" />
-      </Field>
+      <TextField
+        id="acct-caldav"
+        label="Calendar server (CalDAV)"
+        type="url"
+        placeholder="https://dav.example.com/"
+        helper="Optional. The server address is enough; we find your calendars from there."
+        autoCapitalize="none"
+        value={calendarUrl}
+        onChange={(e) => setCalendarUrl(e.target.value)}
+      />
+      <TextField id="acct-carddav" label="Contacts server (CardDAV)" type="url" placeholder="https://dav.example.com/" autoCapitalize="none" value={contactsUrl} onChange={(e) => setContactsUrl(e.target.value)} />
     </>
   )
 }
@@ -544,6 +590,7 @@ function ConnectDavForm({ account, onBack }: { account: Account; onBack: () => v
   // Without a preset, JMAP accounts (API tokens) need their own DAV password.
   const separate = fixed?.separateSecret ?? !!account.jmap
   const [password, setPassword] = useState("")
+  const phone = useAppFrame().phone
   const qc = useQueryClient()
   const connect = useMutation({
     mutationFn: async () => {
@@ -558,24 +605,29 @@ function ConnectDavForm({ account, onBack }: { account: Account; onBack: () => v
     },
   })
   return (
-    <form onSubmit={(e) => (e.preventDefault(), connect.mutate())} className="flex flex-col gap-4">
+    <form onSubmit={(e) => (e.preventDefault(), connect.mutate())} className="flex flex-col gap-8">
       <AccountScreenHead title={`Calendars and contacts // ${account.displayName}`} onBack={onBack} />
-      <FieldGroup>
+      <div className="flex flex-col gap-4">
         {!fixed && <DavUrlFields calendarUrl={calendarUrl} setCalendarUrl={setCalendarUrl} contactsUrl={contactsUrl} setContactsUrl={setContactsUrl} />}
-        <Field>
-          <FieldLabel htmlFor="dav-password">{separate ? "App password for calendars and contacts" : "Password"}</FieldLabel>
-          <Input id="dav-password" type="password" required={separate} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" />
-          <FieldDescription>
-            {separate ? (preset?.davPasswordHelp?.text ?? "This server needs its own password for calendars.") : "Leave blank to use the account's saved password."}
-          </FieldDescription>
-        </Field>
-      </FieldGroup>
-      <SaveFailed message={connect.error?.message ?? null} />
-      <div className="flex justify-end">
-        <Button type="submit" loading={connect.isPending}>
-          Connect
-        </Button>
+        <TextField
+          id="dav-password"
+          label={separate ? "App password for calendars and contacts" : "Password"}
+          type="password"
+          required={separate}
+          autoComplete="off"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          helper={separate ? (preset?.davPasswordHelp?.text ?? "This server needs its own password for calendars.") : "Leave blank to use the account's saved password."}
+        />
       </div>
+      <FormFailed message={connect.error ? errorText(connect.error) : null} />
+      <AccountFormEnd
+        primary={
+          <Button type="submit" block={phone} loading={connect.isPending}>
+            Connect
+          </Button>
+        }
+      />
     </form>
   )
 }

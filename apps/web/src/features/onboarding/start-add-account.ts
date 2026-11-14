@@ -1,12 +1,13 @@
 import { useUi } from "@/app/ui-store"
 import { useAccountStep } from "@/features/settings/account-step"
 
+import { openFirstRun } from "./first-run"
+
 /**
  * "Add an account…", from a section's account list and the command menu
  * (brief X1): Settings › Accounts, at its ADD AN ACCOUNT providers (brief
- * T1; ADR-0104), with the first one focused. Each provider opens today's
- * form in that column (pushed on a phone) until first run restyles it as
- * X8's second step.
+ * T1; ADR-0104), with the first one focused. Each provider opens first
+ * run's second step in that column (pushed on a phone; ADR-0107).
  */
 export function startAddAccount() {
   useAccountStep.setState({ step: { kind: "list" }, focusAdd: true })
@@ -15,9 +16,9 @@ export function startAddAccount() {
 
 /**
  * "Add account" for someone with none yet, from Mail's empty state (brief
- * M1). It will start first run at its first step (brief X8); until then it
- * opens Settings › Accounts too.
+ * M1): first run again, at its first step, in the focus frame (brief X8;
+ * ADR-0107). NOT NOW there returns to the app.
  */
 export function startFirstRun() {
-  useUi.getState().openSettings("accounts")
+  openFirstRun()
 }

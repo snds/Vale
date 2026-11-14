@@ -110,6 +110,47 @@ export const scenes = [
   },
   { name: "settings-accounts", sizes: ["desktop", "phone", "medium"], sean: { kind: "undrawn", area: "settings", screen: "accounts" }, run: (app) => settings(app, "Accounts") },
   {
+    // ADD AN ACCOUNT opens first run's step 2 inside the Settings column, not the focus frame (brief
+    // T1, X8; ADR-0107): the same form, under the pushed screen's head. Adding it returns to the list.
+    name: "settings-add-account",
+    scenario: "accounts-addable",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "add-account" },
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Accounts")
+      await press(app, page.getByRole("region", { name: "Add an account", exact: true }).getByRole("button", { name: "iCloud", exact: true }))
+      ensure(!(await page.getByRole("main", { name: "First run" }).count()), "ADD AN ACCOUNT opened the focus frame")
+      ensure(await page.getByRole("heading", { name: "Add iCloud" }).isVisible(), "the Settings column does not show Add iCloud")
+      await page.getByRole("textbox", { name: "Email address" }).fill("robin.ash@icloud.com")
+      await page.getByRole("textbox", { name: "Name on sent mail" }).fill("Robin Ash")
+      await page.getByLabel("App-specific password").fill("abcd-efgh-ijkl-mnop")
+      await page.mouse.move(0, 0)
+      await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
+    },
+    assert: async ({ page }) => {
+      ensure(await page.getByRole("button", { name: "Add account", exact: true }).isVisible(), "the form has no ADD ACCOUNT")
+      ensure(await page.getByText("Checked before saving.").isVisible(), "ADD ACCOUNT has no Checked before saving.")
+    },
+  },
+  {
+    // Adding from Settings: the toast names the address and the list shows the new account, waiting for its first sync.
+    name: "settings-add-account-done",
+    scenario: "accounts-addable",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Accounts")
+      await press(app, page.getByRole("region", { name: "Add an account", exact: true }).getByRole("button", { name: "iCloud", exact: true }))
+      await page.getByRole("textbox", { name: "Email address" }).fill("robin.ash@icloud.com")
+      await page.getByLabel("App-specific password").fill("abcd-efgh-ijkl-mnop")
+      await press(app, page.getByRole("button", { name: "Add account", exact: true }))
+      ensure(/Added robin\.ash@icloud\.com/.test(await page.locator("[data-sonner-toast]").first().innerText()), "the toast does not read Added robin.ash@icloud.com")
+      ensure(/iCloud \/\/ first sync/.test(await page.getByRole("group", { name: "robin.ash" }).first().textContent()), "the new account's row does not read iCloud // first sync")
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
     // Manage an account, pushed in the column (brief T1).
     name: "settings-manage-account",
     sizes: ["desktop", "phone", "medium"],
