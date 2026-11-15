@@ -26,7 +26,8 @@ import { ConversationView } from "./conversation-view"
 import { CATEGORIES, LANES } from "./lanes"
 import { MailNav } from "./mail-nav"
 import { useSenderActions } from "./sender-actions"
-import { ScheduledList } from "./scheduled-list"
+import { editFailed, markFailedSeen, useFailedSends, useOutboxItems } from "./outbox"
+import { OutboxList, OutboxMessage } from "./scheduled-list"
 import { SenderPanelSlot } from "./sender-profile"
 import { TeamList, TeamThreadView } from "../team/team-view"
 import { InboxChips, NewsletterBundle, ScreenerPointer } from "./splits"
@@ -67,6 +68,16 @@ export function MailView() {
     setSelected(null)
   }
   const selectedId = selected?.threadId ?? null
+  // The Outbox's open message (ADR-0095): an outbox item, not a conversation.
+  const [outboxOpen, setOutboxOpen] = useState<string | null>(null)
+  if (placeSeen !== placeKey && outboxOpen) setOutboxOpen(null)
+  const outbox = useOutboxItems(accountId)
+  const { failed, unseen } = useFailedSends()
+  // Opening the Outbox counts as seeing what failed: the banner, its toast and the critical tone go (brief M7).
+  const failedIds = failed.map((i) => i.id).join(" ")
+  useEffect(() => {
+    if (tab === "scheduled" && failedIds) markFailedSeen(failedIds.split(" "))
+  }, [tab, failedIds])
 
   const { data: core } = useCore()
   // All of the inbox (no chip) folds newsletters into the bundle row. Searching a lane is Search's (ADR-0085).
@@ -125,6 +136,8 @@ export function MailView() {
   const where = [
     laneInfo.label,
     tab === "screener" ? `${formatListCount(waiting)} waiting` : null,
+    // `OUTBOX // 03`: what waits to go (brief M7).
+    tab === "scheduled" && outbox.items.length > 0 ? formatListCount(outbox.items.length) : null,
     account ? account.displayName : multiAccount && tab !== "screener" ? "All accounts" : null,
   ]
     .filter(Boolean)
@@ -176,7 +189,16 @@ export function MailView() {
     // reauth.mutate is stable; the banner changes only with what it says.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [failing?.id, failing?.displayName, failing?.lastError, failing?.oauth, stops, reauthError, reauth.isPending])
-  useSectionBanner("mail", syncBanner)
+  // A send that failed and has not been seen (brief M7, X4): the first in its own words with EDIT, or how many with OPEN OUTBOX.
+  const notSent = unseen[0]
+  const notSentCount = unseen.length
+  const failBanner = useMemo<SectionBanner | null>(() => {
+    if (!notSent) return null
+    if (notSentCount > 1) return { title: `${formatListCount(notSentCount)} messages not sent`, action: { label: "Open Outbox", onClick: () => useUi.getState().showMailTab("scheduled") } }
+    return { title: `Not sent: ${notSent.draft.subject.trim() || "message"}`, body: notSent.error ?? undefined, action: { label: "Edit", onClick: () => editFailed(notSent) } }
+  }, [notSent, notSentCount])
+  // One banner per section: an account that stopped syncing first.
+  useSectionBanner("mail", syncBanner ?? failBanner)
 
   useMailShortcuts({
     list,
@@ -191,7 +213,7 @@ export function MailView() {
   return (
     <MasterDetail
       section="Mail"
-      onBack={() => (tab === "team" ? setTeamOpen(null) : leaveThen(() => setSelected(null)))}
+      onBack={() => (tab === "team" ? setTeamOpen(null) : tab === "scheduled" ? setOutboxOpen(null) : leaveThen(() => setSelected(null)))}
       onRoot={() => {
         useUi.getState().showMailTab("inbox")
         setTeamOpen(null)
@@ -225,7 +247,7 @@ export function MailView() {
       }
       list={
         tab === "scheduled" ? (
-          <ScheduledList />
+          <OutboxList accountId={accountId} selectedId={outboxOpen} onOpen={setOutboxOpen} />
         ) : tab === "team" ? (
           <TeamList />
         ) : accounts.length === 0 && !isPending ? (
@@ -286,7 +308,13 @@ export function MailView() {
           </LoadState>
         )
       }
-      pick={failing && stops ? `${failing.displayName} mail stops at ${stops}. Pick a conversation to see it here.` : vertical("mail").pick}
+      pick={
+        failing && stops
+          ? `${failing.displayName} mail stops at ${stops}. Pick a conversation to see it here.`
+          : tab === "scheduled"
+            ? "Pick a message to see it here."
+            : vertical("mail").pick
+      }
       idle={
         inboxZero && list.length === 0 && !isPending && accounts.length > 0 ? (
           <SnoozedBeside accountId={accountId} now={now} selectedId={selectedId} onOpen={setSelected} />
@@ -296,6 +324,8 @@ export function MailView() {
       detail={
         tab === "team" ? (
           teamOpen && <TeamThreadView key={teamOpen} id={teamOpen} />
+        ) : tab === "scheduled" ? (
+          outboxOpen && <OutboxMessage key={outboxOpen} id={outboxOpen} onGone={() => setOutboxOpen(null)} />
         ) : selectedId && (
           <ConversationView
             key={selectedId}

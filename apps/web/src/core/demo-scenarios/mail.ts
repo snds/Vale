@@ -1,5 +1,5 @@
 import type { DemoMessage, DemoScenarios, DemoState } from "../demo-scenarios"
-import type { Address, Invite } from "../types"
+import type { Address, Draft, Invite, OutboxItem } from "../types"
 
 const nowSecs = () => Math.floor(Date.now() / 1000)
 
@@ -237,6 +237,43 @@ export const mail: DemoScenarios = {
       if (i.method === "cancel" && i.eventId) await client.deleteEvent(i.eventId)
       return (await invite(messageId)) ?? i
     })
+  },
+  /**
+   * The Outbox with one of each (ADR-0095; brief M7): a reply to Marcus in its undo window, eight seconds left; the
+   * estimate to Priya that the server refused this morning; and the studio's invoice scheduled for Monday at 8:00.
+   */
+  outbox: ({ state }) => {
+    const draft = (accountId: string, to: Address[], subject: string, body: string): Draft => ({
+      accountId, to, cc: [], subject, body, bodyHtml: null, inReplyTo: null, references: [], attachments: [], followUpAfter: null, requestReceipt: false,
+    })
+    const priya = { name: "Priya Raman", email: "priya@studio.example" }
+    const items: OutboxItem[] = [
+      {
+        id: "outbox-sending-ferry",
+        draft: draft("personal", [{ name: "Marcus Lee", email: "marcus@example.com" }], "Re: Saturday ferry", "Booked the 08:15 crossing for both of us. Meet at the pier at 7:45?"),
+        sendAt: nowSecs() + 8,
+        state: "queued",
+        error: null,
+        scheduled: false,
+      },
+      {
+        id: "outbox-failed-estimate",
+        draft: draft("work", [priya], "Estimate for the spring catalogue", "Priya, the estimate is attached. The print run is the open question; I priced both sizes."),
+        sendAt: nowSecs() - 40 * 60,
+        state: "failed",
+        error: "The server refused the message: the mailbox me@studio.example is over its sending limit for today.",
+      },
+      {
+        id: "outbox-scheduled-invoice",
+        draft: draft("work", [priya, { name: "Sam Okafor", email: "sam@studio.example" }], "November invoice", "Hi both, the November invoice is below. Payment within 14 days, as usual. Thank you!"),
+        // Monday at 8:00, the week after the demo's Thursday.
+        sendAt: dayAt(4, 8),
+        state: "queued",
+        error: null,
+        scheduled: true,
+      },
+    ]
+    for (const item of items) state.outbox.set(item.id, item)
   },
   /** The mail server refuses the next message sent, once, in its own words (brief M6: the composer's critical notice). */
   "send-refused": ({ wrap }) => {

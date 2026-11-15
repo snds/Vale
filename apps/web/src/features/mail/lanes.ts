@@ -1,6 +1,9 @@
 import type { Category, Lane } from "@/core/types"
 
-/** A lane of conversations, the outbox's scheduled messages, or conversations shared with teammates. */
+/**
+ * A lane of conversations, the Outbox, or conversations shared with teammates. The Outbox keeps the id
+ * "scheduled" it had as the Scheduled lane (ADR-0095: renamed, Q3 and DC9), so a place kept anywhere still opens it.
+ */
 export type MailTab = Lane | "scheduled" | "team" | "mine"
 
 export const LANES: { id: MailTab; label: string; empty: string }[] = [
@@ -12,7 +15,7 @@ export const LANES: { id: MailTab; label: string; empty: string }[] = [
   { id: "starred", label: "Starred", empty: "Star messages to keep them close." },
   { id: "snoozed", label: "Snoozed", empty: "Snoozed mail waits here until it's time." },
   { id: "waiting", label: "Waiting", empty: "Mail you're waiting on a reply to. Set a reminder when you send." },
-  { id: "scheduled", label: "Scheduled", empty: "Nothing scheduled." },
+  { id: "scheduled", label: "Outbox", empty: "Nothing waiting to go." },
   { id: "team", label: "Team", empty: "Conversations you share with teammates, or they share with you." },
   { id: "archive", label: "Archive", empty: "Archived mail shows up here." },
 ]

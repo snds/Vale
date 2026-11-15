@@ -422,9 +422,9 @@ export const scenes = [
         const box = await strip(page).boundingBox()
         ensure(Math.round(box.x) === 16 && Math.round(box.x + box.width) === app.viewport.width - 16, `alone at the foot the strip spans ${Math.round(box.x)} to ${Math.round(box.x + box.width)}`)
         await press(app, button(page, "Back"))
-        // Its text area opens Scheduled, where the message waits.
+        // Its text area opens the Outbox, where the message waits (ADR-0095).
         await press(app, strip(page).locator('[data-slot="accessory-open"]'))
-        ensure((await smallOrHead(page)) === "Scheduled", "the sending strip did not open Scheduled")
+        ensure((await smallOrHead(page)) === "Outbox", "the sending strip did not open the Outbox")
         await press(app, tabBar(page).getByRole("tab", { name: "Mail", exact: true }))
       }
       // Two seconds on.

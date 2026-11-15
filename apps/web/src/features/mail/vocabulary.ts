@@ -81,7 +81,7 @@ export function useMailVerbs(triage: ReturnType<typeof useTriage>, senders: Retu
           onAction: () =>
             followUp.mutate(
               { threadId: m.threadId, at: inThreeDays() },
-              { onSuccess: () => toast.success("If nobody replies, this comes back in 3 days"), onError: (e) => toast.error(e.message) },
+              { onSuccess: () => toast("Comes back in 3 days if nobody replies"), onError: (e) => toast.error(e.message) },
             ),
         }
       case "newsletters":

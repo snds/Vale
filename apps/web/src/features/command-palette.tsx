@@ -19,7 +19,7 @@ const LANE_ICONS: Record<string, IconName> = {
   starred: "star",
   snoozed: "time",
   waiting: "notification",
-  scheduled: "time",
+  scheduled: "send--alt",
   archive: "archive",
 }
 

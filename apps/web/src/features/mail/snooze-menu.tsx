@@ -1,49 +1,78 @@
-import { useState, type ReactElement, type ReactNode } from "react"
+import { useState, type ReactElement } from "react"
 
-import { Icon, DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@unicron/ui"
-import { DateTimePicker, MenuAnchor } from "@/components/date-picker"
-import { longTime, snoozeOptions } from "@/lib/time"
+import { AdaptiveMenu, AdaptiveMenuItem, AdaptiveMenuSeparator, useAdaptiveSheet } from "@unicron/ui"
+import { DateTimePicker } from "@/components/date-picker"
+import { snoozeOptions } from "@/lib/time"
 
-/** Snooze presets, each with its exact time, so "Tomorrow" is never ambiguous; then any date and time (brief M8). */
-export function SnoozeMenu({
+import { rowTime } from "./row-time"
+
+/** A menu that another menu opens stands by an anchor of its own: it takes no press and no focus. */
+const anchor = <span aria-hidden="true" tabIndex={-1} className="pointer-events-none absolute top-full right-0 size-0" />
+
+/** What each list is for (brief M8): its mono label, the picker's title and primary, and the line under the picker. */
+const KINDS = {
+  snooze: { title: "Snooze until", picker: "Snooze", action: "Snooze", note: undefined },
+  remind: {
+    title: "Remind me if no reply",
+    picker: "Remind me if no reply",
+    action: "Set reminder",
+    note: "If nobody has replied by then, the conversation comes back to the top of your inbox.",
+  },
+} as const
+
+/**
+ * A time to bring a conversation back (ADR-0095; brief M8): Snooze, and
+ * Remind me if no reply on a thread with your mail in it. One list for both:
+ * the mono label, `snoozeOptions` each with its time in mono, then "Pick date
+ * and time…", the shared picker titled for the job. A menu on a desktop, a
+ * sheet on a phone (unicron's AdaptiveMenu). Opened by its trigger, or by
+ * another menu (`open`), when it stands by an anchor of its own.
+ *
+ * `onPick` gets the time and how a toast says it: a preset's name in lower
+ * case ("tomorrow"), or a picked time as rows write it ("Fri 11:00").
+ */
+export function LaterMenu({
+  kind,
+  open,
+  onOpenChange,
   trigger,
-  children,
-  onSnooze,
+  onPick,
 }: {
-  trigger: ReactElement
-  children: ReactNode
-  onSnooze: (until: number, label: string) => void
+  kind: keyof typeof KINDS
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  trigger?: ReactElement<Record<string, unknown>>
+  onPick: (at: number, label: string) => void
 }) {
-  const options = snoozeOptions()
-  const [custom, setCustom] = useState(false)
+  const words = KINDS[kind]
+  const [picking, setPicking] = useState(false)
+  // The mono label: the menu's first line on a desktop; a phone's sheet says it as its title.
+  const sheet = useAdaptiveSheet()
   return (
-    <DropdownMenu>
-      {/* The picker stands where the menu did: both open from the one button (ADR-0088). */}
-      <DateTimePicker
-        open={custom}
-        onOpenChange={(open) => !open && setCustom(false)}
-        trigger={<MenuAnchor menu={<DropdownMenuTrigger render={trigger}>{children}</DropdownMenuTrigger>} />}
-        title="Snooze"
-        action="Snooze"
-        onPick={(at) => onSnooze(at, longTime(at))}
-      />
-      <DropdownMenuContent align="end" className="w-60">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>Snooze until…</DropdownMenuLabel>
-          {options.map((o) => (
-            <DropdownMenuItem key={o.label} onClick={() => onSnooze(o.until, o.label)}>
-              <Icon name="time" />
-              <span className="flex-1">{o.label}</span>
-              <span className="text-xs text-muted-foreground">{o.detail}</span>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => setCustom(true)}>
-          <Icon name="calendar" />
+    <>
+      <AdaptiveMenu title={words.title} overline={sheet ? undefined : words.title} align="end" open={open} onOpenChange={onOpenChange} trigger={trigger ?? anchor}>
+        {snoozeOptions().map((o) => (
+          <AdaptiveMenuItem key={o.label} icon={kind === "snooze" ? "time" : "notification"} onSelect={() => onPick(o.until, o.label.toLowerCase())}>
+            <span className="flex-1">{o.label}</span>
+            <span className="ps-4 type-meta text-muted-foreground">{rowTime(o.until)}</span>
+          </AdaptiveMenuItem>
+        ))}
+        <AdaptiveMenuSeparator />
+        <AdaptiveMenuItem icon="calendar" onSelect={() => setPicking(true)}>
           Pick date and time…
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        </AdaptiveMenuItem>
+      </AdaptiveMenu>
+      {picking && (
+        <DateTimePicker
+          open
+          onOpenChange={(o) => !o && setPicking(false)}
+          trigger={anchor}
+          title={words.picker}
+          action={words.action}
+          note={words.note}
+          onPick={(at) => onPick(at, rowTime(at))}
+        />
+      )}
+    </>
   )
 }

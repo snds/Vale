@@ -15,6 +15,17 @@ export const lane = async (app, name) => {
   await app.page.mouse.move(0, 0)
   await app.settle()
 }
+/**
+ * Opens the Outbox. On a phone while a send waits out its window, by the sending strip's text area (ADR-0095): a
+ * toast raised then stands under the top row, over the page head, until it is closed.
+ */
+const openOutbox = async (app) => {
+  const open = app.page.locator('[data-slot="accessory-open"]:visible')
+  if (app.phone && (await open.count())) {
+    await press(app, open.first())
+    await app.page.mouse.move(0, 0)
+  } else await lane(app, "Outbox")
+}
 /** Opens a new message; returns its dialog. */
 export const compose = async (app) => {
   await press(app, button(app.page, "Compose"))
@@ -238,7 +249,7 @@ export const scenes = [
       await row.locator('[data-slot="list-row-main"]').focus()
       await page.keyboard.press("Shift+F10")
       await press(app, menu(page).getByRole("menuitem", { name: "Remind me in 3 days", exact: true }))
-      await page.locator("[data-sonner-toast]").filter({ hasText: "If nobody replies, this comes back in 3 days" }).waitFor()
+      await page.locator("[data-sonner-toast]").filter({ hasText: "Comes back in 3 days if nobody replies" }).waitFor()
       ensure(!(await page.getByRole("list", { name: "Inbox", exact: true }).locator('[data-slot="badge"]').count()), "Remind me in 3 days left the row in the Inbox with No reply yet")
       await toastGone(app)
       // The picture: the Inbox with the reminder come due again, as the scenario starts.
@@ -468,6 +479,7 @@ export const scenes = [
   },
   {
     name: "mail-snooze-menu",
+    sean: { kind: "undrawn", area: "mail", screen: "snooze" },
     run: async (app) => {
       await conversation(app, /Token audit/)
       await snoozeMenu(app)
@@ -877,6 +889,22 @@ export const scenes = [
     },
   },
   {
+    // Remind me if no reply, on a thread with your mail in it (ADR-0095; brief M8): the snooze times, then any date and time.
+    name: "mail-remind-no-reply",
+    sean: { kind: "undrawn", area: "mail", screen: "remind" },
+    run: async (app) => {
+      await conversation(app, /Token audit/)
+      await moreItem(app, "Remind me if no reply…")
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async (app) => {
+      const list = app.page.getByRole(app.phone ? "dialog" : "menu", { name: "Remind me if no reply" })
+      if (!app.phone) ensure(/^REMIND ME IF NO REPLY$/i.test((await list.locator('[data-slot="dropdown-menu-label"]').first().innerText()).trim()), "the menu does not start with its label")
+      ensure(/Fri 08:00/.test(await row(app, list, /^Tomorrow/).innerText()), "Tomorrow does not give its time")
+      ensure(await row(app, list, "Pick date and time…").count(), "the reminder has no Pick date and time…")
+    },
+  },
+  {
     // Each of More's rows does its job (brief M4).
     name: "mail-more-actions",
     scenario: "ai-on",
@@ -899,7 +927,7 @@ export const scenes = [
       // Remind me if no reply…: its own times; picking one sets the reminder, and the menu then offers to cancel it.
       await moreItem(app, "Remind me if no reply…")
       await press(app, row(app, page.getByRole(app.phone ? "dialog" : "menu", { name: "Remind me if no reply" }), /^Tomorrow/))
-      await toast(/comes back tomorrow/).waitFor()
+      await toast("Comes back tomorrow if nobody replies").waitFor()
       ensure(/REMINDER .* IF NO REPLY/.test(await reader(page).innerText()), "the title's line does not say a reminder is set")
       await moreItem(app, "Cancel reminder")
       await toast("Cancelled the reminder").waitFor()
@@ -1042,10 +1070,19 @@ export const scenes = [
   {
     // Send later from the message: the chevron's menu on a desktop; More's Send later… (a sheet) on a phone.
     name: "mail-send-later",
+    sean: { kind: "undrawn", area: "mail", screen: "send-later" },
     run: async (app) => {
       const form = await compose(app)
       await sendLater(app, form)
       await app.page.mouse.move(0, 0)
+    },
+    // The mono label, the presets each with a time in mono, then any date and time (ADR-0095; brief M7).
+    assert: async (app) => {
+      const later = app.phone ? app.page.getByRole("dialog", { name: "Send later" }) : app.page.getByRole("menu")
+      if (!app.phone) ensure(/^SEND LATER$/i.test((await later.locator('[data-slot="dropdown-menu-label"]').first().innerText()).trim()), "the menu does not start with SEND LATER")
+      for (const name of [/^Tomorrow morning/, /^Tomorrow afternoon/, /^Monday morning/]) ensure(await toolRow(app, later, name).count(), `Send later has no ${name}`)
+      ensure(/Fri 08:00/.test(await toolRow(app, later, /^Tomorrow morning/).innerText()), "Tomorrow morning does not give its time as rows write it")
+      ensure(await toolRow(app, later, "Pick date and time…").count(), "Send later has no Pick date and time…")
     },
   },
   {
@@ -1053,8 +1090,46 @@ export const scenes = [
     run: async (app) => {
       const form = await compose(app)
       const later = await sendLater(app, form)
-      await press(app, toolRow(app, later, "Pick a time…"))
+      await press(app, toolRow(app, later, "Pick date and time…"))
       await app.page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      const picker = page.getByRole("dialog", { name: "Send later" })
+      ensure(await picker.getByText("If the desktop app is closed then, it sends when it next opens. A gateway sends on time.").isVisible(), "the picker does not say when it sends")
+      ensure(await picker.getByRole("button", { name: "Schedule", exact: true }).isVisible(), "the picker has no Schedule")
+    },
+  },
+  {
+    // Send now (ADR-0095; brief M7, X4): the sending strip or status line with UNDO, which takes it back into the
+    // message; sent again, the window runs out and the toast says "Sent {subject}". Scheduled: a toast with UNDO.
+    name: "mail-send-undo",
+    run: async (app) => {
+      const { page } = app
+      const undo = () => (app.phone ? page.locator('[data-slot="accessory"]') : page.locator('[data-slot="app-frame-status-line"]')).getByRole("button", { name: "Undo", exact: true })
+      await send(app, "Saturday ferry")
+      ensure(await undo().isVisible(), "the send shows no UNDO")
+      await press(app, undo())
+      const again = page.getByRole("dialog", { name: /Saturday ferry/ })
+      ensure(await again.isVisible(), "UNDO did not reopen the message")
+      ensure((await again.getByRole("textbox", { name: "Subject" }).inputValue()) === "Saturday ferry", "the message came back without its subject")
+      // Sent from where it came back; ten seconds on, it has gone.
+      await press(app, sendButton(again))
+      await again.waitFor({ state: "detached" })
+      const now = await page.evaluate(() => Date.now())
+      await page.clock.setFixedTime(new Date(now + 12_000))
+      await toastSaying(page, "Sent Saturday ferry").waitFor()
+      ensure(!(await undo().count()), "UNDO stayed once the message had gone")
+      await toastGone(app)
+      // Send later: picked from the menu, then SCHEDULE; the toast names the message and its time, with UNDO.
+      const form = await compose(app)
+      await writeMessage(app, form, { subject: "Pier parking" })
+      await press(app, toolRow(app, await sendLater(app, form), /^Tomorrow morning/))
+      await press(app, sendButton(form))
+      await form.waitFor({ state: "detached" })
+      const scheduled = toastSaying(page, "Scheduled Pier parking for Fri 08:00")
+      await scheduled.waitFor()
+      ensure(await scheduled.getByRole("button", { name: "Undo", exact: true }).isVisible(), "the scheduled toast has no UNDO")
+      await page.mouse.move(0, 0)
     },
   },
   {
@@ -1805,7 +1880,171 @@ export const scenes = [
     assert: async ({ page }) => ensure(/^PERSONAL\s*\/\/\s*FRI 08:00$/.test((await page.getByRole("list", { name: "Snoozed" }).locator('[data-slot="list-row-time"]').first().innerText()).trim()), "a snoozed row does not say when it comes back"),
   },
   { name: "mail-waiting", sean: { kind: "undrawn", area: "mail", screen: "lane-waiting" }, run: (app) => lane(app, "Waiting") },
-  { name: "mail-scheduled", run: (app) => lane(app, "Scheduled") }, // empty in the sample data: a lane's empty state
+  {
+    // The Outbox with nothing in it (ADR-0095; brief M7, 5.2): the lane the Scheduled lane became.
+    name: "mail-scheduled",
+    run: (app) => lane(app, "Outbox"),
+    assert: async ({ page }) => {
+      ensure((await headTitle(page)) === "Outbox", "the lane is not called Outbox")
+      ensure(await page.getByText("Nothing waiting to go.", { exact: true }).isVisible(), "the empty Outbox does not say so")
+      ensure(await page.getByText("Use the arrow beside Send to send later.", { exact: true }).isVisible(), "the empty Outbox does not say how to send later")
+    },
+  },
+  {
+    // SENDING, NOT SENT and SCHEDULED, one of each (ADR-0095; brief M7): OUTBOX // 03, the seconds, the critical badge, the send time.
+    name: "mail-outbox",
+    scenario: "outbox",
+    sean: { kind: "undrawn", area: "mail", screen: "outbox" },
+    run: (app) => openOutbox(app),
+    assert: async (app) => {
+      const { page } = app
+      ensure((await headTitle(page)) === "Outbox", "the lane is not called Outbox")
+      ensure(/^OUTBOX\s*\/\/\s*03/i.test(await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()), "the overline does not count what waits")
+      const heads = (await page.locator('[data-slot="section-header"]:visible').allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim().toUpperCase())
+      ensure(JSON.stringify(heads.map((h) => h.replace(/\s*\d+$/, ""))) === JSON.stringify(["SENDING", "NOT SENT", "SCHEDULED"]), `the sections read ${heads.join(", ")}`)
+      const list = (name) => page.getByRole("list", { name, exact: true })
+      ensure(/08 S/.test(await list("Sending").innerText()), "the sending row does not count its seconds")
+      ensure((await list("Sending").getByRole("button", { name: "Undo", exact: true }).count()) === 1, "the sending row has no UNDO")
+      ensure(await list("Not sent").locator('[data-slot="badge"]', { hasText: /not sent/i }).isVisible(), "the failed row has no NOT SENT")
+      ensure(/over its sending limit/.test(await list("Not sent").innerText()), "the failed row does not give the error")
+      ensure(/MON 08:00/i.test(await list("Scheduled").locator('[data-slot="list-row-time"]').innerText()), "the scheduled row does not give its time")
+      // Opening the Outbox counts as seeing the failed send: no banner, no toast, no critical tone.
+      ensure(!(await page.locator('[data-slot="banner"]:visible').count()), "the Outbox still shows the not-sent banner")
+      ensure(!(await toastSaying(page, "Not sent:").count()), "the Outbox still shows the not-sent toast")
+      ensure(!(await page.locator('[data-slot="nav-item"][data-tone="critical"]').count()), "the Outbox is still critical once opened")
+    },
+  },
+  {
+    // An Outbox message opened, read-only (ADR-0095; brief M7): TO, FROM, SENDS; the subject; the body; its actions.
+    name: "mail-outbox-row",
+    scenario: "outbox",
+    run: async (app) => {
+      await openOutbox(app)
+      await press(app, app.page.getByRole("list", { name: "Scheduled", exact: true }).getByRole("button", { name: /^To .*November invoice$/ }))
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      const open = reader(page)
+      for (const label of ["To", "From", "Sends"]) ensure(await open.locator("dt", { hasText: new RegExp(`^${label}$`, "i") }).count(), `the message has no ${label}`)
+      ensure(await open.getByRole("heading", { name: "November invoice" }).isVisible(), "the subject is not the title")
+      ensure(await open.getByText(/the November invoice is below/).isVisible(), "the body is not shown")
+      for (const name of ["Send now", "Change time", "Edit", "Delete"]) ensure(await open.getByRole("button", { name, exact: true }).isVisible(), `the message has no ${name}`)
+    },
+  },
+  {
+    // A scheduled message is sent now, moved, edited (closing it unchanged puts it back) and deleted with UNDO (brief M7).
+    name: "mail-scheduled-actions",
+    scenario: "outbox",
+    run: async (app) => {
+      const { page } = app
+      const scheduled = () => page.getByRole("list", { name: "Scheduled", exact: true })
+      const invoice = () => rowOf(page, /November invoice/, "Scheduled")
+      const rowMenu = async () => {
+        await press(app, moreOf(invoice()))
+        return menu(page)
+      }
+      await openOutbox(app)
+      // The reply in its window goes first: on a phone a strip with UNDO holds every toast until it ends.
+      const now = await page.evaluate(() => Date.now())
+      await page.clock.setFixedTime(new Date(now + 12_000))
+      await toastSaying(page, "Sent Re: Saturday ferry").waitFor()
+      await toastsGone(app)
+      // Swipe tiles on a touch screen: EDIT inner, DELETE outer.
+      if (app.touch) {
+        await drag(app, invoice(), -120)
+        ensure(JSON.stringify(await tiles(invoice())) === JSON.stringify(["EDIT", "DELETE"]), `the row's tiles read ${(await tiles(invoice())).join(", ")}`)
+        await pressOutside(app)
+      }
+      // CHANGE TIME, from the row's menu: the send-later times; the toast names the new time.
+      await press(app, (await rowMenu()).getByRole("menuitem", { name: "Change time…" }))
+      await press(app, row(app, page.getByRole(app.phone ? "dialog" : "menu", { name: "Send later" }), /^Tomorrow afternoon/))
+      await toastSaying(page, "Moved November invoice to Fri 13:00").waitFor()
+      ensure(/FRI 13:00/i.test(await scheduled().locator('[data-slot="list-row-time"]').innerText()), "the row did not move to its new time")
+      await toastsGone(app)
+      // EDIT: out of the Outbox, open with its time; closed unchanged, no question, and it goes back.
+      await press(app, scheduled().getByRole("button", { name: /^To .*November invoice$/ }))
+      await press(app, reader(page).getByRole("button", { name: "Edit", exact: true }))
+      const form = page.getByRole("dialog", { name: /November invoice/ })
+      ensure(await form.isVisible(), "EDIT did not open the message")
+      ensure(await form.getByRole("button", { name: "Schedule", exact: true }).count(), "the message lost its time")
+      ensure(!(await scheduled().count()), "the message stayed in the Outbox while open")
+      await page.keyboard.press("Escape")
+      await app.settle()
+      ensure(!(await discardQuestion(page).count()), "closing it unchanged asked to discard")
+      await toastSaying(page, "Back in Outbox for Fri 13:00").waitFor()
+      ensure(await scheduled().getByRole("button", { name: /^To .*November invoice$/ }).isVisible(), "closing it unchanged did not put it back")
+      await toastsGone(app)
+      // DELETE, then UNDO: it is queued again with its time.
+      await press(app, (await rowMenu()).getByRole("menuitem", { name: "Delete", exact: true }))
+      const deleted = toastSaying(page, "Deleted November invoice")
+      await deleted.waitFor()
+      ensure(!(await scheduled().count()), "DELETE left the message listed")
+      await press(app, deleted.getByRole("button", { name: "Undo", exact: true }))
+      await scheduled().getByRole("button", { name: /^To .*November invoice$/ }).waitFor()
+      ensure(/FRI 13:00/i.test(await scheduled().locator('[data-slot="list-row-time"]').innerText()), "UNDO did not keep its time")
+      await toastsGone(app)
+      // SEND NOW: it goes at once, and the toast says so.
+      await press(app, (await rowMenu()).getByRole("menuitem", { name: "Send now", exact: true }))
+      await toastSaying(page, "Sent November invoice").waitFor()
+      ensure(!(await scheduled().count()), "SEND NOW left the message scheduled")
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // A send that failed (ADR-0095; brief M7): the toast with EDIT, the Mail banner, the NOT SENT row and the Outbox in
+    // the critical tone, each once. The brief's unit test with a client stub is this scenario.
+    name: "mail-send-fails",
+    scenario: "send-fails",
+    sean: { kind: "undrawn", area: "mail", screen: "not-sent" },
+    assert: async (app) => {
+      const { page } = app
+      const toast = toastSaying(page, "Not sent: Estimate for the spring catalogue")
+      ensure((await toast.count()) === 1, `${await toast.count()} not-sent toasts, not one`)
+      ensure(await toast.getByRole("button", { name: "Edit", exact: true }).isVisible(), "the toast has no EDIT")
+      const banners = page.locator('[data-slot="banner"]:visible')
+      ensure((await banners.count()) === 1, `${await banners.count()} banners, not one`)
+      ensure(/Not sent: Estimate for the spring catalogue/.test(await banners.innerText()) && /over its sending limit/.test(await banners.innerText()), "the banner does not name the message and the error")
+      ensure(await banners.getByRole("button", { name: "Edit", exact: true }).isVisible(), "the banner has no EDIT")
+      if (app.size === "desktop") ensure(await page.getByRole("navigation", { name: "Vale" }).getByRole("button", { name: /^Outbox, a message not sent/ }).isVisible(), "the Outbox is not in the critical tone")
+    },
+  },
+  {
+    // Seen once: after the Outbox is opened, the banner, toast and tone are gone, and stay gone after a reload; the row stays (W9).
+    name: "mail-send-fails-seen",
+    scenario: "send-fails",
+    run: async (app) => {
+      const { page } = app
+      await lane(app, "Outbox")
+      ensure((await page.getByRole("list", { name: "Not sent", exact: true }).getByRole("listitem").count()) === 1, "the NOT SENT row does not show once")
+      ensure(!(await toastSaying(page, "Not sent:").count()), "opening the Outbox left the toast")
+      await page.reload()
+      await page.waitForFunction(() => !!document.getElementById("root")?.innerText.trim())
+      await app.settle()
+      await lane(app, "Inbox")
+    },
+    assert: async ({ page }) => {
+      ensure(!(await toastSaying(page, "Not sent:").count()), "the toast came back after a reload")
+      ensure(!(await page.locator('[data-slot="banner"]:visible').count()), "the banner came back after a reload")
+      ensure(!(await page.locator('[data-slot="nav-item"][data-tone="critical"]').count()), "the Outbox is critical again after a reload")
+    },
+  },
+  {
+    // EDIT on a failed send opens a copy; the failed row stays, since the core has no call to clear one (W9).
+    name: "mail-send-fails-edit",
+    scenario: "send-fails",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await press(app, page.locator('[data-slot="banner"]:visible').getByRole("button", { name: "Edit", exact: true }))
+      const form = page.getByRole("dialog", { name: /Estimate for the spring catalogue/ })
+      ensure(await form.isVisible(), "EDIT did not open a copy of the message")
+      ensure(!(await toastSaying(page, "Not sent:").count()), "EDIT left the toast")
+      await closeForm(app)
+      await lane(app, "Outbox")
+      ensure((await page.getByRole("list", { name: "Not sent", exact: true }).getByRole("listitem").count()) === 1, "the failed row left after EDIT")
+      await page.mouse.move(0, 0)
+    },
+  },
   { name: "mail-team", run: (app) => lane(app, "Team") },
   {
     name: "mail-team-open-link",
@@ -2135,7 +2374,7 @@ export const scenes = [
       const list = await groups(app)
       ensure((await oneCurrent(list, "Mail's folders")) === "Inbox", "the Inbox is not the current place")
       for (const gone of ["Drafts", "Sent", "Spam"]) ensure(!(await list.getByRole("button", { name: gone, exact: true }).count()), `${gone} is listed, and the core has no such folder`)
-      for (const row of ["Unread", "Starred", "Snoozed", "Waiting", "Scheduled", "Archive", "Team", "Add an account…"]) ensure(await list.getByRole("button", { name: row, exact: true }).count(), `${row} is not in Mail's folders`)
+      for (const row of ["Unread", "Starred", "Snoozed", "Waiting", "Outbox", "Archive", "Team", "Add an account…"]) ensure(await list.getByRole("button", { name: row, exact: true }).count(), `${row} is not in Mail's folders`)
       const accounts = list.getByRole("radiogroup", { name: /Account/ })
       ensure((await accounts.getByRole("radio").count()) === 3, "the Account group is not All and the two accounts")
       ensure(await accounts.getByRole("radio", { name: "All", exact: true }).isChecked(), "All is not the checked account")

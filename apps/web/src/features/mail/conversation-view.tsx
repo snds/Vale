@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 
 import { usePushedChrome } from "@/app/screen"
 import { useUi } from "@/app/ui-store"
@@ -35,13 +35,12 @@ import {
   toast,
   useAppFrame,
 } from "@unicron/ui"
-import { DateTimePicker } from "@/components/date-picker"
 import { getCoreClient, isMember } from "@/core/client"
 import { useAiReady, useContactPhotos, useMailAction, useMailPrefs, useSharedInbox, useSignatures, useThread, useThreadShare } from "@/core/queries"
 import type { Account, Address, Category, Draft, Invite, MessageDetail, MessageSummary } from "@/core/types"
 import { useConfirm } from "@/lib/confirm"
 import { useLeaveGuard } from "@/lib/leave-guard"
-import { longTime, snoozeOptions } from "@/lib/time"
+import { longTime } from "@/lib/time"
 import { useNowSecs } from "@/hooks/use-now"
 
 import type { useTriage } from "./actions"
@@ -58,6 +57,7 @@ import { useSenderActions } from "./sender-actions"
 import { openSenderPanel, setSenderPanel } from "./sender-panel"
 import { signatureBlock } from "./signature"
 import { SignatureSuggestion } from "./signature-suggestion"
+import { LaterMenu } from "./snooze-menu"
 import { UnsubscribeAction } from "./unsubscribe"
 import { useAiAssist } from "./use-ai-assist"
 import { LinkedNotes } from "../notes/linked-notes"
@@ -267,7 +267,7 @@ function Conversation({
   }
 
   const remind = (at: number, label: string) =>
-    setFollowUp.mutate({ threadId: row.threadId, at }, { onSuccess: () => toast(`If nobody replies, ${subject} comes back ${label}`), onError: (e) => toast.error(e.message) })
+    setFollowUp.mutate({ threadId: row.threadId, at }, { onSuccess: () => toast(`Comes back ${label} if nobody replies`), onError: (e) => toast.error(e.message) })
   const snooze = (until: number, label: string) => triage.snooze(row, until, label)
 
   // Decisions about the sender close the reader when the conversation leaves the list (screened out, blocked).
@@ -460,7 +460,7 @@ function Conversation({
               {snoozed ? (
                 <ToolbarToggle icon="time" label="Unsnooze" pressed onPressedChange={() => triage.unsnooze(row)} />
               ) : (
-                <LaterMenu title="Snooze until" open={snoozing} onOpenChange={setSnoozing} trigger={<ToolbarButton icon="time" label="Snooze" />} picker="Snooze" onPick={snooze} />
+                <LaterMenu kind="snooze" open={snoozing} onOpenChange={setSnoozing} trigger={<ToolbarButton icon="time" label="Snooze" />} onPick={snooze} />
               )}
               <ToolbarButton icon={row.flagged ? "star--filled" : "star"} label={row.flagged ? "Unstar" : "Star"} shortcut="S" onClick={() => triage.toggleFlag(row)} />
               <ToolbarButton icon="email--new" label="Mark unread" shortcut="U" onClick={() => triage.markSeen(row, false)} />
@@ -470,16 +470,8 @@ function Conversation({
             </Toolbar>
           )}
           {/* Menus opened from another menu stand here: snoozing from a phone's More, a reminder from More or the block. */}
-          {phone && !snoozed && <LaterMenu title="Snooze until" open={snoozing} onOpenChange={setSnoozing} picker="Snooze" onPick={snooze} />}
-          <LaterMenu
-            title="Remind me if no reply"
-            open={reminding}
-            onOpenChange={setReminding}
-            picker="Remind me if no reply"
-            action="Set reminder"
-            note="If nobody has replied by then, the conversation comes back to the top of your inbox."
-            onPick={remind}
-          />
+          {phone && !snoozed && <LaterMenu kind="snooze" open={snoozing} onOpenChange={setSnoozing} onPick={snooze} />}
+          <LaterMenu kind="remind" open={reminding} onOpenChange={setReminding} onPick={remind} />
         </div>
 
         <div className="flex flex-col gap-1">
@@ -826,58 +818,3 @@ function ThreadMessage({ message, mine, open, onToggle, now, onUnsubscribe }: { 
   )
 }
 
-/**
- * A time to bring the conversation back (snooze) or to be reminded if nobody replies: the presets
- * with their exact times, then any date and time in the shared picker (ADR-0088). A menu on a
- * desktop, a sheet on a phone. Opened by its trigger, or by another menu (`open`), when it stands
- * by an anchor of its own.
- */
-function LaterMenu({
-  title,
-  open,
-  onOpenChange,
-  trigger,
-  picker,
-  action,
-  note,
-  onPick,
-}: {
-  title: string
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  trigger?: ReactElement<Record<string, unknown>>
-  picker: string
-  action?: string
-  note?: string
-  onPick: (at: number, label: string) => void
-}) {
-  const [picking, setPicking] = useState(false)
-  const anchor = <span aria-hidden="true" tabIndex={-1} className="pointer-events-none absolute top-full right-0 size-0" />
-  return (
-    <>
-      <AdaptiveMenu title={title} align="end" open={open} onOpenChange={onOpenChange} trigger={trigger ?? anchor}>
-        {snoozeOptions().map((o) => (
-          <AdaptiveMenuItem key={o.label} icon="time" onSelect={() => onPick(o.until, o.label.toLowerCase())}>
-            <span className="flex-1">{o.label}</span>
-            <span className="ps-4 type-meta text-muted-foreground">{o.detail}</span>
-          </AdaptiveMenuItem>
-        ))}
-        <AdaptiveMenuSeparator />
-        <AdaptiveMenuItem icon="calendar" onSelect={() => setPicking(true)}>
-          Pick date and time…
-        </AdaptiveMenuItem>
-      </AdaptiveMenu>
-      {picking && (
-        <DateTimePicker
-          open
-          onOpenChange={(o) => !o && setPicking(false)}
-          trigger={anchor}
-          title={picker}
-          action={action ?? picker}
-          note={note}
-          onPick={(at) => onPick(at, longTime(at))}
-        />
-      )}
-    </>
-  )
-}

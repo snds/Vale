@@ -2,7 +2,6 @@ import { useEditorState } from "@tiptap/react"
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type DragEvent, type ReactElement } from "react"
 
 import { useUi, type ComposerDraft } from "@/app/ui-store"
-import { DateTimePicker } from "@/components/date-picker"
 import { FormLayer, FormLayerForm } from "@/components/editor-frame"
 import { useFormLayerClose } from "@/components/form-layer-context"
 import { FormatBar } from "@/components/format-bar"
@@ -21,10 +20,6 @@ import {
   Button,
   Chip,
   ChipRemove,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   FieldRow,
   FieldRowAction,
   FileChip,
@@ -45,9 +40,12 @@ import type { Account, Draft, LocalTime, OutgoingAttachment, Template } from "@/
 import { useSettingsSections } from "@/features/settings/sections"
 import { useNowSecs } from "@/hooks/use-now"
 import { useLeaveGuard } from "@/lib/leave-guard"
-import { FOLLOW_UP_OPTIONS, longTime, nextLocalHour, partOfDay, sendLaterOptions, timeThere } from "@/lib/time"
+import { FOLLOW_UP_OPTIONS, longTime, nextLocalHour, partOfDay, timeThere } from "@/lib/time"
 
 import { UNDO_SECONDS, formatRecipients, formatSize, parseRecipients } from "./format"
+import { rowTime } from "./row-time"
+import { backToOutbox } from "./outbox"
+import { SendLaterItems, SendLaterMenu, SendLaterPicker } from "./send-later"
 import { signatureBlock, withSignature } from "./signature"
 import { htmlToText, textToHtml } from "./rich-text"
 
@@ -103,8 +101,6 @@ interface TheirMorning {
   at: number
   /** "9:00 AM for Priya". */
   label: string
-  /** When that is for you. */
-  detail: string
 }
 
 /** 9:00 AM on each recipient's next workday, for those in another zone than
@@ -121,7 +117,6 @@ function theirMornings(times: LocalTime[], now: number): TheirMorning[] {
       offset: t.offset,
       at,
       label: `${timeThere(t.offset, at)} for ${firstName(t)}`,
-      detail: new Date(at * 1000).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }),
     })
   }
   return out
@@ -156,7 +151,8 @@ export function ComposeMail() {
   useTemplates()
   return (
     <>
-      <FormLayer open={draft !== null} onClose={close} size="compose" finalFocus={returnFocus}>
+      {/* Closed without sending: a message EDIT took out of the Outbox goes back at its time (brief M7). */}
+      <FormLayer open={draft !== null} onClose={() => (draft?.outbox && void backToOutbox(draft.outbox), close())} size="compose" finalFocus={returnFocus}>
         {draft !== null && <WritingForm key={JSON.stringify(draft)} initial={draft} onDone={close} onSaveTemplate={setTemplate} />}
       </FormLayer>
       <FormLayer open={template !== null} onClose={() => setTemplate(null)}>
@@ -349,7 +345,8 @@ function WritingForm({ initial, onDone, onSaveTemplate }: { initial: ComposerDra
       const item = await client.queueSend(draft, UNDO_SECONDS, sendAt)
       onDone()
       if (sendAt !== null) {
-        toast.success(`Scheduled ${draft.subject || "your message"} for ${longTime(item.sendAt)}`, {
+        // Toasts name the thing and say the time as rows do (brief M7): "Scheduled Saturday ferry for Fri 08:00".
+        toast(`Scheduled ${draft.subject || "message"} for ${rowTime(item.sendAt)}`, {
           action: {
             label: "Undo",
             onClick: async () => {
@@ -372,7 +369,14 @@ function WritingForm({ initial, onDone, onSaveTemplate }: { initial: ComposerDra
 
   // Closing asks whenever the message holds a recipient, a subject, text or a file (brief X6): a reply
   // and a message reopened by Undo send always do. The signature alone is not writing.
+  // A message EDIT took out of the Outbox asks only when it was changed: closed as it was, it goes back (brief X6).
+  const written = () => JSON.stringify([to, showCc ? cc : "", subject, files.length, htmlToText(editor.getHTML()), followUp, receipt, sendAt])
+  const asOpened = useRef<string | null>(null)
+  useEffect(() => {
+    if (initial.outbox && asOpened.current === null && signatures) asOpened.current = written()
+  })
   useLeaveGuard(() => {
+    if (initial.outbox) return asOpened.current !== null && written() !== asOpened.current
     if (to.trim() || (showCc && cc.trim()) || subject.trim() || files.length) return true
     const html = editor.isEmpty ? "" : editor.getHTML()
     return htmlToText(shownBlock.current ? html.replace(shownBlock.current, "") : html).trim() !== ""
@@ -416,18 +420,7 @@ function WritingForm({ initial, onDone, onSaveTemplate }: { initial: ComposerDra
   const sendWord = sendAt === null ? "Send" : "Schedule"
   const demo = core?.kind === "demo" ? <span className="shrink-0 type-caption text-muted-foreground">Demo. Nothing leaves.</span> : null
 
-  const laterPicker = picking && (
-    <DateTimePicker
-      open
-      onOpenChange={(o) => !o && setPicking(false)}
-      trigger={anchor}
-      title="Send later"
-      note="If the desktop app is closed then, it sends when it next opens. A gateway sends on time."
-      action="Schedule"
-      value={sendAt}
-      onPick={setSendAt}
-    />
-  )
+  const laterPicker = picking && <SendLaterPicker value={sendAt} onClose={() => setPicking(false)} onPick={setSendAt} />
 
   const templatesMenu = (trigger: ReactElement<Record<string, unknown>>, controlled: boolean) => (
     <AdaptiveMenu title="Templates" align="start" trigger={trigger} open={controlled ? templatesOpen : undefined} onOpenChange={controlled ? setTemplatesOpen : undefined}>
@@ -509,40 +502,7 @@ function WritingForm({ initial, onDone, onSaveTemplate }: { initial: ComposerDra
         aria-describedby={reasonId}
         aria-keyshortcuts="Control+Enter Meta+Enter"
         menuProps={{ width: "auto" }}
-        menu={
-          <>
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Send later</DropdownMenuLabel>
-              {sendLaterOptions().map((o) => (
-                <DropdownMenuItem key={o.label} onClick={() => setSendAt(o.until)}>
-                  <Icon name="time" />
-                  <span className="flex-1">{o.label}</span>
-                  <span className="type-meta text-muted-foreground">{o.detail}</span>
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-            {theirs.length > 0 && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>Their time</DropdownMenuLabel>
-                  {theirs.map((t) => (
-                    <DropdownMenuItem key={t.label} onClick={() => setSendAt(t.at)}>
-                      <Icon name="time" />
-                      <span className="flex-1">{t.label}</span>
-                      <span className="type-meta text-muted-foreground">{t.detail}</span>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuGroup>
-              </>
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setPicking(true)}>
-              <Icon name="calendar" />
-              Pick a time…
-            </DropdownMenuItem>
-          </>
-        }
+        menu={<SendLaterItems theirs={theirs} onPick={setSendAt} onCustom={() => setPicking(true)} />}
       >
         <Icon name={sendAt === null ? "send--alt" : "time"} data-icon="inline-start" /> {sendWord}
       </SplitButton>
@@ -581,27 +541,9 @@ function WritingForm({ initial, onDone, onSaveTemplate }: { initial: ComposerDra
           {demo}
         </div>
       )}
-      <AdaptiveMenu title="Send later" open={laterOpen} onOpenChange={setLaterOpen} trigger={anchor}>
-        {sendLaterOptions().map((o) => (
-          <AdaptiveMenuItem key={o.label} icon="time" onSelect={() => setSendAt(o.until)}>
-            <span className="flex-1">{o.label}</span>
-            <span className="ps-4 type-meta text-muted-foreground">{o.detail}</span>
-          </AdaptiveMenuItem>
-        ))}
-        {theirs.map((t) => (
-          <AdaptiveMenuItem key={t.label} icon="time" onSelect={() => setSendAt(t.at)}>
-            <span className="flex-1">{t.label}</span>
-            <span className="ps-4 type-meta text-muted-foreground">{t.detail}</span>
-          </AdaptiveMenuItem>
-        ))}
-        <AdaptiveMenuSeparator />
-        <AdaptiveMenuItem icon="calendar" onSelect={() => setPicking(true)}>
-          Pick a time…
-        </AdaptiveMenuItem>
-      </AdaptiveMenu>
+      <SendLaterMenu open={laterOpen} onOpenChange={setLaterOpen} theirs={theirs} value={sendAt} onPick={setSendAt} />
       {templatesMenu(anchor, true)}
       {remindMenu(anchor, true)}
-      {laterPicker}
     </div>
   )
 
