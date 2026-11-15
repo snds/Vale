@@ -1,6 +1,6 @@
 // Calendar: every view, an event and its editor, the calendars list, booking links, and the menu-bar window.
 import { area, button, closeForm, ensure, formLayer, formPrimary, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, sidebar, switcherLayer, toastGone } from "./helpers.mjs"
-import { compose } from "./mail.mjs"
+import { compose, sendLater, toolRow } from "./mail.mjs"
 import { settings } from "./settings.mjs"
 
 /** The range chips (ADR-0098; brief C1): a radio group named "View". A phone has Day, Week and Month; wider, Upcoming first. */
@@ -1257,13 +1257,18 @@ export const scenes = [
       const { page } = app
       const message = await compose(app)
       const open = async () => {
+        // A phone's composer has no Send later button (brief M6): More's Send later…, then its row.
+        if (app.phone) {
+          await press(app, toolRow(app, await sendLater(app, message), "Pick date and time…"))
+          return page.getByRole("dialog", { name: "Send later" })
+        }
         // (Held as an element: an open menu hides the form behind it from roles.)
         const later = await message.getByRole("button", { name: "Send later" }).elementHandle()
         await later.click()
         await app.settle()
         // The one button opens the menu and anchors the picker: it says the menu's state, not the picker's.
         ensure((await later.getAttribute("aria-expanded")) === "true" && (await later.getAttribute("aria-haspopup")) === "menu", "Send later does not say its menu is open")
-        await press(app, page.getByRole("menuitem", { name: "Pick a time…" }))
+        await press(app, page.getByRole("menuitem", { name: "Pick date and time…" }))
         ensure((await later.getAttribute("aria-expanded")) === "false", "Send later says its menu is open under the picker")
         return page.getByRole("dialog", { name: "Send later" })
       }

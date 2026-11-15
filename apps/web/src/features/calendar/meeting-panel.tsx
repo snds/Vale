@@ -103,7 +103,7 @@ const SERVICE: Record<string, string> = { zoom: "Zoom", meet: "Google Meet", tea
 const serviceName = (s: string) => SERVICE[s] ?? s
 
 /**
- * JOIN, the screen's one primary, and the text action OPEN IN BROWSER when Join opens the service's app.
+ * JOIN, the screen's one primary (secondary in a message's invitation, beside ACCEPT), and the text action OPEN IN BROWSER when Join opens the service's app.
  * Where JOIN stands elsewhere (`join` false), OPEN IN BROWSER stays: it is the one way to the web call.
  */
 function JoinRow({ meeting, compact, join: withJoin }: { meeting: MeetingInfo; compact: boolean; join: boolean }) {
@@ -111,7 +111,8 @@ function JoinRow({ meeting, compact, join: withJoin }: { meeting: MeetingInfo; c
   if (!withJoin && !join.inApp) return null
   return (
     <div className="flex flex-wrap items-center gap-2 pb-4">
-      {withJoin && <JoinButton url={meeting.url} appUrl={meeting.appUrl} size={compact ? "sm" : "default"} long />}
+      {/* Compact is the invitation in a message, where ACCEPT is the one solid action: JOIN is secondary there. */}
+      {withJoin && <JoinButton url={meeting.url} appUrl={meeting.appUrl} size={compact ? "sm" : "default"} variant={compact ? "outline" : "default"} long />}
       {join.inApp && (
         <a
           href={meeting.url}

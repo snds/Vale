@@ -1,5 +1,6 @@
 // Settings (ADR-0104): the page on unicron's SettingsFrame, each section the demo shows, Accounts.
 import { area, button, ensure, formatBar, formLayer, formPrimary, press, settingsButton, sidebar, toastGone } from "./helpers.mjs"
+import { calendarHours, calendarView } from "./calendar.mjs"
 
 /** The list of sections: the frame's own nav. */
 const sectionList = (page) => page.getByRole("navigation", { name: "Settings sections" })
@@ -503,8 +504,9 @@ export const scenes = [
       await press(app, options.first())
       ensure(/Lisbon \(/.test(await row.textContent()), "the row does not show Lisbon")
       // The time grid's second gutter.
-      await area(app, "Calendar")
-      await press(app, page.getByRole("group", { name: "View" }).getByRole("button", { name: "Day", exact: true }))
+      // The Day as hours (ADR-0098: cards by default, an Hours switch).
+      await calendarView(app, "Day")
+      await calendarHours(app, true)
     },
     assert: async ({ page }) => {
       const gutter = page.locator('[data-slot="second-zone"]')

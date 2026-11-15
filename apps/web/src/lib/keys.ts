@@ -34,7 +34,7 @@ export const KEY_COMMANDS: KeyCommand[] = [
   { id: "calendar.day", area: "calendar", does: "Day view", default: "d" },
   { id: "calendar.week", area: "calendar", does: "Week view", default: "w" },
   { id: "calendar.month", area: "calendar", does: "Month view", default: "m" },
-  { id: "calendar.agenda", area: "calendar", does: "Agenda", default: "a" },
+  { id: "calendar.agenda", area: "calendar", does: "Upcoming", default: "a" },
   { id: "calendar.previous", area: "calendar", does: "Previous day, week, or month", default: "ArrowLeft" },
   { id: "calendar.next", area: "calendar", does: "Next day, week, or month", default: "ArrowRight" },
 ]

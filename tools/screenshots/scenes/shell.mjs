@@ -208,7 +208,8 @@ export const scenes = [
     // A phone on its side: the bottom row stands as a column at the trailing edge, the tab bar turned.
     name: "shell-landscape",
     sizes: ["landscape"],
-    sean: { kind: "undrawn", area: "shell", screen: "landscape" },
+    // It is the Inbox, the app's main phone screen, on its side (cross-app decisions §14): Sean's set names it so.
+    sean: { kind: "undrawn", area: "mail", screen: "inbox" },
     assert: async ({ page }) => {
       ensure((await tabBar(page).getAttribute("aria-orientation")) === "vertical", "the tab bar is not vertical on a short screen")
       ensure(await button(page, "Compose").isVisible(), "create is not on a short screen")

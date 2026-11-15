@@ -178,7 +178,7 @@ export const scenes = [
       // ⌘K's settings rows are the settings page's sections, from one list.
       await settings(app)
       const names = await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button").evaluateAll((els) => els.map((el) => el.textContent.trim()).filter((t) => !/^Sign out/.test(t)))
-      ensure(names.includes("Notifications") && !names.includes("Notes"), `the settings sections are: ${names.join(", ")}`)
+      ensure(names.includes("Notifications") && names.includes("Notes"), `the settings sections are: ${names.join(", ")}`)
       const menu = await commandMenu(app)
       await menu.getByRole("combobox").fill("settings")
       for (const name of names) ensure(await menu.getByRole("option", { name, exact: true }).count(), `⌘K has no row for the settings section “${name}”`)

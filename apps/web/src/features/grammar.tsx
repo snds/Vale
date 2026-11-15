@@ -28,8 +28,8 @@ const TILE: Record<Exclude<SwipeActionId, "none">, { icon: IconName; label: stri
   read: { icon: "view", label: "Read" },
   archive: { icon: "archive", label: "Archive" },
   star: { icon: "star", label: "Star" },
-  "snooze-tomorrow": { icon: "time", label: "Tomorrow" },
-  "snooze-next-week": { icon: "time", label: "Next week" },
+  "snooze-tomorrow": { icon: "time", label: "Snooze" },
+  "snooze-next-week": { icon: "time", label: "Snooze" },
   remind: { icon: "notification", label: "Remind" },
   newsletters: { icon: "blog", label: "Newsletters" },
 }

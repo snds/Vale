@@ -65,7 +65,7 @@ import { shareLinksIn, type ShareLink } from "../notes/share-link"
 import { useAddShared } from "../notes/use-add-shared"
 import { useOpenTeamLink } from "../team/use-open-team-link"
 import { useQuickContext } from "../notes/use-quick-context"
-import { ShareThreadDialog } from "../team/share-thread-dialog"
+import { ShareThreadLayer } from "../team/share-thread-dialog"
 import { InboxTeamPanel } from "../team/inbox-team"
 import { OwnerTeamPanel } from "../team/owner-team-panel"
 import { useInboxHereNames, useShareHere } from "../team/here"
@@ -557,7 +557,7 @@ function Conversation({
         )}
       </article>
 
-      <ShareThreadDialog threadId={row.threadId} subject={subject} open={sharing} onOpenChange={setSharing} />
+      <ShareThreadLayer threadId={row.threadId} subject={subject} open={sharing} onOpenChange={setSharing} />
       {unsubscribable && <UnsubscribeAction message={unsubscribable} button={false} open={unsubscribing} onOpenChange={setUnsubscribing} onArchive={() => !row.archived && triage.toggleArchive(row)} />}
       {confirm.question()}
     </div>

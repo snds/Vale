@@ -19,7 +19,7 @@ import { shareToken, shareUrl } from "../notes/share-link"
  * you. Only you send it. Three states: no relay (OPEN SYNC), not shared (CREATE LINK), shared (the link,
  * COPY LINK, EMAIL IT, STOP SHARING).
  */
-export function ShareThreadDialog({ threadId, subject, open, onOpenChange }: { threadId: string; subject: string; open: boolean; onOpenChange: (open: boolean) => void }) {
+export function ShareThreadLayer({ threadId, subject, open, onOpenChange }: { threadId: string; subject: string; open: boolean; onOpenChange: (open: boolean) => void }) {
   return (
     <FormLayer open={open} onClose={() => onOpenChange(false)}>
       {open && <ShareThreadForm threadId={threadId} subject={subject} onDone={() => onOpenChange(false)} />}

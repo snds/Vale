@@ -38,7 +38,7 @@ import { parseShareUrl } from "../notes/share-link"
 import { useShareHere } from "./here"
 import { HereTiles } from "./here-tiles"
 import { openTeamLinkForm, useLinkForm } from "./link-form"
-import { ShareThreadDialog } from "./share-thread-dialog"
+import { ShareThreadLayer } from "./share-thread-dialog"
 import type { TeamMessage } from "./team-doc"
 import { OwnerFiles, TeammateFiles } from "./team-files"
 import { TeamTabs } from "./team-panel"
@@ -94,7 +94,7 @@ export function TeamList() {
           )}
         </LoadState>
       )}
-      <OpenTeamLinkDialog open={linkForm} onOpenChange={(o) => useLinkForm.setState({ open: o })} />
+      <OpenTeamLinkLayer open={linkForm} onOpenChange={(o) => useLinkForm.setState({ open: o })} />
     </>
   )
 }
@@ -272,7 +272,7 @@ export function TeamThreadView({ id }: { id: string }) {
         />
       </article>
 
-      {canShare && t.threadId && <ShareThreadDialog threadId={t.threadId} subject={subject} open={sharing} onOpenChange={setSharing} />}
+      {canShare && t.threadId && <ShareThreadLayer threadId={t.threadId} subject={subject} open={sharing} onOpenChange={setSharing} />}
       {confirm.question()}
     </div>
   )
@@ -298,7 +298,7 @@ function SharedMessages({ messages, live }: { messages: TeamMessage[]; live: boo
 }
 
 /** OPEN A LINK… (brief M9): a form with LINK and the primary OPEN. */
-export function OpenTeamLinkDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+export function OpenTeamLinkLayer({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   return (
     <FormLayer open={open} onClose={() => onOpenChange(false)}>
       {open && <OpenTeamLinkForm onDone={() => onOpenChange(false)} />}

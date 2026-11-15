@@ -17,7 +17,7 @@ export interface Vertical {
 export const VERTICALS: Vertical[] = [
   { id: "mail", label: "Mail", icon: "email", create: { label: "Compose", icon: "edit" }, quick: "New message", pick: "Pick a conversation to see it here." },
   { id: "calendar", label: "Calendar", icon: "calendar", create: { label: "New event", icon: "add" }, quick: "New event", pick: "Pick an event to see it here." },
-  { id: "contacts", label: "Contacts", icon: "user--multiple", create: { label: "New contact", icon: "add" }, quick: "New contact", pick: "Pick a person to see them here." },
+  { id: "contacts", label: "Contacts", icon: "user--multiple", create: { label: "New contact", icon: "add" }, quick: "New contact", pick: "Pick a contact to see it here." },
   { id: "notes", label: "Notes", icon: "notebook", create: { label: "New note", icon: "add" }, quick: "New note", pick: "Pick a note to see it here." },
 ]
 

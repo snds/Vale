@@ -192,13 +192,13 @@ const messageTool = async (app, form, name) => {
 /** Turns Formatting on: the toolbar's toggle on a desktop, More's row on a phone. */
 const formatting = (app, form) => messageTool(app, form, "Formatting")
 /** Opens Send later: the chevron beside Send on a desktop; More's Send later… on a phone (or a long press on Send). */
-const sendLater = async (app, form) => {
+export const sendLater = async (app, form) => {
   if (app.phone) return messageTool(app, form, "Send later")
   await press(app, form.getByRole("button", { name: "Send later", exact: true }))
   return app.page.getByRole("menu")
 }
 /** A row of the message's menus: a menu item on a desktop, a sheet row on a phone. */
-const toolRow = (app, within, name, kind = "item") =>
+export const toolRow = (app, within, name, kind = "item") =>
   within.getByRole(app.phone ? { item: "button", radio: "radio", check: "checkbox" }[kind] : { item: "menuitem", radio: "menuitemradio", check: "menuitemcheckbox" }[kind], { name, exact: true })
 /** Drags a file the scene makes over the message and drops it: `bytes` long, named `name`. `hold` stops before the drop. */
 const dropFile = async (app, form, name, bytes, hold = false) => {
@@ -1551,7 +1551,8 @@ export const scenes = [
     // No account (brief M6): the info notice "Add an account to send." with OPEN ACCOUNTS, and Send off with it as its
     // reason. OPEN ACCOUNTS leaves for the Accounts section.
     name: "mail-compose-no-account",
-    scenario: "no-account",
+    // Past first run with Not now (ADR-0107): Mail itself, with no account.
+    scenario: ["no-account", "first-run-skipped"],
     run: async (app) => {
       const { page } = app
       const form = await compose(app)
@@ -1913,8 +1914,9 @@ export const scenes = [
       ensure(!(await folders.locator('[aria-label="Screener"], [aria-label^="Screener, "]').count()), "the Screener is listed while it is off and empty")
       if (await switcherLayer(page).count()) await leaveLayer(app)
       await settings(app, "Mail")
-      await page.getByRole("switch", { name: "Screen first-time senders" }).click()
-      await toastGone(app)
+      // Settings saves the switch silently (ADR-0110): no toast to wait for.
+      await page.getByRole("switch", { name: "Screener" }).click()
+      await app.settle()
       await area(app, "Mail")
       await lane(app, "Screener")
       const empty = page.getByRole("region", { name: "Mail", exact: true }).locator('[data-slot="empty"]')
@@ -2330,7 +2332,8 @@ export const scenes = [
   {
     // No account yet: one way on, to the first run.
     name: "mail-no-account",
-    scenario: "no-account",
+    // Past first run with Not now (ADR-0107): Mail's own way on.
+    scenario: ["no-account", "first-run-skipped"],
     sean: { kind: "undrawn", area: "mail", screen: "no-account" },
     assert: async ({ page }) => {
       const empty = page.getByRole("region", { name: "Mail", exact: true }).locator('[data-slot="empty"]')
