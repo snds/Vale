@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import { factTime, usePlaceStrip, useRefresh, useScreenFact, useScreenPlace } from "@/app/screen"
@@ -15,10 +15,11 @@ import { MasterDetail } from "@/components/master-detail"
 import { ScreenHead } from "@/components/page"
 import { VirtualList } from "@/components/virtual-list"
 import { getCoreClient } from "@/core/client"
-import { useCore, useInboxOverview, useMailPrefs, useMe, useMessagePages, useSplits, useSwipeActions, useThread } from "@/core/queries"
+import { useCore, useInboxOverview, useMe, useMessagePages, useSplits, useSwipeActions, useThread } from "@/core/queries"
 import type { Category, Lane, MessageSummary } from "@/core/types"
 
 import { useTriage } from "./actions"
+import { useMarkRead } from "./use-mark-read"
 import { useNowSecs } from "@/hooks/use-now"
 import { startFirstRun } from "@/features/onboarding/start-add-account"
 
@@ -107,22 +108,8 @@ export function MailView() {
   // A reply typed in the open conversation asks before another row or Back drops it (ADR-0092).
   const select = (id: string | null) => leaveThen(() => setSelected(id ? (list.find((m) => m.threadId === id) ?? null) : null))
 
-  // Opening a conversation reads it — once, so "Mark unread" sticks. Advanced
-  // settings can wait 3 seconds, so a glance doesn't count, or leave it to you (ADR-0055).
-  const markedRef = useRef<string | null>(null)
-  const { data: mailPrefs } = useMailPrefs()
-  const markRead = mailPrefs?.markRead
-  useEffect(() => {
-    if (!markRead || markRead === "manual") return
-    if (!row || !thread || !thread.some((m) => !m.seen) || markedRef.current === row.threadId) return
-    const mark = () => {
-      markedRef.current = row.threadId
-      markSeen(row, true)
-    }
-    if (markRead === "open") return mark()
-    const t = setTimeout(mark, 3000)
-    return () => clearTimeout(t)
-  }, [row, thread, markSeen, markRead])
+  // Opening a conversation reads it, once (ADR-0055).
+  useMarkRead(row, thread, markSeen)
 
   const multiAccount = accounts.length > 1
   const laneInfo = LANES.find((l) => l.id === tab)!
