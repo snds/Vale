@@ -372,6 +372,7 @@ export const scenes = [
   {
     // A calendar that did not sync (brief X4, C5): Calendar's banner, and the account's rows say so.
     name: "calendar-dav-error",
+    sizes: ["desktop", "phone", "medium"],
     scenario: "dav-error",
     sean: { kind: "undrawn", area: "calendar", screen: "sync-error" },
     run: (app) => area(app, "Calendar"),
@@ -380,7 +381,12 @@ export const scenes = [
       const banner = page.locator('[data-role="section-banner"]')
       ensure(/Work calendars didn't sync/.test(await banner.innerText()), "Calendar shows no banner for the calendars that did not sync")
       ensure(await banner.getByRole("button", { name: "Open Accounts" }).isVisible(), "the banner has no OPEN ACCOUNTS")
-      if (!app.phone) ensure(await sidebar(page).getByRole("checkbox", { name: /didn't sync/ }).count(), "the account's calendars do not say they did not sync")
+      // The sidebar on a desktop; the page head's popover beside the rail at medium width.
+      if (app.size === "desktop") ensure(await sidebar(page).getByRole("checkbox", { name: /didn't sync/ }).count(), "the account's calendars do not say they did not sync")
+      else if (app.size === "medium") {
+        ensure(await (await groups(app)).getByRole("checkbox", { name: /didn't sync/ }).count(), "the account's calendars do not say they did not sync")
+        await leaveLayer(app)
+      }
     },
   },
   {
@@ -505,13 +511,16 @@ export const scenes = [
       // A menu on a desktop, a sheet of rows on a phone.
       await press(app, page.getByText("This event", { exact: true }).last())
     },
-    assert: async ({ page }) => {
+    assert: async (app) => {
+      const { page } = app
       const form = page.getByRole("dialog", { name: /^Edit event/ })
       ensure(await form.isVisible(), "This event did not open the form")
       ensure((await form.locator('[data-slot="banner"]').innerText()).includes("Changes apply to this event only."), "the form does not say only this event changes")
       for (const label of ["Repeat", "Calendar"]) ensure(!(await rowOf(form, label).count()), `one event of a series shows ${label}`)
       ensure(!(await form.getByRole("combobox", { name: "Invite" }).count()), "one event of a series shows INVITE")
-      ensure(/^Edit event \/\/ Work/i.test((await form.innerText()).trim()) || (await form.getByText(/^Edit event \/\/ Work$/i).count()), "the overline is not EDIT EVENT // WORK")
+      // A phone's top row names the form (Mobile / 10); the dialog's overline adds the calendar.
+      if (app.phone) ensure((await form.locator('[data-slot="top-bar-title"]').first().innerText()).trim() === "Edit event", "the phone's top row does not say Edit event")
+      else ensure(/^Edit event \/\/ Work/i.test((await form.innerText()).trim()) || (await form.getByText(/^Edit event \/\/ Work$/i).count()), "the overline is not EDIT EVENT // WORK")
     },
   },
   {

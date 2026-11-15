@@ -61,21 +61,29 @@ export function MailNav({ layer = false, more = false }: { layer?: boolean; more
       <FirstGroup layer={layer} title="Mail // folders">
         {folders.map(row)}
       </FirstGroup>
-      {team.length > 0 && <NavSection title="Team">{team.map(row)}</NavSection>}
       {accounts.length > 1 && (
         <div className="flex flex-col gap-1">
-          {/* A filter, not a place: a radio group, so no row here is ever "current". */}
+          {/* A filter, not a place: a radio group, so no row here is ever "current". No "All" row, as
+              Mobile / 05 and Desktop / 01 draw it: none chosen is all of them, and pressing the chosen
+              account again goes back to all (the page head's overline says ALL ACCOUNTS). */}
           <NavSection title="Accounts" count={accounts.length} checkable="single" aria-label="Account">
-            <NavItem label="All" checked={account === null} onCheckedChange={() => useUi.getState().setMailAccount(null)} onClick={picked} />
             {accounts.map((a) => (
               <NavItem
                 key={a.id}
+                ref={a.lastError ? showBroken : undefined}
                 label={a.displayName}
+                icon="user--avatar"
                 checked={account?.id === a.id}
                 tone={a.lastError ? "critical" : undefined}
                 toneLabel="sync problem"
                 onCheckedChange={() => useUi.getState().setMailAccount(a.id)}
-                onClick={picked}
+                onClick={(e) => {
+                  if (account?.id === a.id) {
+                    e.preventDefault()
+                    useUi.getState().setMailAccount(null)
+                  }
+                  picked()
+                }}
               />
             ))}
           </NavSection>
@@ -90,9 +98,28 @@ export function MailNav({ layer = false, more = false }: { layer?: boolean; more
           />}
         </div>
       )}
+      {/* The team's lists after the accounts (Desktop / 05): an account that stopped syncing stays in sight. */}
+      {team.length > 0 && <NavSection title="Team">{team.map(row)}</NavSection>}
       {more && <MailMore />}
     </>
   )
+}
+
+/**
+ * An account that stopped syncing is the sidebar's one critical signal (Desktop / 05). When the
+ * groups are taller than the window, the scrolling middle brings its row into view once it
+ * appears, moving by whole groups so no row is left cut in half at the top.
+ */
+function showBroken(el: HTMLElement | null) {
+  const middle = el?.closest<HTMLElement>('[data-slot="app-frame-sidebar-middle"]')
+  if (!el || !middle) return el?.scrollIntoView({ block: "nearest" })
+  const below = el.getBoundingClientRect().bottom - middle.getBoundingClientRect().bottom
+  if (below <= 0) return
+  const need = middle.scrollTop + below
+  const top = middle.getBoundingClientRect().top - middle.scrollTop
+  // The first group (Search, APPS, the folders) that starts at or past the distance needed.
+  const step = [...middle.children].map((c) => c.getBoundingClientRect().top - top).find((t) => t >= need)
+  middle.scrollTop = step ?? need
 }
 
 /** The phone sheet's last group: when mail was last checked, and the plain way to check again (pull to refresh has one too). */

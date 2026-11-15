@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react"
 
 import { useUi, type ContactEditorState } from "@/app/ui-store"
+import { DatePicker } from "@/components/date-picker"
 import { FormLayer, FormLayerForm } from "@/components/editor-frame"
 import {
   AdaptiveMenu,
@@ -15,6 +16,7 @@ import {
   FieldRow,
   FieldRowAction,
   Icon,
+  IconButton,
   InitialTile,
   TextField,
   toast,
@@ -101,9 +103,12 @@ function useContactForm(state: ContactEditorState, onSaved: (id: string) => void
   const [title, setTitle] = useState(initial.title ?? "")
   const [emails, setEmails] = useState<ContactField[]>(initial.emails?.length ? initial.emails : [{ label: EMAIL_LABELS[0]!, value: "" }])
   const [phones, setPhones] = useState<ContactField[]>(initial.phones?.length ? initial.phones : [{ label: PHONE_LABELS[0]!, value: "" }])
-  // A yearless birthday from another app ("--03-04") has no date to show here: it stays unless replaced.
-  const yearless = initial.birthday?.startsWith("--") ? initial.birthday : null
-  const [birthday, setBirthday] = useState(yearless ? "" : (initial.birthday ?? ""))
+  // The birthday as two parts (Mobile / 13 draws "Mar 04"): the day of the year, picked with the app's
+  // DatePicker, and an optional year, typed. A card's yearless birthday ("--03-04") keeps no year.
+  const [birthdayDay, setBirthdayDay] = useState(() => /(\d{2}-\d{2})$/.exec(initial.birthday ?? "")?.[1] ?? "")
+  const [birthdayYear, setBirthdayYear] = useState(() => /^(\d{4})-/.exec(initial.birthday ?? "")?.[1] ?? "")
+  const yearOk = !birthdayYear.trim() || /^\d{4}$/.test(birthdayYear.trim())
+  const birthday = birthdayDay ? (birthdayYear.trim() && yearOk ? `${birthdayYear.trim()}-${birthdayDay}` : `--${birthdayDay}`) : ""
   const [note, setNote] = useState(initial.note ?? "")
   const [labels, setLabels] = useState<string[]>(initial.labels ?? [])
   const [photo, setPhoto] = useState<string | null>(initial.photo ?? null)
@@ -150,7 +155,7 @@ function useContactForm(state: ContactEditorState, onSaved: (id: string) => void
   const submit = async () => {
     setError(null)
     setTried(true)
-    if (wrongPhone) return
+    if (wrongPhone || !yearOk) return
     if (!bookId) return setError("There's no address book you can write to.")
     const input: ContactInput = {
       bookId,
@@ -159,7 +164,7 @@ function useContactForm(state: ContactEditorState, onSaved: (id: string) => void
       title: title.trim() || null,
       emails: emails.filter((e) => e.value.trim()),
       phones: phones.filter((p) => p.value.trim()),
-      birthday: birthday || yearless,
+      birthday: birthday || null,
       note: note.trim() || null,
       // An editor opened without the card's labels leaves them alone.
       labels: initial.labels !== undefined || labels.length ? labels : null,
@@ -192,9 +197,11 @@ function useContactForm(state: ContactEditorState, onSaved: (id: string) => void
     phoneError,
     checkPhone: (i: number) => setChecked((s) => new Set(s).add(i)),
     wrongPhone,
-    birthday,
-    setBirthday,
-    yearless,
+    birthdayDay,
+    setBirthdayDay,
+    birthdayYear,
+    setBirthdayYear,
+    yearError: tried && !yearOk ? "Four digits, such as 1990." : undefined,
     note,
     setNote,
     labels,
@@ -218,7 +225,6 @@ type Form = ReturnType<typeof useContactForm>
 
 /** In the form layer: a phone's whole screen (Mobile / 13), or a 640 dialog. */
 function LayerForm({ state, onDone }: { state: ContactEditorState; onDone: () => void }) {
-  const phone = useAppFrame().phone
   const form = useContactForm(state, onDone)
   useLeaveGuard(form.dirty)
   const what = form.isNew ? "New contact" : "Edit contact"
@@ -226,7 +232,8 @@ function LayerForm({ state, onDone }: { state: ContactEditorState; onDone: () =>
     <FormLayerForm
       overline={what}
       // A phone's top row says what the form is (Mobile / 13); a dialog's header shows the name as typed.
-      title={phone ? what : form.fullName.trim() || what}
+      title={form.fullName.trim() || what}
+      phoneKind
       primary={{ label: "Save", loading: form.saving }}
       error={form.error}
       onSubmit={() => void form.submit()}
@@ -349,6 +356,7 @@ function PasteSignature({ form }: { form: Form }) {
 
 /** The fields of brief P3, in its order. */
 function Fields({ form, nameRef }: { form: Form; nameRef?: Ref<HTMLInputElement> }) {
+  const photoInput = useRef<HTMLInputElement>(null)
   const phone = useAppFrame().phone
   const { data: known = [] } = useContactLabels()
   const pick = (files: FileList | null) => {
@@ -361,10 +369,11 @@ function Fields({ form, nameRef }: { form: Form; nameRef?: Ref<HTMLInputElement>
       <div className="flex items-center gap-4" role="group" aria-label="Photo">
         <InitialTile size="l" initials={contactInitials(form.fullName || "?")} src={form.photo ?? undefined} />
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="ghost" size="sm" render={<label />} nativeButton={false}>
+          {/* One control, one Tab stop: the button opens the file picker; the input stays out of the tab order and of assistive tech. */}
+          <Button type="button" variant="ghost" size="sm" onClick={() => photoInput.current?.click()}>
             <Icon name="camera" data-icon="inline-start" /> {form.photo ? "Change photo" : "Add photo"}
-            <input type="file" accept="image/*" aria-label={form.photo ? "Change photo" : "Add photo"} className="sr-only" onChange={(e) => (pick(e.target.files), (e.target.value = ""))} />
           </Button>
+          <input ref={photoInput} type="file" accept="image/*" tabIndex={-1} aria-hidden="true" hidden onChange={(e) => (pick(e.target.files), (e.target.value = ""))} />
           {form.photo && (
             <Button type="button" variant="ghost" size="sm" onClick={() => form.setPhoto(null)}>
               Remove photo
@@ -379,13 +388,7 @@ function Fields({ form, nameRef }: { form: Form; nameRef?: Ref<HTMLInputElement>
       </div>
       <FieldList kind="email" form={form} />
       <FieldList kind="phone" form={form} />
-      <TextField
-        label="Birthday"
-        type="date"
-        value={form.birthday}
-        onChange={(e) => form.setBirthday(e.target.value)}
-        helper={form.yearless && !form.birthday ? `Saved without a year: ${birthdayLabel(form.yearless)}. Pick a date to replace it.` : undefined}
-      />
+      <BirthdayField form={form} />
       <ChipField
         label="Labels"
         value={form.labels}
@@ -430,6 +433,64 @@ function Fields({ form, nameRef }: { form: Form; nameRef?: Ref<HTMLInputElement>
 }
 
 /** EMAILS or PHONE NUMBERS: a row per value (the field, its label in a menu inside the box, remove), then ADD EMAIL or ADD PHONE. */
+/**
+ * BIRTHDAY (Mobile / 13, Desktop / 10): the day, as the app writes dates ("Mar 04"), picked with the
+ * shared DatePicker (ADR-0088), and an optional YEAR beside it. A birthday with no year is saved
+ * without one, as other apps save it ("--03-04").
+ */
+function BirthdayField({ form }: { form: Form }) {
+  const [open, setOpen] = useState(false)
+  const day = form.birthdayDay
+  const shown = day ? birthdayLabel(`--${day}`) : ""
+  // The picker opens on the birthday in the year typed, or this year.
+  const [thisYear] = useState(() => String(new Date().getFullYear()))
+  const year = /^\d{4}$/.test(form.birthdayYear.trim()) ? form.birthdayYear.trim() : thisYear
+  const spoken = day ? `Birthday, ${shown}` : "Pick a birthday"
+  return (
+    <div className="flex items-start gap-4" role="group" aria-label="Birthday">
+      <div className="min-w-0 flex-1">
+        <TextField
+          label="Birthday"
+          readOnly
+          tabIndex={-1}
+          placeholder="Not set"
+          value={shown}
+          onClick={() => setOpen(true)}
+          trailing={
+            <>
+              {day && <IconButton type="button" label="Remove birthday" icon="close" size="icon-sm" onClick={() => (form.setBirthdayDay(""), form.setBirthdayYear(""))} />}
+              <DatePicker
+                title="Birthday"
+                value={day ? `${year}-${day}` : ""}
+                onPick={(d) => form.setBirthdayDay(d.slice(5))}
+                open={open}
+                onOpenChange={setOpen}
+                align="end"
+                trigger={<IconButton type="button" label={spoken} icon="calendar" size="icon-sm" />}
+              />
+            </>
+          }
+        />
+      </div>
+      {/* The year joins once there is a day to give it to. */}
+      {day && (
+        <div className="w-32 shrink-0">
+          <TextField
+            label="Year"
+            inputMode="numeric"
+            autoComplete="bday-year"
+            placeholder="Optional"
+            maxLength={4}
+            value={form.birthdayYear}
+            onChange={(e) => form.setBirthdayYear(e.target.value)}
+            error={form.yearError}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function FieldList({ kind, form }: { kind: "email" | "phone"; form: Form }) {
   const email = kind === "email"
   const rows = email ? form.emails : form.phones

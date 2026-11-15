@@ -1,7 +1,6 @@
 import { Highlight, Icon, ListRow } from "@unicron/ui"
 import type { NoteSummary } from "@/core/types"
 import { noteSwatch, swatchSquare } from "@/lib/swatches"
-import { shortTime } from "@/lib/time"
 
 import { NOTE_COLOR_LABEL } from "./note-color"
 import { editedLabel, noteDetail, noteTag, rowTime } from "./note-meta"
@@ -47,8 +46,8 @@ export function NoteRow({ note: n, onOpen, selected, query, list }: NoteRowProps
           </>
         ) : undefined
       }
-      meta={shortTime(n.updated)}
-      metaStyle="plain"
+      // The clock time or the weekday, as the Notes list and Mail's rows write it (decisions §13), in the mono meta.
+      meta={rowTime(n.updated)}
       status={n.archived ? "Archived" : undefined}
       detail={snippet ? query && !n.locked ? <Highlight text={snippet} query={query} /> : snippet : undefined}
     />

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
 import { toast } from "@unicron/ui"
 
+import { useUi } from "@/app/ui-store"
 import { useCore, useOutbox } from "@/core/queries"
 
 import { editFailed, remember, toastId, useShown } from "./outbox"
@@ -18,6 +19,10 @@ const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isCo
  * goes out, the toast "Sent {subject}"; and a send that failed raises
  * "Not sent: {subject}" with EDIT, which stays until closed, once per item,
  * whether it failed now or while Vale was closed.
+ *
+ * In Mail a failed send is Mail's critical Banner alone (cross-app decisions
+ * §1: broken and fixable is one Banner in the section it affects), so the
+ * toast is raised only while another place is open, and goes when Mail does.
  */
 export function OutboxWatcher() {
   const { data: core } = useCore()
@@ -59,6 +64,7 @@ export function OutboxWatcher() {
     const fresh = (outbox ?? []).filter((i) => i.state === "failed" && !toasted.includes(i.id) && !seen.includes(i.id))
     if (!fresh.length) return
     remember({ toasted: [...toasted, ...fresh.map((i) => i.id)] })
+    if (inMail(useUi.getState())) return
     for (const item of fresh) {
       toast.error(`Not sent: ${sendName(item)}`, {
         id: toastId(item.id),
@@ -68,8 +74,21 @@ export function OutboxWatcher() {
       })
     }
   }, [outbox])
+
+  // Into Mail: its Banner says it now, so a not-sent toast still standing goes.
+  useEffect(
+    () =>
+      useUi.subscribe((s, prev) => {
+        if (!inMail(s) || inMail(prev)) return
+        for (const id of useShown.getState().toasted) toast.dismiss(toastId(id))
+      }),
+    [],
+  )
   return null
 }
+
+/** Mail's lists are the place on screen: its Banner is in sight. */
+const inMail = (s: { vertical: string; settings: unknown; search: unknown }) => s.vertical === "mail" && !s.settings && !s.search
 
 /** The names of messages seen waiting in the outbox, by id, for the toast once each has gone out. */
 const sentNames = new Map<string, string>()

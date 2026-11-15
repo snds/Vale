@@ -137,6 +137,9 @@ export const scenes = [
       ensure((await field(f, "Name").inputValue()) === "Priya Raman", "NAME does not hold the card's name")
       ensure((await field(f, "Company").inputValue()) === "Studio", "COMPANY does not hold the card's company")
       ensure(await paster(app, f).isVisible(), "the form has no PASTE A SIGNATURE")
+      // BIRTHDAY is the app's date picker, not the browser's date field (ADR-0088).
+      ensure(!(await f.locator('input[type="date"]').count()), "BIRTHDAY is the browser's date field")
+      ensure(await f.getByRole("group", { name: "Birthday", exact: true }).getByRole("button", { name: "Pick a birthday", exact: true }).isVisible(), "BIRTHDAY has no picker")
       if (inPane(app)) {
         ensure(!(await page.getByRole("dialog").count()), "on a desktop the form opened as a dialog, not in the pane")
         ensure(await people(page).isVisible(), "the list is not beside the form")
@@ -148,6 +151,31 @@ export const scenes = [
       } else if (app.phone) {
         ensure((await f.locator('[data-slot="top-bar-title"]').innerText()).trim() === "Edit contact", "the phone's top row does not say Edit contact")
       }
+    },
+  },
+  {
+    // BIRTHDAY in the app's date style (Mobile / 13: "Mar 04"), the year beside it; a day picked in the
+    // shared DatePicker keeps the year; REMOVE BIRTHDAY empties both.
+    name: "contacts-edit-birthday",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await editPerson(app, /Marcus Lee/)
+      // The form, held by name: on a phone the picker is a dialog too.
+      const f = inPane(app) ? contactForm(app) : page.getByRole("dialog", { name: /Edit contact/ })
+      const day = field(f, "Birthday")
+      ensure(/^[A-Z][a-z]{2} \d{2}$/.test(await day.inputValue()), `BIRTHDAY reads ${await day.inputValue()}, not the app's date style`)
+      ensure((await field(f, "Year").inputValue()) === "1990", "YEAR does not hold the card's year")
+      const group = f.getByRole("group", { name: "Birthday", exact: true })
+      await press(app, group.getByRole("button", { name: /^Birthday, / }))
+      // The month grid's 4th: each day is named by its full date ("Friday, November 4").
+      const fourth = page.getByRole("gridcell", { name: /^\w+, \w+ 4(,|$)/ }).first()
+      await fourth.waitFor()
+      await press(app, fourth)
+      ensure(/ 04$/.test(await day.inputValue()), `picking the 4th left BIRTHDAY at ${await day.inputValue()}`)
+      ensure((await field(f, "Year").inputValue()) === "1990", "picking a day lost the year")
+      await press(app, group.getByRole("button", { name: "Remove birthday", exact: true }))
+      ensure((await day.inputValue()) === "" && !(await field(f, "Year").count()), "REMOVE BIRTHDAY left a birthday")
     },
   },
   {
@@ -222,6 +250,15 @@ export const scenes = [
         await press(app, sidebar(page).getByRole("button", { name: "Calendar", exact: true }))
         await keep("another section")
         ensure((await headTitle(page)) === "People", "KEEP EDITING still left Contacts")
+        // A new form in place of this one asks too: the sidebar's NEW CONTACT, and ⌘K › New contact.
+        await press(app, sidebar(page).getByRole("button", { name: "New contact", exact: true }))
+        await keep("NEW CONTACT")
+        await page.keyboard.press("Control+KeyK")
+        await app.settle()
+        const menu = page.getByRole("dialog", { name: "Command menu" })
+        await menu.getByRole("combobox").fill("new contact")
+        await press(app, menu.getByRole("option", { name: "New contact", exact: true }))
+        await keep("⌘K › New contact")
         await field(contactForm(app), "Name").press("Escape")
         await app.settle()
         await keep("Esc")
@@ -653,6 +690,7 @@ export const scenes = [
   {
     // RESTORE brings the card back: the toast "Restored {name}", and the card open among everyone.
     name: "places-recently-deleted-restore",
+    sizes: ["desktop", "phone", "medium"],
     scenario: "contacts-deleted",
     run: async (app) => {
       const { page } = app
@@ -666,7 +704,8 @@ export const scenes = [
     assert: async (app) => {
       const { page } = app
       ensure(await page.getByRole("article", { name: "Sam Okafor" }).isVisible(), "the restored card is not open")
-      if (!app.phone) ensure(await people(page).getByRole("button", { name: /Sam Okafor/ }).isVisible(), "the restored card is not in the list")
+      // Beside the list on a desktop; at medium width the card is a pushed screen, and Back shows the list.
+      if (app.size === "desktop") ensure(await people(page).getByRole("button", { name: /Sam Okafor/ }).isVisible(), "the restored card is not in the list")
     },
   },
   {

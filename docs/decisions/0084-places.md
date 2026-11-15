@@ -1,6 +1,7 @@
 # ADR-0084 · Places: one per section, in the store, the nav and the history
 
 - **Status:** Accepted for the build. One part is a proposal for Sean, marked below: DC7 (sets, Tasks and Booking links leave the calendar's side list for the calendars list and two places).
+- **Changed by:** [ADR-0115](0115-review-fixes.md): the accounts group has no "All" row (pressing the chosen account again shows all) and stands before Team.
 - **Date:** 2026-11-14
 - **Builds on:** [ADR-0083](0083-shell.md) (the shell; it left a slot for each section's groups), [ADR-0075](0075-settings-page-and-shortcuts.md) (Settings as a page), [ADR-0073](0073-icons-by-code-point-and-the-rail.md) (the rail by choice), [ADR-0063](0063-shared-inbox.md) (a team member has Mail only), [ADR-0021](0021-calendar-planning.md) (calendar sets), [ADR-0028](0028-tasks-on-the-calendar.md) (tasks), [ADR-0026](0026-scheduling-links.md) (booking links).
 - **Design:** the Folders sheet (Mobile / 05) and the sidebar groups of Desktop / 01, 06, 09 and 11; briefs X1, 3.1, 3.3 and 3.5 of the undrawn-areas design.

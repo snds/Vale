@@ -262,8 +262,10 @@
 .time-grid-hour {
   color: var(--text-secondary);
 }
+/* A day of the next or last month holds events too, so it is read: secondary ink, set apart from the
+   month's own days (body ink) at 4.5:1 or more, never the faint decoration ink. */
 .month-cell[data-outside] .month-cell-date {
-  color: var(--text-faint);
+  color: var(--text-secondary);
 }
 .week-strip-day[data-block] > *,
 .week-day-head[data-today] > *,
@@ -280,7 +282,7 @@
 /* ── The desktop Month (features/calendar/month-grid.tsx; ADR-0098) ─────────
    Six weeks of cells: the date in mono at the top left (today on the primary
    block), up to three compact events, then "+2 more". Days outside the month
-   are faint. */
+   are in secondary ink. */
 @layer components {
   .month-cells {
     display: grid;
@@ -297,7 +299,8 @@
   .month-cell {
     display: flex;
     flex-direction: column;
-    gap: calc(var(--spacing) * 0.5);
+    /* 4 apart, on the spacing scale: the date, then each compact event. */
+    gap: var(--spacing);
     min-width: 0;
     min-height: var(--c-month-cell-min);
     padding: var(--spacing);
@@ -379,7 +382,10 @@
     user-select: none;
     -webkit-tap-highlight-color: transparent;
     font-variant-numeric: tabular-nums;
-    &[data-outside],
+    /* Another month's day can still be picked: secondary ink, readable. A day that cannot be is faint. */
+    &[data-outside] {
+      color: var(--text-secondary);
+    }
     &[aria-disabled="true"] {
       color: var(--text-faint);
     }

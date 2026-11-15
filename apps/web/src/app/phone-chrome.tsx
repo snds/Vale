@@ -37,7 +37,14 @@ export function PhoneTopRow({ settingsOpen, searchOpen, onSettings, onCloseSetti
     return (
       <AppFrameTopRow>
         {/* An open settings section goes back to the list of sections; the list goes back to the app. */}
-        <TopBar onBack={frame.back?.onBack ?? (settingsOpen ? onCloseSettings : undefined)} backLabel={frame.back?.label} actions={frame.detailOpen ? pushed?.actions : undefined} />
+        {/* Settings' list is a pushed screen with its name in the top row (Mobile / 16), not a large page head. */}
+        <TopBar
+          title={settingsOpen && !frame.detailOpen ? "Settings" : undefined}
+          titleAs={settingsOpen && !frame.detailOpen ? "h1" : undefined}
+          onBack={frame.back?.onBack ?? (settingsOpen ? onCloseSettings : undefined)}
+          backLabel={frame.back?.label}
+          actions={frame.detailOpen ? pushed?.actions : undefined}
+        />
       </AppFrameTopRow>
     )
   }

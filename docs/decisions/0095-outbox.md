@@ -1,6 +1,7 @@
 # ADR-0095 · Send later, the Outbox, failed sends, snooze and reminders on mail
 
 - **Status:** Accepted for the build. It records **DC9 as Proposed**: the lane "Scheduled" becomes the **Outbox**, with SENDING, NOT SENT and SCHEDULED (question Q3 for Sean). It cites W9 (no call to clear a failed send) and DC4 and DC10 (ADR-0087, what closing a form asks). Everything else builds briefs M7 and M8 as written.
+- **Changed by:** [ADR-0115](0115-review-fixes.md): in Mail a failed send is the Mail Banner alone; the "Not sent" toast shows only while another place is open (cross-app decisions §1).
 - **Date:** 2026-11-14
 - **Builds on:** [ADR-0041](0041-their-time.md) (their morning), [ADR-0086](0086-status.md) (the sending strip and status line, section banners), [ADR-0087](0087-forms-and-questions.md) (the form layer, the leave guard), [ADR-0088](0088-date-parts.md) (the date-and-time picker), [ADR-0113](0113-mail-lists.md) (message rows on unicron's `ListRow` and `SwipeRow`), [ADR-0094](0094-writing.md) (the compose dialog and its `SplitButton`).
 - **Design:** briefs M7 and M8 of the undrawn-areas design; brief X4 (the Mail banner for a failed send), X6 (EDIT on a scheduled message and closing it), 4.0 (toasts, swipes, empty states), 5.2 (the Outbox's empty copy); cross-app decisions §1, §9, §10, §12, §13. Figma draws none of it.

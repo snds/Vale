@@ -79,9 +79,12 @@ export const scenes = [
       await page.evaluate(() => document.querySelectorAll("[data-scroll-root], main, [data-slot]").forEach((el) => el.scrollTop && (el.scrollTop = 0)))
       await app.settle()
     },
-    assert: async ({ page }) => {
+    assert: async (app) => {
+      const { page } = app
       ensure(await page.getByRole("heading", { name: "Settings", level: 1 }).isVisible(), "the page head does not say Settings")
-      ensure(/Settings \/\/ Personal \+ Work/i.test(await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()), "the page head's overline does not name the accounts")
+      // A phone names Settings in its top row (Mobile / 16); the page head and its overline are the desktop's and medium's.
+      if (app.phone) ensure((await page.locator('[data-slot="top-bar-title"]').first().innerText()).trim() === "Settings", "the phone's top row does not say Settings")
+      else ensure(/Settings \/\/ Personal \+ Work/i.test(await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()), "the page head's overline does not name the accounts")
       const work = page.getByRole("group", { name: "Work" }).first()
       ensure(/Gmail \/\/ sign-in needed/.test(await work.textContent()), "the work account does not read Gmail // sign-in needed")
       ensure(await work.getByRole("button", { name: "Sign in", exact: true }).isVisible(), "the work account has no SIGN IN")

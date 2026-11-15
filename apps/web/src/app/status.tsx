@@ -107,7 +107,8 @@ export function LineStatus({ fact }: { fact: string | null }) {
           <Tooltip>
             {/* A plain element takes the hover and the focus inside it, so the item keeps its own slot and name. */}
             <TooltipTrigger render={<span className="flex min-w-0" />}>
-              <StatusItem text={fact} label="Check again" onClick={() => void checkMail()} />
+              {/* The words on it lead its name (WCAG 2.5.3, label in name): "Synced // 09:16. Check again". */}
+              <StatusItem text={fact} label={`${fact}. Check again`} onClick={() => void checkMail()} />
             </TooltipTrigger>
             <TooltipContent>Check for new mail</TooltipContent>
           </Tooltip>

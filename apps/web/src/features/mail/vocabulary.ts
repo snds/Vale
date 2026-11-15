@@ -36,14 +36,6 @@ export const SWIPE_CHOICES: { id: SwipeActionId; label: string; command?: string
   { id: "none", label: "Nothing" },
 ]
 
-/**
- * Kept for the settings that still read it. The tiles take their fill from
- * unicron's SwipeRow now (ADR-0113): the outermost and the leading tile
- * primary, the rest raised neutral.
- * @deprecated
- */
-export const PRIMARY = "bg-primary text-primary-foreground"
-
 /** 9:00 three days from now, for "remind me if nobody replies". */
 const inThreeDays = () => {
   const d = new Date(Date.now() + 3 * 86_400_000)

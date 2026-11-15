@@ -398,6 +398,10 @@ export const scenes = [
     assert: async ({ page }) => {
       const list = page.getByRole("dialog", { name: "Keyboard shortcuts" })
       ensure(await list.isVisible(), "? did not open the keys list")
+      // CHANGE KEYS AND SWIPES is pinned at the foot at every width (brief X7), never scrolled out of sight.
+      const change = list.getByRole("button", { name: "Change keys and swipes", exact: true })
+      const box = await change.boundingBox()
+      ensure(box && box.y + box.height <= page.viewportSize().height, "CHANGE KEYS AND SWIPES is below the fold")
       const section = (name) => list.getByRole("region", { name, exact: true })
       const text = async (name) => ((await section(name).textContent()) ?? "").replace(/\s+/g, " ")
       // The person's own keys (the demo's are the defaults) and the fixed ones.

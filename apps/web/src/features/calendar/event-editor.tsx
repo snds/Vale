@@ -256,6 +256,7 @@ function EventForm({ state, onDone }: { state: EventEditorState; onDone: () => v
     <FormLayerForm
       overline={calendar ? `${what} // ${calendar.name}` : what}
       title={title.trim() || what}
+      phoneKind
       primary={{ label: "Save event", loading: save.isPending }}
       error={error}
       onSubmit={() => void submit()}

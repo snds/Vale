@@ -138,6 +138,7 @@ export function FormLayerForm({
   ref,
   overline,
   title,
+  phoneKind = false,
   primary,
   primaryControl,
   footerStart,
@@ -153,6 +154,12 @@ export function FormLayerForm({
   overline: string
   /** The item's name as typed; the overline's words while it has none. */
   title: string
+  /**
+   * On a phone, the top row names the kind of form ("New message", "New event", "Edit contact"), as
+   * Mobile / 03, 10 and 13 draw it, where the name is typed in a field on the same screen. Left out,
+   * the top row shows the title (a signature's account, an invitation's person).
+   */
+  phoneKind?: boolean
   primary: FormPrimary
   /** A desktop primary of its own (the composer's Send with Send later). It must submit the form. */
   primaryControl?: ReactNode
@@ -184,36 +191,50 @@ export function FormLayerForm({
       run()
     }
   }
+  // The overline's first part: what the form is ("Reply // Saturday ferry" is a Reply).
+  const kind = phoneKind ? overline.split("//")[0].trim() : null
   const failed = error ? <Banner size="compact" tone="critical" body={error} /> : null
 
   if (phone) {
     return (
       <form ref={ref} className="flex min-h-0 flex-1 flex-col gap-2" onSubmit={submit} onKeyDown={keys} {...form}>
         <div className="shrink-0 px-4">
-          <TopBar
-            titleAs="h2"
-            title={<span id={titleId}>{title}</span>}
-            start={<FloatButton type="button" label="Close" icon="close" size="l" tooltip={false} onClick={close} />}
-            actions={
-              <FloatButton
-                type="submit"
-                kind="primary"
-                size="l"
-                label={primary.label}
-                icon={primary.icon ?? "checkmark"}
-                disabled={primary.disabled || primary.loading}
-                // Off with a reason: it points at the line that says why (brief 4.0). Unicron's FloatButton
-                // cannot yet stay a Tab stop while disabled (gap in ADR-0094).
-                aria-describedby={primary.disabled ? primary.describedBy : undefined}
-                onLongPress={primary.onLongPress}
-                longPressLabel={primary.longPressLabel}
-                aria-keyshortcuts={primary.onLongPress ? "Control+Enter Meta+Enter Shift+Enter" : "Control+Enter Meta+Enter"}
-              />
-            }
-          />
-          <span id={overlineId} hidden>
-            {overline}
-          </span>
+          {/* The hairline under the top row, inside the screen's 16 px edges (Mobile / 03, 10, 13). */}
+          <div className="pb-2 rule-b">
+            <TopBar
+              titleAs="h2"
+              // With `phoneKind` the top row names the kind of form, and the typed name stays in the layer's name.
+              title={kind ? <span id={overlineId ?? titleId}>{kind}</span> : <span id={titleId}>{title}</span>}
+              start={<FloatButton type="button" label="Close" icon="close" size="l" tooltip={false} onClick={close} />}
+              actions={
+                <FloatButton
+                  type="submit"
+                  kind="primary"
+                  size="l"
+                  label={primary.label}
+                  icon={primary.icon ?? "checkmark"}
+                  disabled={primary.disabled || primary.loading}
+                  // Off with a reason: it points at the line that says why (brief 4.0). Unicron's FloatButton
+                  // cannot yet stay a Tab stop while disabled (gap in ADR-0094).
+                  aria-describedby={primary.disabled ? primary.describedBy : undefined}
+                  onLongPress={primary.onLongPress}
+                  longPressLabel={primary.longPressLabel}
+                  aria-keyshortcuts={primary.onLongPress ? "Control+Enter Meta+Enter Shift+Enter" : "Control+Enter Meta+Enter"}
+                />
+              }
+            />
+            {kind ? (
+              overlineId && (
+                <span id={titleId} hidden>
+                  {title}
+                </span>
+              )
+            ) : (
+              <span id={overlineId} hidden>
+                {overline}
+              </span>
+            )}
+          </div>
         </div>
         <SheetBody>
           {children}

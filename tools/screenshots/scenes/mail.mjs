@@ -1,5 +1,5 @@
 // Mail: the lanes, a conversation, reading and writing. Search is in search.mjs.
-import { area, button, closeForm, tabBar, discardQuestion, ensure, formatBar, formLayer, formPrimary, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, switcher, switcherLayer, toastGone } from "./helpers.mjs"
+import { area, button, closeForm, tabBar, discardQuestion, ensure, formatBar, formLayer, formPrimary, goBack, groups, headTitle, sidebar, leaveLayer, oneCurrent, pick, press, switcher, switcherLayer, toastGone } from "./helpers.mjs"
 import { settings } from "./settings.mjs"
 
 /** Opens a conversation in the Inbox list by its subject. */
@@ -579,6 +579,7 @@ export const scenes = [
   {
     // The viewer (brief M4): viewer 960, a full sheet on a phone. TXT // 63 B, the name, close; one secondary SAVE.
     name: "mail-attachment-preview",
+    sizes: ["desktop", "phone", "medium"],
     sean: { kind: "undrawn", area: "mail", screen: "attachment-preview" },
     run: async (app) => {
       await conversation(app, /Your booking is confirmed/)
@@ -590,7 +591,9 @@ export const scenes = [
       ensure(/TXT\s*\/\/\s*\d+ B/.test(await viewer.innerText()), "the viewer's overline is not TYPE // SIZE")
       ensure(/Passports/.test(await viewer.innerText()), "the viewer does not show the file")
       ensure(await viewer.getByRole("button", { name: "Save", exact: true }).isVisible(), "the viewer has no Save")
-      if (!app.phone) ensure(Math.round((await viewer.boundingBox()).width) === 960, `the viewer is ${Math.round((await viewer.boundingBox()).width)} wide, not 960`)
+      // The viewer size, capped at the window less 48 (contract C10): 960 on a desktop, 720 at 768.
+      const want = Math.min(960, app.page.viewportSize().width - 48)
+      if (!app.phone) ensure(Math.round((await viewer.boundingBox()).width) === want, `the viewer is ${Math.round((await viewer.boundingBox()).width)} wide, not ${want}`)
     },
   },
   {
@@ -1052,6 +1055,7 @@ export const scenes = [
     // The Screener's notice in the conversation's notice slot (brief M3): NEW SENDER, the question, LET IN and
     // SCREEN OUT. LET IN keeps the conversation open; SCREEN OUT closes it. Both toast with UNDO.
     name: "mail-screener-notice",
+    sizes: ["desktop", "phone", "medium"],
     path: "/?screener",
     scenario: "screener-waiting",
     run: async (app) => {
@@ -1069,7 +1073,8 @@ export const scenes = [
       ensure(await reader(page).getByRole("heading", { name: "Quick question about your studio" }).isVisible(), "Let in closed the conversation")
       await press(app, toast("Riley Growth can reach your inbox").getByRole("button", { name: "Undo", exact: true }))
       await toastsGone(app)
-      if (app.phone) await press(app, button(page, "Back"))
+      // A pushed conversation (a phone, medium width) goes back to the list before the lane is picked again.
+      if (app.phone || app.size === "medium") await press(app, button(page, "Back").first())
       await open()
       await press(app, notice().getByRole("button", { name: "Screen out", exact: true }))
       await toast("Screened out Riley Growth").waitFor()
@@ -1099,8 +1104,14 @@ export const scenes = [
     assert: async (app) => {
       const { page } = app
       const form = page.getByRole("dialog", { name: "New message" })
-      const overline = (await form.locator(app.phone ? '[id$="-overline"]' : '[data-slot="dialog-overline"]').first().textContent()).trim()
-      ensure(/^New message \/\/ Personal$/i.test(overline), `the overline reads “${overline}”, not New message // Personal`)
+      if (app.phone) {
+        // Mobile / 03: the top row names the form; the account is in FROM, the subject in its field.
+        const top = (await form.locator('[data-slot="top-bar-title"]').first().innerText()).trim()
+        ensure(top === "New message", `the phone's top row reads “${top}”, not New message`)
+      } else {
+        const overline = (await form.locator('[data-slot="dialog-overline"]').first().textContent()).trim()
+        ensure(/^New message \/\/ Personal$/i.test(overline), `the overline reads “${overline}”, not New message // Personal`)
+      }
       ensure(await form.getByRole("group", { name: "From", exact: true }).isVisible(), "the message has no FROM row")
       ensure(await form.getByRole("group", { name: "From", exact: true }).getByRole("button", { name: /^Change/ }).isVisible(), "FROM has no Change with two accounts")
       ensure(!(await form.getByRole("button", { name: "Cancel", exact: true }).count()), "the message has a Cancel besides its close button")
@@ -2049,16 +2060,15 @@ export const scenes = [
     },
   },
   {
-    // A send that failed (ADR-0095; brief M7): the toast with EDIT, the Mail banner, the NOT SENT row and the Outbox in
-    // the critical tone, each once. The brief's unit test with a client stub is this scenario.
+    // A send that failed (ADR-0095; brief M7): in Mail, the Mail banner with EDIT, the NOT SENT row and the Outbox in
+    // the critical tone, each once, and no toast beside the banner (cross-app decisions §1, ADR-0115). The brief's
+    // unit test with a client stub is this scenario.
     name: "mail-send-fails",
     scenario: "send-fails",
     sean: { kind: "undrawn", area: "mail", screen: "not-sent" },
     assert: async (app) => {
       const { page } = app
-      const toast = toastSaying(page, "Not sent: Estimate for the spring catalogue")
-      ensure((await toast.count()) === 1, `${await toast.count()} not-sent toasts, not one`)
-      ensure(await toast.getByRole("button", { name: "Edit", exact: true }).isVisible(), "the toast has no EDIT")
+      ensure(!(await toastSaying(page, "Not sent:").count()), "a not-sent toast stands beside Mail's banner")
       const banners = page.locator('[data-slot="banner"]:visible')
       ensure((await banners.count()) === 1, `${await banners.count()} banners, not one`)
       ensure(/Not sent: Estimate for the spring catalogue/.test(await banners.innerText()) && /over its sending limit/.test(await banners.innerText()), "the banner does not name the message and the error")
@@ -2270,6 +2280,16 @@ export const scenes = [
       ensure(await page.getByRole("list", { name: "Inbox", exact: true }).getByRole("listitem").first().isVisible(), "the list did not carry on under the banner")
       // The detail column stands beside the list only at the full width.
       if (app.size === "desktop") ensure(await page.getByRole("region", { name: "Mail: nothing open" }).getByText("Work mail stops at 08:36.").isVisible(), "the detail column does not name the stopped account")
+      // Desktop / 05: the sidebar's Work row and its sync-problem mark are in sight, inside the scrolling middle.
+      if (app.size === "desktop") {
+        const work = sidebar(page).getByRole("radio", { name: "Work, sync problem", exact: true })
+        const seen = await work.evaluate((el) => {
+          const box = el.getBoundingClientRect()
+          const middle = el.closest('[data-slot="app-frame-sidebar-middle"]').getBoundingClientRect()
+          return box.top >= middle.top && box.bottom <= middle.bottom
+        })
+        ensure(seen, "the Work account and its sync problem are out of sight in the sidebar")
+      }
     },
   },
   {
@@ -2316,7 +2336,7 @@ export const scenes = [
     run: async (app) => {
       const { page } = app
       if (app.phone) await press(app, tabBar(page).getByRole("tab", { name: "Mail", exact: true }))
-      else await press(app, page.locator('[data-slot="app-frame-status-line"]').getByRole("button", { name: "Check again", exact: true }))
+      else await press(app, page.locator('[data-slot="app-frame-status-line"]').getByRole("button", { name: /\. Check again$/ }))
       await page.mouse.move(0, 0)
       await app.settle()
     },
@@ -2576,8 +2596,9 @@ export const scenes = [
       for (const gone of ["Drafts", "Sent", "Spam"]) ensure(!(await list.getByRole("button", { name: gone, exact: true }).count()), `${gone} is listed, and the core has no such folder`)
       for (const row of ["Unread", "Starred", "Snoozed", "Waiting", "Outbox", "Archive", "Team", "Add an account…"]) ensure(await list.getByRole("button", { name: row, exact: true }).count(), `${row} is not in Mail's folders`)
       const accounts = list.getByRole("radiogroup", { name: /Account/ })
-      ensure((await accounts.getByRole("radio").count()) === 3, "the Account group is not All and the two accounts")
-      ensure(await accounts.getByRole("radio", { name: "All", exact: true }).isChecked(), "All is not the checked account")
+      // As drawn (Mobile / 05): the two accounts and no "All" row; none chosen is all of them.
+      ensure((await accounts.getByRole("radio").count()) === 2, "the Account group is not the two accounts")
+      ensure(!(await accounts.locator('[role="radio"][aria-checked="true"]').count()), "an account is chosen while the Inbox shows all accounts")
       ensure(!(await list.locator('[role="radio"][aria-current]').count()), "an account says it is the current place: it is a filter")
       if (await switcherLayer(page).count()) {
         ensure(/Mail\s*\/\/\s*All accounts/i.test(await list.innerText()), "the layer's overline does not name the section and the account")

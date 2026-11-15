@@ -4,7 +4,7 @@ import { create } from "zustand"
 import type { Category, ContactInput, Draft, EditScope, EventInput, MessageSummary, SplitInput } from "@/core/types"
 
 import type { MailTab } from "@/features/mail/lanes"
-import { guardPlaces } from "@/lib/leave-guard"
+import { guardPlaces, leaveThen } from "@/lib/leave-guard"
 import type { SettingsSection } from "@/features/settings/sections"
 
 import type { CalendarPlace, ContactsPlace, NotesPlace, SearchPlace, SearchScope } from "./places"
@@ -231,7 +231,9 @@ export const useUi = create<UiState>(guardPlaces(movesAway, (set, get) => ({
   openEventEditor: (state = { initial: {} }) => set({ eventEditor: state }),
   closeEventEditor: () => set({ eventEditor: null }),
   contactEditor: null,
-  openContactEditor: (state = { initial: {} }) => set({ contactEditor: state }),
+  // A new form in place of one being written in asks first (brief X6): every caller (quick create,
+  // NEW CONTACT, ⌘K, the sender panel, a signature) goes through the pane's question.
+  openContactEditor: (state = { initial: {} }) => leaveThen(() => set({ contactEditor: state })),
   closeContactEditor: () => set({ contactEditor: null }),
   settings: null,
   openSettings: (section) =>

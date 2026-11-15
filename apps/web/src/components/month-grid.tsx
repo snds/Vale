@@ -44,7 +44,7 @@ const key = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
  *
  * - The picked day is the primary block. Today, when another day is picked,
  *   keeps its ink and takes the 2 px edge under it. Where no day can be picked,
- *   today takes the block. Days outside the month are faint.
+ *   today takes the block. Days outside the month are in secondary ink.
  * - A grid named for its month; each day is named with its full date and its
  *   events. One day is in the tab order. Arrows move a day, Page Up and Down a
  *   month (with Shift, a year), Home and End to the week's ends; Enter or

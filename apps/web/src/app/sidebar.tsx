@@ -67,7 +67,8 @@ export function Sidebar({ sections, active, current, onNavigate, onSettings, onS
           ))}
         </NavSection>
       )}
-      {groups && <SectionGroups section={active.id} />}
+      {/* Settings is a place of the whole app: the section's own groups step aside while it is open (Desktop / 12). */}
+      {groups && current !== "settings" && <SectionGroups section={active.id} />}
     </AppFrameSidebar>
   )
 }

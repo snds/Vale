@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 
 import { useUi } from "@/app/ui-store"
-import { AdaptiveDialog, Button, FieldRow, Kbd, SectionHeader, useViewport } from "@unicron/ui"
+import { AdaptiveDialog, Button, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogOverline, DialogTitle, FieldRow, Kbd, SectionHeader, useAdaptiveSheet, useViewport } from "@unicron/ui"
 import { isMember } from "@/core/client"
 import { useKeyBindings } from "@/core/queries"
 import { FIXED_KEYS, KEY_COMMANDS, type KeyArea, keyLabel, listedUnder } from "@/lib/keys"
@@ -33,6 +33,7 @@ export function KeyboardShortcuts() {
   const wide = useViewport().widthClass !== "compact"
   // A team member has mail alone: no calendar keys, and nothing about notes (brief X10).
   const member = isMember()
+  const sheet = useAdaptiveSheet()
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -55,25 +56,18 @@ export function KeyboardShortcuts() {
   // Focus starts at the top of the list, not on its one button at the foot, so the list opens at its start.
   const top = useRef<HTMLDivElement>(null)
 
-  return (
-    <AdaptiveDialog
-      open={open}
-      onOpenChange={setOpen}
-      size="form"
-      height="full"
-      overline="Keys"
-      title="Keyboard shortcuts"
-      // Focus without scrolling: the dialog's header scrolls with its body, and must stay in view.
-      initialFocus={() => {
-        top.current?.focus({ preventScroll: true })
-        return top.current ? false : true
-      }}
-      footer={
-        <Button variant="secondary" onClick={() => (setOpen(false), useUi.getState().openSettings("shortcuts"))}>
-          Change keys and swipes
-        </Button>
-      }
-    >
+  // Focus without scrolling: the dialog's header scrolls with its body, and must stay in view.
+  const initialFocus = () => {
+    top.current?.focus({ preventScroll: true })
+    return top.current ? false : true
+  }
+  const change = (
+    <Button variant="secondary" onClick={() => (setOpen(false), useUi.getState().openSettings("shortcuts"))}>
+      Change keys and swipes
+    </Button>
+  )
+  const list = (
+    <>
       {/* The key column holds a key or two, so it takes the scale's 96, not a label's 140 (unicron's knob). */}
       <div ref={top} tabIndex={-1} className={`outline-none [--c-field-row-label-width:--spacing(24)] ${wide && groups.length > 2 ? "grid grid-cols-2 gap-x-6 gap-y-6" : "flex flex-col gap-6"}`}>
         {groups.map(({ area, heading }) => (
@@ -100,6 +94,28 @@ export function KeyboardShortcuts() {
           </section>
         ))}
       </div>
-    </AdaptiveDialog>
+    </>
+  )
+  // On a phone the sheet pins its footer. On a desktop the dialog's footer is pinned too (sticky), so
+  // CHANGE KEYS AND SWIPES stays in sight while the list scrolls (brief X7); AdaptiveDialog's own footer
+  // scrolls with the body there (a unicron gap, ADR-0115).
+  if (sheet) {
+    return (
+      <AdaptiveDialog open={open} onOpenChange={setOpen} size="form" height="full" overline="Keys" title="Keyboard shortcuts" initialFocus={initialFocus} footer={change}>
+        {list}
+      </AdaptiveDialog>
+    )
+  }
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent size="form" initialFocus={initialFocus}>
+        <DialogHeader>
+          <DialogOverline>Keys</DialogOverline>
+          <DialogTitle>Keyboard shortcuts</DialogTitle>
+        </DialogHeader>
+        <DialogBody>{list}</DialogBody>
+        <DialogFooter sticky>{change}</DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

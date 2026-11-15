@@ -285,19 +285,3 @@ function LinkFacts({ link, size }: { link: ShareLink; size: "default" | "stacked
     </div>
   )
 }
-
-/** What a link is, before you add it: the note, who shared it, and what you can do. In a conversation's shared-note card. */
-export function SharedPreview({ link }: { link: ShareLink }) {
-  return (
-    <div className="flex items-start gap-3 rounded-lg border p-3 [&>svg]:mt-0.5 [&>svg]:size-5 [&>svg]:shrink-0 [&>svg]:text-muted-foreground" data-slot="shared-preview">
-      <Icon name="user--multiple" />
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="truncate text-sm font-medium">{link.title || (link.kind === "thread" ? "A shared conversation" : "A shared note")}</span>
-        <span className="text-xs text-muted-foreground">
-          {link.from ? `From ${link.from} · ` : ""}
-          {link.mode === "edit" ? "You can edit" : "You can read"}
-        </span>
-      </div>
-    </div>
-  )
-}

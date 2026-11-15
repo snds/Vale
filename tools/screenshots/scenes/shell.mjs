@@ -286,7 +286,9 @@ export const scenes = [
       // Mail's account choice, now a radio group in Mail's folders (ADR-0084): the sidebar, or the page head's layer.
       await press(app, (await groups(app)).getByRole("radio", { name: "Work", exact: true }))
       ensure(/Inbox\s*\/\/\s*Work/i.test(await page.locator('[data-slot="page-head-overline"]').first().innerText()), "choosing an account did not change the page head")
-      await press(app, (await groups(app)).getByRole("radio", { name: "All", exact: true }))
+      // Pressing the chosen account again goes back to all of them (there is no "All" row, as drawn).
+      await press(app, (await groups(app)).getByRole("radio", { name: "Work", exact: true }))
+      ensure(/Inbox\s*\/\/\s*All accounts/i.test(await page.locator('[data-slot="page-head-overline"]').first().innerText()), "pressing the chosen account again did not go back to all accounts")
     },
   },
   {
@@ -342,7 +344,7 @@ export const scenes = [
         ensure(await page.getByRole("dialog", { name: "Folders", exact: true }).isVisible(), "the syncing strip did not open the Folders sheet")
         await leave(app)
       } else {
-        const again = statusLine(page).getByRole("button", { name: "Check again", exact: true })
+        const again = statusLine(page).getByRole("button", { name: /\. Check again$/ })
         await again.hover()
         await page.locator('[data-slot="tooltip-content"]').filter({ hasText: "Check for new mail" }).waitFor()
         await press(app, again)
@@ -360,7 +362,7 @@ export const scenes = [
         const items = await statusItems(page).allInnerTexts()
         ensure(items.length === 2 && /^CHECKING \/\/ 2 ACCOUNTS$/i.test(items[0].trim()) && /^SYNCED \/\/ 09:16$/i.test(items[1].trim()), `the status line says ${JSON.stringify(items)}`)
         ensure((await statusItems(page).first().getAttribute("data-tone")) === "live", "the live item is not first")
-        ensure(!(await statusLine(page).getByRole("button", { name: "Check again" }).count()), "Check again is still offered while checking")
+        ensure(!(await statusLine(page).getByRole("button", { name: /Check again$/ }).count()), "Check again is still offered while checking")
       }
       ensure(!(await toasts(page).count()), "a check for mail raised a toast")
     },

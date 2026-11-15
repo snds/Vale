@@ -29,6 +29,27 @@ jobs:
       # Notes relay: two clients merge, refusals, persistence across restart.
       - run: pnpm --filter notes-relay test
 
+  # The browser test gate (ADR-0115): the scenes that carry asserts on safety and flow (swipes, the
+  # discard question, the form layer, one current item, keys, the leave guard), on the built app in
+  # Chromium. Any FAIL fails the job. The full set is `pnpm shots` (ADR-0079).
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright-core install --with-deps chromium
+      - run: >-
+          pnpm shots --out ${{ runner.temp }}/shots --theme dark
+          -g mail-swipe -g mail-screener-swipe -g discard-question -g form-layer
+          -g contacts-leave -g contacts-merge -g contacts-edit -g mail-row-menu
+          -g calendar-delete -g notes-archive-delete -g mail-send-fails -g mail-sync-error
+          -g mail-folders-sheet -g shell-navigation -g keyboard-shortcuts -g command-menu
+
   core:
     runs-on: ubuntu-latest
     steps:

@@ -575,6 +575,7 @@ function WritingForm({ initial, onDone, onSaveTemplate }: { initial: ComposerDra
       ref={formRef}
       overline={overline}
       title={subject.trim() || kind}
+      phoneKind
       primary={{
         label: sendWord,
         icon: sendAt === null ? "send--alt" : "time",

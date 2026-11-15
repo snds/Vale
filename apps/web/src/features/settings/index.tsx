@@ -80,7 +80,8 @@ export function SettingsView() {
       head={
         <>
           <DemoBar in="column" />
-          <ScreenHead overline={names.length ? `Settings // ${names.join(" + ")}` : "Settings"} title="Settings" />
+          {/* A phone names Settings in its top row (Mobile / 16); the large head is the desktop's and medium's. */}
+          {!frame.phone && <ScreenHead overline={names.length ? `Settings // ${names.join(" + ")}` : "Settings"} title="Settings" />}
           {findable && (
             <AppFrameInset>
               <div className="flex flex-col gap-2 pb-6">
