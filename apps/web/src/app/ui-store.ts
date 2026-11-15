@@ -162,6 +162,11 @@ interface UiState {
 /** A draft for the composer; `sendAt` reopens a scheduled message with its time. */
 export type ComposerDraft = Partial<Draft> & {
   sendAt?: number | null
+  /**
+   * Taken out of the Outbox by EDIT (ADR-0095; brief M7, X6): the message as it waited, and its time.
+   * Closed without sending, it goes back there at that time.
+   */
+  outbox?: { draft: Draft; sendAt: number }
   /** A bottom-posted reply: the cursor starts below the quote (ADR-0055). */
   cursorAfterQuote?: boolean
 }

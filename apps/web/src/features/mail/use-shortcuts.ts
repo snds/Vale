@@ -40,7 +40,7 @@ export function useMailShortcuts(opts: {
       const next = list[Math.min(Math.max(index + delta, 0), list.length - 1)]
       if (next) select(next.threadId)
     }
-    const swipe = (id: Parameters<typeof opts.verb>[0]) => () => selected && opts.verb(id, selected)?.onCommit()
+    const swipe = (id: Parameters<typeof opts.verb>[0]) => () => selected && opts.verb(id, selected)?.onAction()
     const handlers: Record<string, () => void> = {
       "mail.next": () => move(index < 0 ? 0 : 1),
       "mail.previous": () => move(-1),

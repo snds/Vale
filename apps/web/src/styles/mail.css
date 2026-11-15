@@ -88,3 +88,10 @@
     }
   }
 }
+
+/* The phone's message body (Mobile / 03): no box, so the text lines up with
+   the fields above it instead of sitting 16 px in. Unlayered, so it wins
+   over the field's own padding utility. */
+[data-slot="rich-editor"][data-bare] .composer-body {
+  padding-inline: 0;
+}

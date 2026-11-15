@@ -1,13 +1,6 @@
 import { useMutation } from "@tanstack/react-query"
 
 import { getCoreClient } from "@/core/client"
-import type { AiProvider } from "@/core/types"
-
-/** Where the answer came from, in a few words: the model, and whose machine. */
-export function byline(provider: AiProvider, model: string) {
-  const where = provider === "local" ? "on your model server" : provider === "anthropic" ? "at Anthropic" : "at your AI service"
-  return `${model} ${where}`
-}
 
 const ask = <T,>(fn: (c: Awaited<ReturnType<typeof getCoreClient>>) => Promise<T>) => getCoreClient().then(fn)
 
@@ -18,4 +11,9 @@ export function useThreadSummary(threadId: string) {
 
 export function useSuggestedReplies(threadId: string) {
   return useMutation({ mutationKey: ["ai", "replies", threadId], mutationFn: () => ask((c) => c.suggestReplies(threadId)) })
+}
+
+/** Both asks for one conversation: its summary and its suggested replies. */
+export function useAiAssist(threadId: string) {
+  return { summary: useThreadSummary(threadId), replies: useSuggestedReplies(threadId) }
 }

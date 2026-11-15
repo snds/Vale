@@ -57,12 +57,22 @@ const NAMED: Record<string, string> = {
   Backspace: "⌫",
 }
 
-/** Keys that never change: Esc closes, ? lists the keys, and ⌘K. */
-export const FIXED_KEYS: { area: KeyArea | "everywhere"; keys: string[]; does: string }[] = [
+/**
+ * Keys that never change (ADR-0096; brief X7, DC14): Esc closes, ? lists
+ * the keys, ⌘K, ⌘, and ⌘\, ⌥N, ⌘Z while a send can be taken back, and a
+ * row's menu. `notes` marks a key a team member does not have (notes are
+ * the gateway owner's).
+ */
+export const FIXED_KEYS: { area: KeyArea | "everywhere"; keys: string[]; does: string; notes?: true }[] = [
   { area: "mail", keys: ["Esc"], does: "Close the conversation" },
   { area: "everywhere", keys: ["⌘K"], does: "Commands and search" },
-  { area: "everywhere", keys: ["⌥N"], does: "Quick note, linked to what's open" },
+  { area: "everywhere", keys: ["⌘,"], does: "Settings" },
+  { area: "everywhere", keys: ["⌘\\"], does: "Collapse or show the sidebar" },
+  { area: "everywhere", keys: ["⌥N"], does: "Quick note, linked to what's open", notes: true },
   { area: "everywhere", keys: ["?"], does: "This list" },
+  { area: "everywhere", keys: ["⌘Z"], does: "Take back a send, while its window is open" },
+  { area: "everywhere", keys: ["Menu", "⇧F10"], does: "A row's menu" },
+  { area: "everywhere", keys: ["Esc"], does: "Close the top layer" },
 ]
 
 /** How a key is printed: "E", "⇧E" for Shift+E, "←". */

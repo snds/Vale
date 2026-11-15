@@ -274,10 +274,10 @@ export function useTeamMembers() {
   return useQuery({ queryKey: ["inbox-team", "members"], queryFn: teamMembers, staleTime: 60_000 })
 }
 
-/** A shared inbox is one with more than one person on it. */
+/** A shared inbox is one with more than one person on it; a team member is on one by being there (ADR-0097). */
 export function useSharedInbox() {
   const { data: members = [] } = useTeamMembers()
-  return members.filter((m) => !m.pending).length > 1
+  return isMember() || members.filter((m) => !m.pending).length > 1
 }
 
 /** You, as the team knows you: the gateway's session, or your own name elsewhere. */

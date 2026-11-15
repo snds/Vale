@@ -27,7 +27,7 @@ export function StatusStrip() {
   const place = useScreen((s) => s.strip)
   const inMail = useUi((s) => s.vertical === "mail" && !s.settings && !s.search)
   if (live && live.kind !== "not-syncing") {
-    // While sending the strip opens Scheduled, where the message waits; while mail is fetched, the Folders sheet.
+    // While sending the strip opens the Outbox, where the message waits; while mail is fetched, the Folders sheet.
     const canOpenFolders = !!frame.head?.switcher
     const open =
       live.kind === "sending"
@@ -37,7 +37,7 @@ export function StatusStrip() {
             ? openFolders
             : () => useUi.getState().setVertical("mail")
           : undefined
-    const label = live.kind === "sending" ? "Open Scheduled" : open ? (inMail ? "Open Folders" : "Open Mail") : undefined
+    const label = live.kind === "sending" ? "Open Outbox" : open ? (inMail ? "Open Folders" : "Open Mail") : undefined
     // Scrolled, the strip stands in the bottom row, where a send shows its seconds and UNDO only.
     const inRow = live.kind === "sending" && frame.minimized && frame.bottom?.variant === "tabs"
     return (

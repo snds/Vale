@@ -9,6 +9,7 @@ import { useCore } from "@/core/queries"
 import { startAddAccount } from "@/features/onboarding/start-add-account"
 
 import { LANES, type MailTab } from "./lanes"
+import { useFailedSends } from "./outbox"
 import { useMailPlace } from "./use-mail-place"
 
 const ICONS: Record<MailTab, IconName> = {
@@ -36,6 +37,8 @@ export function MailNav({ layer = false, more = false }: { layer?: boolean; more
   // Settings or Search stands in the section's place: then none of its rows is the current one.
   const settings = useUi((s) => !!s.settings || !!s.search)
   const picked = useNavPicked()
+  // A send that failed and has not been looked at: the Outbox in the critical tone (brief M7), until it is opened.
+  const notSent = useFailedSends().unseen.length
   const go = (id: MailTab) => {
     useUi.getState().setMailTab(id)
     picked()
@@ -46,7 +49,10 @@ export function MailNav({ layer = false, more = false }: { layer?: boolean; more
       label={lane(id).label}
       icon={ICONS[id]}
       current={!settings && tab === id}
-      mark={id === "screener" && waiting > 0 ? { count: waiting, label: `${waiting} waiting` } : undefined}
+      // The Screener's count is the desktop's pointer to it (brief M3); a phone shows a row at the top of the Inbox.
+      mark={id === "screener" && waiting > 0 ? { count: waiting, label: `${waiting} new ${waiting === 1 ? "sender" : "senders"} waiting` } : undefined}
+      tone={id === "scheduled" && notSent > 0 ? "critical" : undefined}
+      toneLabel={id === "scheduled" && notSent > 0 ? `${notSent === 1 ? "a message" : `${notSent} messages`} not sent` : undefined}
       onClick={() => go(id)}
     />
   )

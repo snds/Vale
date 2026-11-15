@@ -1,4 +1,3 @@
-
 import { type IconName, toast } from "@unicron/ui"
 import { useMailAction } from "@/core/queries"
 import type { MessageSummary, SwipeActionId } from "@/core/types"
@@ -7,13 +6,18 @@ import { snoozeOptions } from "@/lib/time"
 import type { useTriage } from "./actions"
 import type { useSenderActions } from "./sender-actions"
 
-/** One action, as a swipe shows it and does it. */
+/**
+ * One action, as a swipe tile shows it and as the row's menu lists it
+ * (ADR-0113): unicron's SwipeRow action, with the words the tile sets in
+ * capitals. `reversible` actions (they toggle, or toast an Undo) are the only
+ * ones a full swipe may run; any other opens the row and stops there.
+ */
 export interface MailVerb {
   icon: IconName
+  /** What the tile says it will do, in sentence case ("Unread", "Inbox"). */
   label: string
-  /** Background utility for the revealed action, bound to a semantic token. */
-  tone: string
-  onCommit: () => void
+  reversible: boolean
+  onAction: () => void
 }
 
 /**
@@ -33,12 +37,12 @@ export const SWIPE_CHOICES: { id: SwipeActionId; label: string; command?: string
 ]
 
 /**
- * What a swipe reveals behind the row, fill and ink together. Read and
- * archive, the two the design draws solid, take the identity color; every
- * other action is a raised neutral tile.
+ * Kept for the settings that still read it. The tiles take their fill from
+ * unicron's SwipeRow now (ADR-0113): the outermost and the leading tile
+ * primary, the rest raised neutral.
+ * @deprecated
  */
 export const PRIMARY = "bg-primary text-primary-foreground"
-const NEUTRAL = "bg-muted text-foreground"
 
 /** 9:00 three days from now, for "remind me if nobody replies". */
 const inThreeDays = () => {
@@ -47,7 +51,7 @@ const inThreeDays = () => {
   return Math.floor(d.getTime() / 1000)
 }
 
-/** Turns an action id into what a swipe on `m` reveals and does. */
+/** Turns an action id into what a swipe on `m`, or its menu item, shows and does. */
 export function useMailVerbs(triage: ReturnType<typeof useTriage>, senders: ReturnType<typeof useSenderActions>) {
   const followUp = useMailAction<{ threadId: string; at: number }>((c, a) => c.setFollowUp(a.threadId, a.at))
   return (id: SwipeActionId, m: MessageSummary): MailVerb | null => {
@@ -59,28 +63,29 @@ export function useMailVerbs(triage: ReturnType<typeof useTriage>, senders: Retu
       case "none":
         return null
       case "read":
-        return { icon: m.seen ? "email--new" : "view", label: m.seen ? "Unread" : "Read", tone: PRIMARY, onCommit: () => triage.toggleSeen(m) }
+        return { icon: m.seen ? "email--new" : "view", label: m.seen ? "Unread" : "Read", reversible: true, onAction: () => triage.toggleSeen(m) }
       case "archive":
-        return { icon: m.archived ? "reset" : "archive", label: m.archived ? "Inbox" : "Archive", tone: PRIMARY, onCommit: () => triage.toggleArchive(m) }
+        return { icon: m.archived ? "reset" : "archive", label: m.archived ? "Inbox" : "Archive", reversible: true, onAction: () => triage.toggleArchive(m) }
       case "star":
-        return { icon: "star", label: m.flagged ? "Unstar" : "Star", tone: NEUTRAL, onCommit: () => triage.toggleFlag(m) }
+        // "Star" with the star everywhere (Q7); the drawn tile's FLAG is the same action.
+        return { icon: m.flagged ? "star--filled" : "star", label: m.flagged ? "Unstar" : "Star", reversible: true, onAction: () => triage.toggleFlag(m) }
       case "snooze-tomorrow":
-        return { icon: "time", label: "Tomorrow", tone: NEUTRAL, onCommit: snooze("Tomorrow") }
+        return { icon: "time", label: "Snooze", reversible: true, onAction: snooze("Tomorrow") }
       case "snooze-next-week":
-        return { icon: "time", label: "Next week", tone: NEUTRAL, onCommit: snooze("Next week") }
+        return { icon: "time", label: "Snooze", reversible: true, onAction: snooze("Next week") }
       case "remind":
         return {
           icon: "notification",
           label: "Remind",
-          tone: NEUTRAL,
-          onCommit: () =>
+          reversible: false,
+          onAction: () =>
             followUp.mutate(
               { threadId: m.threadId, at: inThreeDays() },
-              { onSuccess: () => toast.success("If nobody replies, this comes back in 3 days"), onError: (e) => toast.error(e.message) },
+              { onSuccess: () => toast("Comes back in 3 days if nobody replies"), onError: (e) => toast.error(e.message) },
             ),
         }
       case "newsletters":
-        return { icon: "blog", label: "Newsletters", tone: NEUTRAL, onCommit: () => senders.move(m.from, "newsletters") }
+        return { icon: "blog", label: "Newsletters", reversible: false, onAction: () => senders.move(m.from, "newsletters") }
     }
   }
 }

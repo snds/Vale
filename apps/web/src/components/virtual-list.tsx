@@ -6,8 +6,8 @@ interface VirtualListProps<T> {
   /** A stable key per item. */
   itemKey: (item: T) => string
   render: (item: T) => ReactNode
-  /** First guess at a row's height; real heights are measured. */
-  estimate: number
+  /** First guess at a row's height, for all rows or per row; real heights are measured. */
+  estimate: number | ((item: T) => number)
   /** Called as the list nears its end, to load the next page. */
   onEnd?: () => void
   label: string
@@ -48,7 +48,7 @@ export function VirtualList<T>({ items, itemKey, render, estimate, onEnd, label 
   const v = useVirtualizer({
     count: items.length,
     getScrollElement: () => root,
-    estimateSize: () => estimate,
+    estimateSize: (i) => (typeof estimate === "number" ? estimate : estimate(items[i]!)),
     overscan: 8,
     getItemKey: (i) => itemKey(items[i]!),
     // The list starts below other content in the scroll root.

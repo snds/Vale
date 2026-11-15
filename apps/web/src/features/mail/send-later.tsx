@@ -1,141 +1,141 @@
-import { useState, type ReactElement, type ReactNode } from "react"
+import { useState, type ReactElement } from "react"
 
-import { Icon, DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@unicron/ui"
-import { DateTimePicker, MenuAnchor } from "@/components/date-picker"
-import { FOLLOW_UP_OPTIONS, longTime, sendLaterOptions, snoozeOptions } from "@/lib/time"
+import {
+  AdaptiveMenu,
+  AdaptiveMenuGroup,
+  AdaptiveMenuItem,
+  AdaptiveMenuSeparator,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  Icon,
+  useAdaptiveSheet,
+} from "@unicron/ui"
+import { DateTimePicker } from "@/components/date-picker"
+import { sendLaterOptions } from "@/lib/time"
 
-/** "9:00 AM for Priya", and when that is for you. */
+import { rowTime } from "./row-time"
+
+/** "09:00 for Priya": a time on a recipient's own clock, and when that is here (ADR-0041). */
 export interface TheirMorning {
-  label: string
   at: number
-  detail: string
+  /** "9:00 AM for Priya". */
+  label: string
+}
+
+/** The picker's words for a time to send at (brief M7). */
+const SEND_LATER_PICKER = {
+  title: "Send later",
+  note: "If the desktop app is closed then, it sends when it next opens. A gateway sends on time.",
+  action: "Schedule",
+} as const
+
+/** A menu that another menu opens stands by an anchor of its own: it takes no press and no focus. */
+const anchor = <span aria-hidden="true" tabIndex={-1} className="pointer-events-none absolute top-full right-0 size-0" />
+
+/** A row's words and its time in mono, as the times read in rows. */
+const Choice = ({ label, at }: { label: string; at: number }) => (
+  <>
+    <span className="flex-1">{label}</span>
+    <span className="ps-4 type-meta text-muted-foreground">{rowTime(at)}</span>
+  </>
+)
+
+/**
+ * Send later as the rows of the SplitButton's own menu (ADR-0095; brief M7):
+ * the mono label SEND LATER, `sendLaterOptions` with their times in mono, a
+ * THEIR TIME group when a recipient lives in another zone, then "Pick date
+ * and time…", which the host opens (`onCustom`) as the shared picker.
+ */
+export function SendLaterItems({ theirs = [], onPick, onCustom }: { theirs?: TheirMorning[]; onPick: (at: number) => void; onCustom: () => void }) {
+  return (
+    <>
+      <DropdownMenuGroup>
+        <DropdownMenuLabel>Send later</DropdownMenuLabel>
+        {sendLaterOptions().map((o) => (
+          <DropdownMenuItem key={o.label} onClick={() => onPick(o.until)}>
+            <Icon name="time" />
+            <Choice label={o.label} at={o.until} />
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuGroup>
+      {theirs.length > 0 && (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Their time</DropdownMenuLabel>
+            {theirs.map((t) => (
+              <DropdownMenuItem key={t.label} onClick={() => onPick(t.at)}>
+                <Icon name="earth" />
+                <Choice label={t.label} at={t.at} />
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+        </>
+      )}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onClick={onCustom}>
+        <Icon name="calendar" />
+        Pick date and time…
+      </DropdownMenuItem>
+    </>
+  )
 }
 
 /**
- * Send-later presets plus "Pick a time…". Each preset shows its exact time,
- * like the snooze menu, so "Tomorrow morning" is never ambiguous.
+ * The same choices as a menu of their own (unicron's AdaptiveMenu: a menu on
+ * a desktop, a sheet on a phone), with the picker behind "Pick date and
+ * time…": for a phone's composer (More, or a long press on Send) and the
+ * Outbox's CHANGE TIME. Opened by its trigger, or by another menu (`open`).
  */
 export function SendLaterMenu({
+  open,
+  onOpenChange,
   trigger,
-  children,
-  onPick,
   theirs = [],
+  value,
+  onPick,
 }: {
-  trigger: ReactElement
-  children: ReactNode
-  onPick: (at: number) => void
-  /** Recipients in another time zone: offers 9:00 AM on their next workday (ADR-0041). */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  trigger?: ReactElement<Record<string, unknown>>
   theirs?: TheirMorning[]
+  /** The time already set: the picker opens on it. */
+  value?: number | null
+  onPick: (at: number) => void
 }) {
-  const [custom, setCustom] = useState(false)
+  const [picking, setPicking] = useState(false)
+  // The mono label: the menu's first line on a desktop; a phone's sheet says it as its title.
+  const sheet = useAdaptiveSheet()
   return (
-      <DropdownMenu>
-        {/* The picker stands where the menu did: both open from the one button (ADR-0088). */}
-        <DateTimePicker
-          open={custom}
-          onOpenChange={(open) => !open && setCustom(false)}
-          trigger={<MenuAnchor menu={<DropdownMenuTrigger render={trigger}>{children}</DropdownMenuTrigger>} />}
-          title="Send later"
-          note="If the desktop app is closed then, it sends when it next opens. A gateway sends on time."
-          action="Schedule"
-          onPick={onPick}
-        />
-        <DropdownMenuContent align="end" className="w-64">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>Send later…</DropdownMenuLabel>
-            {sendLaterOptions().map((o) => (
-              <DropdownMenuItem key={o.label} onClick={() => onPick(o.until)}>
-                <Icon name="time" />
-                <span className="flex-1">{o.label}</span>
-                <span className="text-xs text-muted-foreground">{o.detail}</span>
-              </DropdownMenuItem>
+    <>
+      <AdaptiveMenu title="Send later" overline={sheet ? undefined : "Send later"} align="end" open={open} onOpenChange={onOpenChange} trigger={trigger ?? anchor}>
+        {sendLaterOptions().map((o) => (
+          <AdaptiveMenuItem key={o.label} icon="time" onSelect={() => onPick(o.until)}>
+            <Choice label={o.label} at={o.until} />
+          </AdaptiveMenuItem>
+        ))}
+        {theirs.length > 0 && (
+          <AdaptiveMenuGroup label="Their time">
+            {theirs.map((t) => (
+              <AdaptiveMenuItem key={t.label} icon="earth" onSelect={() => onPick(t.at)}>
+                <Choice label={t.label} at={t.at} />
+              </AdaptiveMenuItem>
             ))}
-          </DropdownMenuGroup>
-          {theirs.length > 0 && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>Their time</DropdownMenuLabel>
-                {theirs.map((t) => (
-                  <DropdownMenuItem key={t.label} onClick={() => onPick(t.at)}>
-                    <Icon name="time" />
-                    <span className="flex-1">{t.label}</span>
-                    <span className="text-xs text-muted-foreground">{t.detail}</span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            </>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setCustom(true)}>
-            <Icon name="calendar" />
-            Pick a time…
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-  )
-}
-
-/** "Remind me if no reply" for a message being written: a delay after it goes out. */
-export function FollowUpAfterMenu({ trigger, children, value, onChange }: { trigger: ReactElement; children: ReactNode; value: number | null; onChange: (after: number | null) => void }) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger render={trigger}>{children}</DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-60">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>Remind me if no reply in…</DropdownMenuLabel>
-          {FOLLOW_UP_OPTIONS.map((o) => (
-            <DropdownMenuItem key={o.label} onClick={() => onChange(o.after)}>
-              <Icon name={value === o.after ? "checkmark" : "notification"} />
-              {o.label}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuGroup>
-        {value !== null && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onChange(null)}>
-              <Icon name="notification--off" />
-              Don't remind me
-            </DropdownMenuItem>
-          </>
+          </AdaptiveMenuGroup>
         )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+        <AdaptiveMenuSeparator />
+        <AdaptiveMenuItem icon="calendar" onSelect={() => setPicking(true)}>
+          Pick date and time…
+        </AdaptiveMenuItem>
+      </AdaptiveMenu>
+      {picking && <SendLaterPicker value={value} onClose={() => setPicking(false)} onPick={onPick} />}
+    </>
   )
 }
 
-/** "Remind me if no reply" for a conversation already sent: a time. */
-export function FollowUpAtMenu({ trigger, children, onPick }: { trigger: ReactElement; children: ReactNode; onPick: (at: number, label: string) => void }) {
-  const [custom, setCustom] = useState(false)
-  return (
-      <DropdownMenu>
-        <DateTimePicker
-          open={custom}
-          onOpenChange={(open) => !open && setCustom(false)}
-          trigger={<MenuAnchor menu={<DropdownMenuTrigger render={trigger}>{children}</DropdownMenuTrigger>} />}
-          title="Remind me if no reply"
-          note="If nobody has replied by then, the conversation comes back to the top of your inbox."
-          action="Set reminder"
-          onPick={(at) => onPick(at, longTime(at))}
-        />
-        <DropdownMenuContent align="end" className="w-64">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>Remind me if no reply…</DropdownMenuLabel>
-            {snoozeOptions().map((o) => (
-              <DropdownMenuItem key={o.label} onClick={() => onPick(o.until, o.label.toLowerCase())}>
-                <Icon name="notification" />
-                <span className="flex-1">{o.label}</span>
-                <span className="text-xs text-muted-foreground">{o.detail}</span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setCustom(true)}>
-            <Icon name="calendar" />
-            Pick a time…
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-  )
+/** The shared picker titled Send later, with its line and SCHEDULE (brief M7). It stands by its own anchor. */
+export function SendLaterPicker({ value, onClose, onPick }: { value?: number | null; onClose: () => void; onPick: (at: number) => void }) {
+  return <DateTimePicker open onOpenChange={(o) => !o && onClose()} trigger={anchor} {...SEND_LATER_PICKER} value={value} onPick={onPick} />
 }

@@ -18,8 +18,9 @@ export function useMailPlace() {
   const { data: screener } = useScreener()
   const { data: accounts = [] } = useAccounts()
   const sharedInbox = useSharedInbox()
-  // The Screener only exists while it's on (or is the lane open); "Assigned to me" with a shared inbox; Team is the owner's.
-  const shown = (id: MailTab) => (id !== "screener" || !!screener?.enabled || stored === "screener") && (id !== "mine" || sharedInbox) && (id !== "team" || !isMember())
+  // The Screener is listed while it's on, while senders still wait in it, or while its lane is open (brief M3:
+  // off and empty, it is not listed); "Assigned to me" with a shared inbox; Team is the owner's.
+  const shown = (id: MailTab) => (id !== "screener" || !!screener?.enabled || (screener?.waiting ?? 0) > 0 || stored === "screener") && (id !== "mine" || sharedInbox) && (id !== "team" || !isMember())
   const tab: MailTab = shown(stored) ? stored : "inbox"
   const account = accounts.find((a) => a.id === storedAccount) ?? null
   return { tab, account, accounts, folders: FOLDERS.filter(shown), team: TEAM.filter(shown), waiting: screener?.waiting ?? 0 }
