@@ -66,6 +66,94 @@ export const notesMenu = async (app, item) => {
   await press(app, app.page.getByRole("menuitem", { name: item }))
 }
 
+/** The sketch layer (brief N3), by its title. */
+const sketchLayer = (page) => page.getByRole("dialog", { name: /^(Sketch|Edit sketch)$/ })
+/** The sketch's canvas: an image named for its strokes. */
+const canvas = (page) => sketchLayer(page).getByRole("img", { name: /^(Empty sketch|Sketch with \d+ strokes?)$/ })
+/** Opens a new sketch from the open note's format bar (on a phone it shows while writing). */
+const openSketch = async (app) => {
+  await note(app, /Cabin packing list/)
+  if (app.phone) await writeIn(app)
+  await press(app, formatting(app.page).getByRole("button", { name: "Sketch" }))
+  await canvas(app.page).waitFor()
+}
+/** Draws a stroke on the canvas through points given as shares of its width and height. */
+const draw = async (app, points) => {
+  const box = await canvas(app.page).boundingBox()
+  const at = ([x, y]) => [box.x + x * box.width, box.y + y * Math.min(box.height, 400)]
+  const [x0, y0] = at(points[0])
+  await app.page.mouse.move(x0, y0)
+  await app.page.mouse.down()
+  for (const p of points.slice(1)) {
+    const [x, y] = at(p)
+    await app.page.mouse.move(x, y, { steps: 6 })
+  }
+  await app.page.mouse.up()
+}
+/** A few strokes: a box and a tick, as a person might draw them. */
+const doodle = async (app) => {
+  await draw(app, [[0.2, 0.2], [0.45, 0.2], [0.45, 0.7], [0.2, 0.7], [0.2, 0.2]])
+  await draw(app, [[0.55, 0.45], [0.62, 0.6], [0.8, 0.25]])
+}
+const strokes = async (page) => (await canvas(page).getAttribute("aria-label")) ?? ""
+
+/** The scanner (brief N4), by its title. */
+const scanLayer = (page) => page.getByRole("dialog", { name: "Scan a document" })
+const openScan = async (app) => {
+  await note(app, /Cabin packing list/)
+  if (app.phone) await writeIn(app)
+  await press(app, formatting(app.page).getByRole("button", { name: "Scan a document" }))
+  await scanLayer(app.page).waitFor()
+}
+/**
+ * A photo of a printed page on a desk, made in the page, for the scanner's file picker: what a person
+ * would choose. The page leans a little, so the corners have something to square.
+ */
+const pagePhoto = async (page, n) => {
+  const b64 = await page.evaluate((n) => {
+    const c = document.createElement("canvas")
+    c.width = 1200
+    c.height = 1600
+    const g = c.getContext("2d")
+    g.fillStyle = "#4a443e"
+    g.fillRect(0, 0, c.width, c.height)
+    g.translate(600, 800)
+    g.rotate(-0.04)
+    g.fillStyle = "#f2efe8"
+    g.fillRect(-440, -600, 880, 1200)
+    g.fillStyle = "#2a2826"
+    g.font = "600 52px Georgia, serif"
+    g.fillText(`Ferry timetable, page ${n}`, -380, -480)
+    g.font = "34px Georgia, serif"
+    for (let i = 0; i < 12; i++) g.fillText(`${String(6 + i).padStart(2, "0")}:15  Anacortes to Friday Harbor`, -380, -380 + i * 64)
+    const url = c.toDataURL("image/jpeg", 0.85)
+    return url.slice(url.indexOf(",") + 1)
+  }, n)
+  return { name: `page-${n}.jpg`, mimeType: "image/jpeg", buffer: Buffer.from(b64, "base64") }
+}
+/** Chooses a photo through CHOOSE A FILE's picker, and waits for the adjust step. */
+const choosePhoto = async (app, n) => {
+  const layer = scanLayer(app.page)
+  await layer.locator('input[data-pick="file"]').setInputFiles(await pagePhoto(app.page, n))
+  await layer.getByRole("button", { name: /^Top left: / }).waitFor()
+  await layer.getByRole("img", { name: "The photo to scan" }).waitFor()
+  await app.settle()
+}
+
+/** The note that holds three images in the notes-images scenario. */
+const imageNote = (app) => note(app, /Icon axis ideas/)
+/** The toolbar of the note's nth image, and the image itself. */
+const imageTools = (page, n = 0) => page.getByRole("toolbar", { name: "Image", exact: true }).nth(n)
+const showImageTools = async (app, n = 0) => {
+  const img = noteText(app.page).locator(".note-image").nth(n)
+  await img.scrollIntoViewIfNeeded()
+  if (!app.touch) await img.hover()
+  await imageTools(app.page, n).waitFor()
+  await app.settle()
+}
+const viewer = (page) => page.getByRole("dialog").filter({ has: page.locator(".image-viewer") })
+const viewerOverline = async (page) => (await viewer(page).locator('[data-slot="sheet-overline"]').innerText()).trim().toUpperCase()
+
 export const scenes = [
   {
     // The list (ADR-0105; Mobile / 14, Desktop / 11's list column): DUE, PINNED, RECENT with their counts; a row is
@@ -582,11 +670,221 @@ export const scenes = [
     },
   },
   {
+    // A sketch (brief N3): a viewer layer of 960, the tools above the canvas on a desktop and below it on a
+    // phone, the canvas on its paper, and one primary. Two strokes drawn, so the paper shows ink.
     name: "notes-sketch",
+    sean: { kind: "undrawn", area: "notes", screen: "sketch" },
     run: async (app) => {
-      await note(app, /Cabin packing list/)
-      if (app.phone) await writeIn(app)
-      await press(app, formatting(app.page).getByRole("button", { name: "Sketch" }))
+      await openSketch(app)
+      await doodle(app)
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async (app) => {
+      const { page } = app
+      const layer = sketchLayer(page)
+      ensure((await strokes(page)) === "Sketch with 2 strokes", `the canvas says "${await strokes(page)}"`)
+      const tools = layer.getByRole("toolbar", { name: "Drawing tools" })
+      for (const name of ["Pen", "Marker", "Eraser", "Undo", "Redo", "Clear", "More room"]) ensure(await tools.getByRole("button", { name, exact: true }).count(), `the tools have no ${name}`)
+      ensure(await tools.getByRole("button", { name: "Pen", exact: true }).getAttribute("aria-pressed") === "true", "the pen is not the tool")
+      ensure((await layer.getByRole("button", { name: "Add to note", exact: true }).count()) === 1, "the layer has no ADD TO NOTE")
+      // The tools above the canvas on a desktop, below it on a phone.
+      const t = await tools.boundingBox()
+      const c = await canvas(page).boundingBox()
+      ensure(app.phone ? t.y > c.y : t.y < c.y, `the tools are ${t.y < c.y ? "above" : "below"} the canvas`)
+      // The viewer size, 960; below that, the window less its 24 px margins (unicron's fitted size).
+      const wide = Math.min(960, app.viewport.width - 48)
+      if (!app.phone) ensure(Math.round((await layer.boundingBox()).width) === wide, `the layer is ${Math.round((await layer.boundingBox()).width)} wide, not ${wide}`)
+    },
+  },
+  {
+    // The empty canvas (brief N3): its one caption, and nothing to add yet.
+    name: "notes-sketch-empty",
+    run: openSketch,
+    assert: async ({ page }) => {
+      const layer = sketchLayer(page)
+      ensure(await layer.getByText("Draw with a mouse, a finger or a pen.", { exact: true }).isVisible(), "the empty canvas has no caption")
+      ensure(await layer.getByRole("button", { name: "Add to note", exact: true }).isDisabled(), "ADD TO NOTE works on an empty sketch")
+    },
+  },
+  {
+    // Draw, clear, undo, save and edit a sketch (brief N3): Clear asks nothing and Undo brings the strokes
+    // back; ADD TO NOTE puts it in the note; the image's Edit sketch opens it again with its strokes, and
+    // SAVE SKETCH replaces it. Closing with drawing asks "Discard changes?", with focus on KEEP EDITING.
+    name: "notes-sketch-edit",
+    run: async (app) => {
+      const { page } = app
+      await openSketch(app)
+      await doodle(app)
+      const tools = sketchLayer(page).getByRole("toolbar", { name: "Drawing tools" })
+      await press(app, tools.getByRole("button", { name: "Clear", exact: true }))
+      ensure((await strokes(page)) === "Empty sketch", "Clear left strokes")
+      ensure(!(await page.getByRole("dialog", { name: "Discard changes?" }).count()), "Clear asked a question")
+      await press(app, tools.getByRole("button", { name: "Undo", exact: true }))
+      ensure((await strokes(page)) === "Sketch with 2 strokes", "Undo did not bring the strokes back")
+      await press(app, tools.getByRole("button", { name: "Redo", exact: true }))
+      await press(app, tools.getByRole("button", { name: "Undo", exact: true }))
+      // Closing asks, and KEEP EDITING keeps the drawing.
+      await press(app, sketchLayer(page).getByRole("button", { name: "Cancel", exact: true }))
+      const question = page.getByRole("dialog", { name: "Discard changes?" })
+      await question.waitFor()
+      ensure(await page.evaluate(() => document.activeElement?.textContent?.trim().toLowerCase() === "keep editing"), "focus is not on KEEP EDITING")
+      await press(app, question.getByRole("button", { name: "Keep editing" }))
+      ensure((await strokes(page)) === "Sketch with 2 strokes", "KEEP EDITING lost the drawing")
+      await press(app, sketchLayer(page).getByRole("button", { name: "Add to note", exact: true }))
+      await sketchLayer(page).waitFor({ state: "detached" })
+      const sketch = noteText(page).getByRole("img", { name: "Sketch", exact: true })
+      await sketch.waitFor()
+      // Edit it again: the strokes come back, one more is drawn, and the save replaces the image.
+      const wrapper = noteText(page).locator(".note-image").filter({ has: page.getByRole("img", { name: "Sketch", exact: true }) })
+      if (!app.touch) await wrapper.hover()
+      await press(app, wrapper.getByRole("toolbar", { name: "Image" }).getByRole("button", { name: "Edit sketch" }))
+      await page.getByRole("dialog", { name: "Edit sketch" }).waitFor()
+      ensure((await strokes(page)) === "Sketch with 2 strokes", `the sketch opened with "${await strokes(page)}"`)
+      await draw(app, [[0.1, 0.85], [0.9, 0.85]])
+      ensure((await strokes(page)) === "Sketch with 3 strokes", "the new stroke did not land")
+      await press(app, sketchLayer(page).getByRole("button", { name: "Save sketch", exact: true }))
+      await sketchLayer(page).waitFor({ state: "detached" })
+      ensure((await noteText(page).getByRole("img", { name: "Sketch", exact: true }).count()) === 1, "saving added a second sketch instead of replacing it")
+    },
+  },
+  {
+    // Scan a document, step one (brief N4): what scanning does, TAKE A PHOTO (primary) and CHOOSE A FILE.
+    name: "notes-scan-capture",
+    sean: { kind: "undrawn", area: "notes", screen: "scan-capture" },
+    run: openScan,
+    assert: async ({ page }) => {
+      const layer = scanLayer(page)
+      ensure(await layer.getByText("The text in it becomes searchable. It is read on this device.").isVisible(), "the capture step does not say what scanning does")
+      for (const name of ["Take a photo", "Choose a file"]) ensure(await layer.getByRole("button", { name, exact: true }).isVisible(), `no ${name}`)
+    },
+  },
+  {
+    // Step two (brief N4): the photo with its four corners, LOOK, and RETAKE · NEXT PAGE · ADD TO NOTE.
+    name: "notes-scan-adjust",
+    sean: { kind: "undrawn", area: "notes", screen: "scan" },
+    run: async (app) => {
+      await openScan(app)
+      await choosePhoto(app, 1)
+    },
+    assert: async ({ page }) => {
+      const layer = scanLayer(page)
+      for (const corner of ["Top left", "Top right", "Bottom right", "Bottom left"]) ensure(await layer.getByRole("button", { name: new RegExp(`^${corner}: \\d+% across, \\d+% down$`) }).count(), `no ${corner} handle`)
+      ensure(await layer.getByRole("radiogroup", { name: "Look" }).getByRole("radio", { name: "Document" }).isChecked(), "the look is not Document")
+      for (const name of ["Retake", "Next page", "Add to note"]) ensure(await layer.getByRole("button", { name, exact: true }).count(), `no ${name}`)
+    },
+  },
+  {
+    // The corners move by arrow keys and say where they are (brief N4).
+    name: "notes-scan-corners",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await openScan(app)
+      await choosePhoto(app, 1)
+      const handle = scanLayer(page).getByRole("button", { name: /^Top left: / })
+      const where = async () => /(\d+)% across, (\d+)% down/.exec((await handle.getAttribute("aria-label")) ?? "")?.slice(1).map(Number)
+      await handle.focus()
+      const [x, y] = await where()
+      for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight")
+      await page.keyboard.press("ArrowDown")
+      await app.settle()
+      const [x2, y2] = await where()
+      ensure(x2 === x + 3 && y2 === y + 1, `the corner went from ${x}%, ${y}% to ${x2}%, ${y2}%`)
+      ensure(await handle.evaluate((el) => el === document.activeElement), "the handle lost focus as it moved")
+    },
+  },
+  {
+    // Two pages from files (brief N4): NEXT PAGE keeps the first, the second is chosen, and ADD 2 PAGES TO
+    // NOTE puts both in the note in order.
+    name: "notes-scan-pages",
+    run: async (app) => {
+      const { page } = app
+      await openScan(app)
+      await choosePhoto(app, 1)
+      await press(app, scanLayer(page).getByRole("button", { name: "Next page", exact: true }))
+      const chips = scanLayer(page).getByRole("region", { name: "Scanned pages" })
+      ensure(await chips.getByRole("button", { name: "Remove page 1" }).count(), "the first page is not among the pages")
+      await choosePhoto(app, 2)
+      await press(app, scanLayer(page).getByRole("button", { name: "Add 2 pages to note", exact: true }))
+      await scanLayer(page).waitFor({ state: "detached" })
+      for (const n of [1, 2]) await noteText(page).getByRole("img", { name: `Scanned document, page ${n} of 2` }).waitFor()
+      await app.settle()
+    },
+  },
+  {
+    // An image's toolbar on hover or focus (brief N4): View, Edit sketch on a sketch, Describe.
+    name: "notes-image-toolbar",
+    scenario: "notes-images",
+    run: async (app) => {
+      await imageNote(app)
+      await showImageTools(app, 0)
+    },
+    assert: async ({ page }) => {
+      const tools = imageTools(page, 0)
+      for (const name of ["View", "Edit sketch", "Describe"]) ensure(await tools.getByRole("button", { name, exact: true }).count(), `the sketch's toolbar has no ${name}`)
+      ensure(!(await imageTools(page, 1).getByRole("button", { name: "Edit sketch" }).count()), "a picture that is not a sketch offers Edit sketch")
+    },
+  },
+  {
+    // Text in image (brief N4): the words read on this device, COPY and ADD TO NOTE.
+    name: "notes-image-text",
+    scenario: "notes-images",
+    run: async (app) => {
+      await imageNote(app)
+      await showImageTools(app, 2)
+      await press(app, imageTools(app.page, 2).getByRole("button", { name: "Text in image" }))
+    },
+    assert: async ({ page }) => {
+      const layer = page.getByRole("dialog", { name: "Text in image" })
+      ensure(await layer.getByText("Below 20 px: open the counters", { exact: false }).isVisible(), "the text read from the page is not shown")
+      for (const name of ["Copy", "Add to note"]) ensure(await layer.getByRole("button", { name, exact: true }).count(), `no ${name}`)
+    },
+  },
+  {
+    // The viewer, full screen (brief N4): IMAGE 01 // 03, the description as title, Actual size, Save and
+    // Close. A phone steps with the bottom row's buttons, a desktop with ← and →.
+    name: "notes-image-viewer",
+    scenario: "notes-images",
+    sean: { kind: "undrawn", area: "notes", screen: "image-viewer" },
+    run: async (app) => {
+      const { page } = app
+      await imageNote(app)
+      await showImageTools(app, 0)
+      await press(app, imageTools(page, 0).getByRole("button", { name: "View", exact: true }))
+      await viewer(page).locator('[data-role="viewer-image"]').waitFor()
+      ensure((await viewerOverline(page)) === "IMAGE 01 // 03", `the viewer opened at "${await viewerOverline(page)}"`)
+      if (app.phone) {
+        await press(app, button(page, "Next image"))
+        ensure((await viewerOverline(page)) === "IMAGE 02 // 03", "Next image did not step")
+        await press(app, button(page, "Previous image"))
+        ensure((await viewerOverline(page)) === "IMAGE 01 // 03", "Previous image did not step back")
+        await press(app, button(page, "Next image"))
+      } else {
+        await page.keyboard.press("ArrowRight")
+        await app.settle()
+        ensure((await viewerOverline(page)) === "IMAGE 02 // 03", "→ did not step")
+        await page.keyboard.press("ArrowLeft")
+        await app.settle()
+        ensure((await viewerOverline(page)) === "IMAGE 01 // 03", "← did not step back")
+        await page.keyboard.press("ArrowRight")
+        await app.settle()
+      }
+      await viewer(page).locator('[data-role="viewer-image"]').waitFor()
+      await page.mouse.move(0, 0)
+      await app.settle()
+    },
+    assert: async (app) => {
+      const { page } = app
+      const v = viewer(page)
+      ensure((await v.getByRole("heading").first().innerText()).trim() === "Six hue ramps, light to dark", "the title is not the image's description")
+      for (const name of ["Actual size", "Save image", "Close", "Previous image", "Next image"]) ensure(await v.getByRole("button", { name, exact: true }).count(), `the viewer has no ${name}`)
+      const box = await v.boundingBox()
+      ensure(Math.round(box.width) === app.viewport.width, "the viewer is not the whole width")
+      // On a phone the steps sit at the foot's start; on a desktop at the sides of the picture.
+      const prev = await v.getByRole("button", { name: "Previous image" }).boundingBox()
+      const next = await v.getByRole("button", { name: "Next image" }).boundingBox()
+      if (app.phone) ensure(prev.y > box.height - 120 && next.x < box.width / 2, "the steps are not at the start of the bottom row")
+      else ensure(prev.x < 100 && next.x > box.width - 100, "the steps are not at the sides")
     },
   },
   {

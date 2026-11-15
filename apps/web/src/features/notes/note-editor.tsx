@@ -24,9 +24,9 @@ import { type Sketch, SVG_MIME, toSvg } from "@/lib/sketch"
 import { SortChecked } from "./checklists"
 import { noteExtensions } from "./extensions"
 import { NOTE_FILE } from "./note-src"
-import { ScanSheet } from "./scan-sheet"
+import { ScanDocument } from "./scan-sheet"
 import { SealedProvider } from "./sealed"
-import { SketchSheet } from "./sketch-sheet"
+import { SketchPad } from "./sketch-sheet"
 import { useSketchSheet } from "./sketch-store"
 import { guestShares, useLiveShareModes } from "./shared-docs"
 import { notesSync, useSyncStatus } from "./sync"
@@ -592,8 +592,8 @@ export function NoteEditor({
       {live && <WikiSuggest editor={editor} q={live} choices={choices} active={active} onPick={choose} />}
       {/* A phone shows the bar only while you write; it stays mounted, so a layer it opened stays open. */}
       {bar && (phone ? <div className={writing ? "contents" : "hidden"}>{bar}</div> : bar)}
-      <SketchSheet onDone={(s, pos) => void saveSketch(editor, note.id, s, pos)} />
-      <ScanSheet open={scanning} onOpenChange={setScanning} onScanned={(pages) => void addScans(editor, note.id, pages)} />
+      <SketchPad onDone={(s, pos) => void saveSketch(editor, note.id, s, pos)} />
+      <ScanDocument open={scanning} onOpenChange={setScanning} onScanned={(pages) => void addScans(editor, note.id, pages)} />
       <input
         ref={picker}
         type="file"

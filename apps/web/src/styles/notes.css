@@ -36,6 +36,25 @@
      inks look the same everywhere. A raw value, deliberately not redefined for
      dark mode: no core token means "paper in every theme". */
   --c-sketch-paper: oklch(0.985 0.004 95);
+  --c-sketch-paper-rule: var(--line-rule);
+  /* The canvas never pushes the layer's actions off the screen: it scrolls
+     inside what the layer's header, tools and footer leave (brief N3). */
+  --c-sketch-chrome: calc(var(--spacing) * 80);
+  --c-sketch-chrome-phone: calc(var(--spacing) * 64);
+  /* An ink choice: the stored color as a 12 px square on 20 px of paper. */
+  --c-sketch-ink-paper: calc(var(--spacing) * 5);
+  --c-sketch-ink: calc(var(--spacing) * 3);
+  --c-sketch-weight-width: calc(var(--spacing) * 4);
+  /* Scan corners: a 44 px target around a 16 px square on the corner. */
+  --c-scan-handle-target: var(--spacing-touch-min, 2.75rem);
+  --c-scan-handle: calc(var(--spacing) * 4);
+  --c-scan-handle-ground: var(--surface-raised);
+  --c-scan-photo-room: calc(var(--spacing) * 96);
+  --c-scan-result-phone: calc(var(--spacing) * 24);
+  /* The image viewer's stage: a step off the ground, so a white page reads as a page. */
+  --c-viewer-stage: var(--surface-ground);
+  --c-note-image-max-height: 70vh;
+  --c-note-image-wait-width: calc(var(--spacing) * 72);
 }
 
 @layer components {
@@ -145,5 +164,317 @@
       pointer-events: none;
       color: var(--c-note-placeholder);
     }
+  }
+}
+
+/* Sketches, scans and images in a note (ADR-0108; briefs N3 and N4). */
+@layer components {
+  /* The sketch layer: the tools above the canvas on a desktop, below it on a phone. */
+  .sketch-body {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 3);
+    min-height: 0;
+  }
+  /* One row that never wraps: on a narrow screen it scrolls sideways, with no bar. */
+  .sketch-tools {
+    display: flex;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .sketch-paper {
+    position: relative;
+    overflow-y: auto;
+    max-height: calc(100dvh - var(--c-sketch-chrome));
+    background: var(--c-sketch-paper);
+    box-shadow: inset 0 0 0 1px var(--c-sketch-paper-rule);
+    & > svg {
+      display: block;
+      width: 100%;
+      touch-action: none;
+      cursor: crosshair;
+    }
+    & > svg[data-tool="eraser"] {
+      cursor: cell;
+    }
+    & > img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+  }
+  .sketch-body[data-phone] .sketch-paper {
+    max-height: calc(100dvh - var(--c-sketch-chrome-phone));
+  }
+  .sketch-paper[data-full] {
+    max-height: calc(100dvh - var(--c-sketch-chrome) + var(--c-dialog-margin, 3rem) * 2);
+  }
+  /* The empty canvas's one line, centred on the paper in the stone ground's ink. */
+  .sketch-caption {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+  }
+  .sketch-ink {
+    display: grid;
+    place-items: center;
+    width: var(--c-sketch-ink-paper);
+    height: var(--c-sketch-ink-paper);
+    background: var(--c-sketch-paper);
+    box-shadow: inset 0 0 0 1px var(--c-sketch-paper-rule);
+    & > span {
+      width: var(--c-sketch-ink);
+      height: var(--c-sketch-ink);
+    }
+  }
+  .sketch-weight {
+    display: block;
+    width: var(--c-sketch-weight-width);
+    background: currentColor;
+  }
+
+  /* The scanner. */
+  .scan-body {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 4);
+    min-height: 0;
+  }
+  /* The photo with its corners, and beside it the page as it will be added; on a phone, the page small under the photo. */
+  .scan-adjust {
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+    gap: calc(var(--spacing) * 6);
+    align-items: start;
+    min-height: 0;
+  }
+  .scan-body[data-phone] .scan-adjust {
+    grid-template-columns: 1fr var(--c-scan-result-phone);
+    gap: calc(var(--spacing) * 3);
+  }
+  .scan-result {
+    display: block;
+    width: 100%;
+    max-height: calc(100dvh - var(--c-scan-photo-room));
+    object-fit: contain;
+    object-position: top;
+    background: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--line-rule);
+  }
+  .scan-photo-frame {
+    display: flex;
+    justify-content: center;
+    min-height: 0;
+  }
+  /* As wide as fits, never taller than the room the layer leaves, keeping the photo's shape. */
+  .scan-photo {
+    position: relative;
+    touch-action: none;
+    user-select: none;
+    width: min(100%, calc((100dvh - var(--c-scan-photo-room)) * var(--scan-ratio)));
+    & > img {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    & > svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      & polygon {
+        fill: var(--c-scan-fill);
+        stroke: var(--c-scan-edge);
+      }
+    }
+    & > [data-corner] {
+      position: absolute;
+      display: grid;
+      place-items: center;
+      width: var(--c-scan-handle-target);
+      height: var(--c-scan-handle-target);
+      translate: -50% -50%;
+      cursor: grab;
+      outline: none;
+      & > span {
+        width: var(--c-scan-handle);
+        height: var(--c-scan-handle);
+        background: var(--c-scan-handle-ground);
+        box-shadow: inset 0 0 0 2px var(--c-scan-edge);
+      }
+      &:active {
+        cursor: grabbing;
+      }
+      &:focus-visible > span {
+        outline: 2px solid var(--ring);
+        outline-offset: 2px;
+      }
+    }
+  }
+  .scan-look {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: calc(var(--spacing) * 3);
+  }
+  .scan-pages {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 2);
+    & > ol {
+      display: flex;
+      flex-wrap: wrap;
+      gap: calc(var(--spacing) * 2);
+    }
+  }
+
+  /* The image viewer: the whole screen at every width. */
+  .image-viewer {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+  }
+  /* The header's two actions sit beside its close button (SheetHeaderActions), 48 each and 8 apart. */
+  .image-viewer-head {
+    padding-inline-end: calc(var(--spacing) * 28);
+  }
+  .image-viewer-stage {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    padding: calc(var(--spacing) * 4) calc(var(--spacing) * 20);
+    background: var(--c-viewer-stage);
+    & > img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    & > img[data-sketch] {
+      background: var(--c-sketch-paper);
+    }
+  }
+  .image-viewer[data-phone] .image-viewer-stage {
+    padding-inline: calc(var(--spacing) * 4);
+  }
+  .image-viewer-stage[data-actual] {
+    display: block;
+    overflow: auto;
+    & > img {
+      max-width: none;
+      max-height: none;
+      margin: auto;
+    }
+  }
+  .image-viewer-side {
+    position: absolute;
+    top: 50%;
+    translate: 0 -50%;
+    &[data-side="start"] {
+      inset-inline-start: calc(var(--spacing) * 4);
+    }
+    &[data-side="end"] {
+      inset-inline-end: calc(var(--spacing) * 4);
+    }
+  }
+  /* The phone's bottom row, as a pushed screen's detail row draws it: 48 high, 8 apart, 16 from the sides. */
+  .image-viewer-row {
+    display: flex;
+    gap: calc(var(--spacing) * 2);
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 4) max(calc(var(--spacing) * 4), env(safe-area-inset-bottom));
+  }
+
+  /* An image in a note: its toolbar on hover or focus, at the image's top end. */
+  .note-image {
+    position: relative;
+    display: inline-flex;
+    max-width: 100%;
+    margin-block: calc(var(--spacing) * 1);
+    vertical-align: bottom;
+    & > img {
+      display: block;
+      max-width: 100%;
+      max-height: var(--c-note-image-max-height);
+      object-fit: contain;
+      box-shadow: inset 0 0 0 1px var(--line-rule);
+    }
+    & > img[data-sketch] {
+      background: var(--c-sketch-paper);
+    }
+    &.is-selected > img {
+      outline: 2px solid var(--ring);
+      outline-offset: 2px;
+    }
+  }
+  .note-image-tools {
+    position: absolute;
+    top: calc(var(--spacing) * 2);
+    inset-inline-end: calc(var(--spacing) * 2);
+    background: var(--surface-raised);
+    box-shadow: inset 0 0 0 1px var(--line-rule);
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--motion-ease);
+  }
+  .note-image:hover > .note-image-tools,
+  .note-image:focus-within > .note-image-tools,
+  .note-image.is-selected > .note-image-tools,
+  .note-image-tools:has([data-popup-open]) {
+    opacity: 1;
+  }
+  @media (hover: none) {
+    .note-image > .note-image-tools {
+      opacity: 1;
+    }
+  }
+  .note-image-wait {
+    display: block;
+    width: var(--c-note-image-wait-width);
+    max-width: 100%;
+    aspect-ratio: 16 / 9;
+    & > * {
+      width: 100%;
+      height: 100%;
+    }
+  }
+  .note-image-stand-in {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 4);
+    background: var(--surface-raised);
+    box-shadow: inset 0 0 0 1px var(--line-rule);
+  }
+  .note-image-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .note-image-text {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 4);
+    max-width: calc(var(--spacing) * 96);
+    & > p {
+      max-height: calc(var(--spacing) * 48);
+      overflow-y: auto;
+      white-space: pre-wrap;
+      user-select: text;
+    }
+  }
+  .note-image-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: calc(var(--spacing) * 2);
   }
 }
