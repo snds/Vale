@@ -17,8 +17,8 @@ import { SettingBlock } from "./setting-block"
  * line are the frame's (ADR-0104), so a body starts with its rows. A lane
  * that rebuilds a section changes its body here, or points the registry at
  * its own. Mail, Signatures and templates, Notifications and Calendar are
- * ADR-0110's; AI, Team members, Shortcuts and About keep today's rows until
- * their slices.
+ * ADR-0110's; Notes, Shortcuts and AI are ADR-0111's, in their own files;
+ * Team members and About keep today's rows until their slice.
  */
 
 export function MailBody() {
@@ -45,9 +45,6 @@ export function CalendarBody() {
     </div>
   )
 }
-
-/** Registered and not shown yet: the notes lane gives it rows, and its `when`, without touching the store. */
-export const NotesBody = () => null
 
 /**
  * About (brief T12): this app's updates on the desktop app, and the

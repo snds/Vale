@@ -1,5 +1,15 @@
 /*
  * Settings: what only the settings area adds to Vale's layer (see shell.css
- * for the rules). Nothing yet: the page is drawn with core roles. Its knobs
- * and rules go here when it gets some.
+ * for the rules). The page is drawn with core roles; this file only turns
+ * unicron's knobs for one place.
  */
+
+/*
+ * Shortcuts and gestures (brief T6; ADR-0111): a row's label is what the
+ * command does ("Remind me in 3 days if nobody replies"), longer than the
+ * Field Row's 140 px label column takes on one line. The key rows get a
+ * wider column on the spacing scale; a phone stacks them anyway.
+ */
+.vale-key-rows {
+  --c-field-row-label-width: calc(var(--spacing) * 72);
+}

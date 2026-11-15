@@ -1,17 +1,23 @@
 import { create } from "zustand"
 
-import { showSection } from "@/app/places"
+import { useUi } from "@/app/ui-store"
 
 /**
- * An intent (ADR-0084): setting up sync between devices, from anywhere. It
- * shows Notes, which mounts the form: today the relay dialog; the notes
- * settings once they are built (brief T5).
+ * Intents (ADR-0084, ADR-0111): the notes' set-up, from anywhere. Since
+ * brief T5 it lives in Settings › Notes, so each one opens that section;
+ * `openNotesImport()` also opens its import form there.
  */
-export const useSyncSetup = create<{ open: boolean }>(() => ({ open: false }))
-
 export function openSyncSetup() {
-  showSection("notes")
-  useSyncSetup.setState({ open: true })
+  useUi.getState().openSettings("notes")
 }
 
-export const closeSyncSetup = () => useSyncSetup.setState({ open: false })
+/** Which of Settings › Notes' forms is open: set-up for sync, or import. */
+export const useNotesSetupForm = create<{ form: "sync" | "import" | null }>(() => ({ form: null }))
+
+export const openNotesForm = (form: "sync" | "import" | null) => useNotesSetupForm.setState({ form })
+
+/** Importing notes, from Notes' empty list: Settings › Notes with its import form open. */
+export function openNotesImport() {
+  useUi.getState().openSettings("notes")
+  openNotesForm("import")
+}

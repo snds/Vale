@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo, useState } from "react"
+import { type ReactNode, useMemo } from "react"
 
 import { factTime, useRefresh, useScreenFact, useScreenPlace } from "@/app/screen"
 import { useSectionBanner } from "@/app/section-banner"
@@ -8,34 +8,23 @@ import { useUi } from "@/app/ui-store"
 import { vertical } from "@/app/verticals"
 import {
   AppFrameInset,
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
   EmptyState,
   FilterChip,
   FilterChipGroup,
-  Icon,
-  IconButton,
   SectionHeader,
   Skeleton,
   Tile,
   formatNavCount,
-  toast,
   useAppFrame,
 } from "@unicron/ui"
 import { LoadState } from "@/components/load-state"
 import { MasterDetail } from "@/components/master-detail"
 import { ScreenHead } from "@/components/page"
-import { getCoreClient } from "@/core/client"
 import { useNoteAction, useNotes, useNotesPrefs } from "@/core/queries"
 import type { NoteSummary, NotesPrefs } from "@/core/types"
 import { useNowSecs } from "@/hooks/use-now"
 import { noteSwatch, swatchId } from "@/lib/swatches"
 
-import { ImportDialog } from "./import-dialog"
 import { NOTE_COLOR_LABEL } from "./note-color"
 import { NoteDetailPane } from "./note-detail"
 import { NoteFolderEditor } from "./note-folders"
@@ -45,8 +34,7 @@ import { editedLabel, noteTag, useNoteItemCounts } from "./note-meta"
 import { NoteRow } from "./note-row"
 import { NotesNav } from "./notes-nav"
 import { closeSharedNote, useOpenSharedNote } from "./open-shared-note"
-import { closeSyncSetup, openSyncSetup, useSyncSetup } from "./open-sync-setup"
-import { RelayDialog } from "./relay-dialog"
+import { openNotesImport, openSyncSetup } from "./open-sync-setup"
 import { OpenSharedLink } from "./share-dialog"
 import { type SyncStatus, useSyncStatus } from "./sync"
 import { useNotesPlace } from "./use-notes-place"
@@ -67,9 +55,7 @@ export function NotesView() {
   const tag = place.tag
   const archived = place.folder.kind === "archive"
   const pinnedOnly = place.folder.kind === "pinned"
-  const [importing, setImporting] = useState(false)
-  // Opened by their intents, so the folders list and the command menu reach them too.
-  const relayOpen = useSyncSetup((s) => s.open)
+  // Opened by its intent, so the folders list and the command menu reach it too.
   const openingShared = useOpenSharedNote((s) => s.open)
   // Finding a note by its words is Search's (ADR-0085); the list is the folder, narrowed by the tag.
   const noteQuery = { search: null, tag, archived, folder: archived ? null : (activeFolder?.id ?? null) }
@@ -83,15 +69,6 @@ export function NotesView() {
   // The map (ADR-0053) wins over cards (ADR-0038), which keep their choice underneath it.
   const view: View = prefs?.graph ? "map" : prefs?.grid ? "cards" : "list"
   const setView = (v: View) => setPrefs.mutate(v === "map" ? { graph: true } : { graph: false, grid: v === "cards" })
-
-  // Every note as a Markdown file with front matter, as Obsidian reads them (ADR-0034).
-  const exportAll = async () => {
-    try {
-      toast.success(`Notes saved to ${await (await getCoreClient()).exportNotes()}`, { duration: 4000 })
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
-    }
-  }
 
   // A reminder that has come due lifts its note above everything, pinned
   // included, until it's marked done (ADR-0039).
@@ -124,7 +101,7 @@ export function NotesView() {
   const headName = place.folder.kind === "all" ? "Notes" : placeName
   const overline = [headName, tag ? `#${tag}` : null, isPending || error ? null : formatNavCount(notes.length)].filter(Boolean).join(" // ")
 
-  const empty = <NotesEmpty place={place.folder.kind} name={placeName} tag={tag} onImport={() => setImporting(true)} />
+  const empty = <NotesEmpty place={place.folder.kind} name={placeName} tag={tag} onImport={openNotesImport} />
   const body =
     isPending ? (
       <AppFrameInset>
@@ -183,39 +160,16 @@ export function NotesView() {
             overline={overline}
             title={headName}
             switcher={switching.switcher}
+            // LIST · CARDS · MAP: the head's own choice from medium width up; a phone has it in the Folders sheet (brief X1).
+            // The set-up the More menu held is Settings › Notes' (brief T5; ADR-0111).
             actions={
-              <>
-                {/* LIST · CARDS · MAP: the head's own choice from medium width up; a phone has it in the Folders sheet (brief X1). */}
-                {!frame.phone && (
-                  <FilterChipGroup label="View" value={view} onValueChange={(v) => setView(v as View)}>
-                    <FilterChip value="list">List</FilterChip>
-                    <FilterChip value="cards">Cards</FilterChip>
-                    <FilterChip value="map">Map</FilterChip>
-                  </FilterChipGroup>
-                )}
-                {/* Set-up, until it moves to Settings › Notes (brief T5, c8). */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger render={<IconButton label="More" icon="overflow-menu--horizontal" />} />
-                  <DropdownMenuContent align="end" width="auto">
-                    <DropdownMenuItem onClick={() => setImporting(true)}>
-                      <Icon name="document--import" /> Import notes…
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => void exportAll()}>
-                      <Icon name="download" /> Export all as Markdown
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={openSyncSetup}>
-                      <Icon name="renew" /> Sync between devices…
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuCheckboxItem checked={prefs?.sortChecked ?? true} onCheckedChange={(on) => setPrefs.mutate({ sortChecked: on })}>
-                      <Icon name="list--checked" /> Move checked items down
-                    </DropdownMenuCheckboxItem>
-                    <DropdownMenuCheckboxItem checked={prefs?.readImageText ?? true} onCheckedChange={(on) => setPrefs.mutate({ readImageText: on })}>
-                      <Icon name="scan--alt" /> Find text in images
-                    </DropdownMenuCheckboxItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </>
+              !frame.phone && (
+                <FilterChipGroup label="View" value={view} onValueChange={(v) => setView(v as View)}>
+                  <FilterChip value="list">List</FilterChip>
+                  <FilterChip value="cards">Cards</FilterChip>
+                  <FilterChip value="map">Map</FilterChip>
+                </FilterChipGroup>
+              )
             }
             below={
               <SectionSwitcher state={switching} overline={["Notes", place.folder.kind === "all" ? null : placeName, tag ? `#${tag}` : null].filter(Boolean).join(" // ")} title="Folders">
@@ -228,8 +182,6 @@ export function NotesView() {
         // The note's color no longer tints the pane (DC3, ADR-0105): it is the row's square and the card's edge.
         detail={selected && <NoteDetailPane key={selected.id} id={selected.id} fresh={selected.fresh} onClosed={() => setSelected(null)} />}
       />
-      <ImportDialog open={importing} onOpenChange={setImporting} />
-      <RelayDialog open={relayOpen} onOpenChange={(o) => !o && closeSyncSetup()} />
       <OpenSharedLink open={openingShared} onOpenChange={(o) => !o && closeSharedNote()} />
       <NoteFolderEditor />
     </>

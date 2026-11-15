@@ -1,3 +1,4 @@
+import { useSyncStatus } from "@/features/notes/sync"
 import { NOT_NOW_KEY } from "@/features/onboarding/first-run"
 
 import type { DemoScenarios } from "../demo-scenarios"
@@ -20,8 +21,10 @@ export const settings: DemoScenarios = {
   },
   /**
    * The settings outlive a reload, as the core keeps them on disk (brief
-   * T2, T4, T8): what Mail, the Screener, Calendar and Notifications saved
-   * is kept in this tab and put back when the demo starts again.
+   * T2, T4, T5, T6, T7, T8): what Mail, the Screener, Calendar,
+   * Notifications, Notes, the swipes and keys, and AI saved is kept in this
+   * tab and put back when the demo starts again. (The notes relay is kept by
+   * the demo itself.)
    */
   "settings-kept": ({ client, wrap }) => {
     const KEY = "vale.demo.settings-kept"
@@ -46,6 +49,12 @@ export const settings: DemoScenarios = {
     if (kept.meeting) void client.setMeetingPrefs(kept.meeting as Parameters<typeof client.setMeetingPrefs>[0])
     if (kept.menuBar) void client.setMenuBarPrefs(kept.menuBar as Parameters<typeof client.setMenuBarPrefs>[0])
     if (kept.push) void client.setPushSettings(kept.push as Parameters<typeof client.setPushSettings>[0])
+    if (kept.notes) void client.setNotesPrefs(kept.notes as Parameters<typeof client.setNotesPrefs>[0])
+    if (kept.swipes) void client.setSwipeActions(kept.swipes as Parameters<typeof client.setSwipeActions>[0])
+    if (kept.keys) void client.setKeyBindings(kept.keys as Parameters<typeof client.setKeyBindings>[0])
+    if (kept.ai) void client.setAiPrefs(kept.ai as Parameters<typeof client.setAiPrefs>[0])
+    // Only whether a key is saved: the demo never holds a real key, and Vale never reads one back.
+    for (const [provider, saved] of Object.entries((kept.aiKeys ?? {}) as Record<string, boolean>)) if (saved) void client.setAiKey(provider as Parameters<typeof client.setAiKey>[0], "kept-by-the-demo")
     const keeping = <A, R>(name: string, original: (a: A) => Promise<R>) => async (a: A) => {
       const r = await original(a)
       keep(name, a)
@@ -55,6 +64,15 @@ export const settings: DemoScenarios = {
     wrap("setScreener", (o) => keeping("screener", o))
     wrap("setMeetingPrefs", (o) => keeping("meeting", o))
     wrap("setMenuBarPrefs", (o) => keeping("menuBar", o))
+    wrap("setNotesPrefs", (o) => keeping("notes", o))
+    wrap("setSwipeActions", (o) => keeping("swipes", o))
+    wrap("setKeyBindings", (o) => keeping("keys", o))
+    wrap("setAiPrefs", (o) => keeping("ai", o))
+    wrap("setAiKey", (o) => async (provider, key) => {
+      const r = await o(provider, key)
+      keep("aiKeys", { ...((read().aiKeys ?? {}) as Record<string, boolean>), [provider]: !!key?.trim() })
+      return r
+    })
     // The relay's token is kept by the demo once saved; a reload asks for it no more.
     wrap("setPushSettings", (o) => async (input) => {
       const r = await o(input)
@@ -141,8 +159,44 @@ export const settings: DemoScenarios = {
       // No storage: first run shows.
     }
   },
+  /**
+   * Notes sync through a relay on this device (brief T5), and it is up to
+   * date. Nothing listens there in the demo (the socket is refused on this
+   * machine and never leaves it), so the demo says what a relay that
+   * answered would: up to date.
+   */
+  "notes-synced": ({ client }) => {
+    // Once, as the demo keeps the relay itself: a reload keeps what was set since (a key turned on).
+    if (!keptRelay()) void client.setNotesRelay({ url: "ws://localhost:1", token: "relay-token-from-the-demo-0042", key: null })
+    upToDate()
+  },
+  /** The same relay, end-to-end encrypted (brief T5): ON, and the KEY row. */
+  "notes-encrypted": ({ client }) => {
+    if (!keptRelay()) void client.setNotesRelay({ url: "ws://localhost:1", token: "relay-token-from-the-demo-0042", key: "Vq3hR8n2LkTz0WbX5cYdA7uE9sJfG1pM4oNiK6eHwQr" })
+    upToDate()
+  },
+  /** AI on a model server on this computer (brief T7), which lists two models. */
+  "ai-local": ({ client }) => {
+    void client.aiSettings().then((s) => client.setAiPrefs({ ...s.prefs, provider: "local", local: { url: "http://localhost:11434/v1", model: "llama3.2" } }))
+  },
   /** The gateway's owner (ADR-0063): Team members and the gateway's sign-out show; Notifications don't. */
   "gateway-owner": ({ flags }) => {
     flags.gatewayOwner = true
   },
+}
+
+/** Pins the demo's sync to "up to date" each time it starts connecting: no relay answers in the demo. */
+function upToDate() {
+  useSyncStatus.subscribe((s) => {
+    if (s.status === "connecting") useSyncStatus.setState({ status: "synced", error: null })
+  })
+}
+
+/** Whether the demo already keeps a notes relay from earlier in this tab (`demo-notes.ts` keeps it in local storage). */
+function keptRelay(): boolean {
+  try {
+    return !!localStorage.getItem("vale.demo.relay")
+  } catch {
+    return false
+  }
 }

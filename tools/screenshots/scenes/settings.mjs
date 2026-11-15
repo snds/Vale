@@ -1,5 +1,5 @@
 // Settings (ADR-0104): the page on unicron's SettingsFrame, each section the demo shows, Accounts.
-import { area, button, ensure, formatBar, formPrimary, press, settingsButton, sidebar, toastGone } from "./helpers.mjs"
+import { area, button, ensure, formatBar, formLayer, formPrimary, press, settingsButton, sidebar, toastGone } from "./helpers.mjs"
 
 /** The list of sections: the frame's own nav. */
 const sectionList = (page) => page.getByRole("navigation", { name: "Settings sections" })
@@ -48,7 +48,7 @@ export const scenes = [
       const { page } = app
       await settings(app)
       const names = await listed(page)
-      ensure(names.length === 8, `the demo lists ${names.length} sections: ${names.join(", ")}`)
+      ensure(names.length === 9, `the demo lists ${names.length} sections: ${names.join(", ")}`)
       const split = !!(await sidebar(page).count()) && app.size === "desktop"
       for (const name of names) {
         await press(app, sectionList(page).getByRole("button", { name, exact: true }))
@@ -82,14 +82,14 @@ export const scenes = [
     },
   },
   {
-    // The phone's Settings below the drawn rows: ALL SETTINGS // 08 and the sections in their four groups.
+    // The phone's Settings below the drawn rows: ALL SETTINGS // 09 and the sections in their four groups.
     name: "settings-phone-index",
     sizes: ["phone"],
     run: async (app) => {
       const { page } = app
       await settings(app)
       const all = page.getByRole("heading", { name: /All settings/i })
-      ensure(/08/.test(await all.innerText()), "the list's header does not count 08 sections")
+      ensure(/09/.test(await all.innerText()), "the list's header does not count 09 sections")
       // Scrolled to the header, so the whole list shows under the top row.
       await all.evaluate((el) => el.scrollIntoView({ block: "start" }))
       await app.settle()
@@ -99,7 +99,7 @@ export const scenes = [
     },
   },
   {
-    // "Find a setting" shows from ten sections up (cross-app decisions §5). The demo has eight, a team
+    // "Find a setting" shows from ten sections up (cross-app decisions §5). The demo has nine, a team
     // member three, so it is not there; once a person has ten, typing narrows the list.
     name: "settings-find",
     sizes: ["desktop", "phone"],
@@ -545,8 +545,308 @@ export const scenes = [
       ensure(await chips.getByRole("radio", { name: picked, exact: true }).isChecked(), `${picked} is not the checked theme`)
     },
   },
-  { name: "settings-shortcuts", run: (app) => settings(app, "Shortcuts and gestures") },
-  { name: "settings-ai", run: (app) => settings(app, "AI summaries and replies") },
+  {
+    // Shortcuts and gestures (brief T6): the picture of the four tiles as set (no words, hidden from screen readers),
+    // a row per tile with CHANGE, KEYS IN MAIL and KEYS IN CALENDAR with a key button per command, THESE DON'T
+    // CHANGE as facts, and RESET KEYS off with its reason until a key differs.
+    name: "settings-shortcuts",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "shortcuts" },
+    run: (app) => settings(app, "Shortcuts and gestures"),
+    assert: async ({ page }) => {
+      const swipes = region(page, "Swipes in the mail list")
+      const picture = swipes.locator("[inert]")
+      ensure((await picture.getAttribute("aria-hidden")) === "true", "the swipe picture is not hidden from screen readers")
+      ensure((await picture.locator('[data-slot="swipe-action"]').count()) === 2, "the picture does not show the demo's two tiles, Read and Archive")
+      for (const [label, value] of [["Leading", "Read / unread"], ["Trailing, outer", "Archive"], ["Trailing, middle", "Nothing"], ["Trailing, inner", "Nothing"]]) {
+        const row = swipes.getByRole("group", { name: label, exact: true })
+        ensure((await row.textContent()).includes(value), `${label} does not read ${value}`)
+        ensure(await row.getByRole("button", { name: "Change", exact: true }).isVisible(), `${label} has no CHANGE`)
+      }
+      ensure(/A full swipe runs it\./.test(await swipes.getByRole("group", { name: "Trailing, outer", exact: true }).textContent()), "the outer tile does not say a full swipe runs it")
+      ensure(await region(page, "Keys in Mail").getByRole("button", { name: "Change the key for Archive, or back to the inbox" }).isVisible(), "Archive has no key button")
+      ensure(await region(page, "Keys in Mail").getByRole("button", { name: "Add a key for Snooze until next week" }).isVisible(), "a command with no key has no ADD KEY")
+      ensure(await region(page, "Keys in Calendar").getByRole("button", { name: "Change the key for Go to today" }).isVisible(), "Go to today has no key button")
+      const facts = region(page, "These don't change")
+      ensure((await facts.getByRole("group").count()) === 7, `THESE DON'T CHANGE lists ${await facts.getByRole("group").count()} keys, not seven`)
+      ensure(!(await facts.getByRole("button").count()), "a fixed key can be changed")
+      const reset = page.getByRole("button", { name: "Reset keys", exact: true })
+      ensure((await reset.getAttribute("aria-disabled")) === "true", "RESET KEYS is on with nothing changed")
+      ensure(await page.getByText("Nothing differs from the defaults.").isVisible(), "RESET KEYS does not say why it is off")
+      ensure(await page.getByText("Keys follow you to every device on your account.").isVisible(), "the caption is missing")
+    },
+  },
+  {
+    // A key, remapped (brief T6): ARCHIVE to X saves silently; then S, Star's key, for Next conversation swaps the two,
+    // and the toast names the other command. RESET KEYS turns on. The picture: a key button waiting, "Press a key…".
+    name: "settings-shortcuts-capture",
+    sizes: ["desktop", "phone"],
+    sean: { kind: "undrawn", area: "settings", screen: "shortcuts-capture" },
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Shortcuts and gestures")
+      const mail = region(page, "Keys in Mail")
+      // The key button: the first control in the command's row (its menu, when it has a key, comes after).
+      const keyOf = (does) => mail.getByRole("group", { name: does, exact: true }).getByRole("button").first()
+      await press(app, keyOf("Archive, or back to the inbox"))
+      ensure(/press a key/i.test(await keyOf("Archive, or back to the inbox").innerText()), "the key button does not wait for a key")
+      await page.keyboard.press("x")
+      await app.settle()
+      ensure((await keyOf("Archive, or back to the inbox").innerText()).trim() === "X", "Archive's key is not X")
+      ensure(!(await page.locator("[data-sonner-toast]").count()), "a key with no clash raised a toast")
+      await press(app, keyOf("Next conversation"))
+      await page.keyboard.press("s")
+      await app.settle()
+      const toast = page.locator("[data-sonner-toast]").filter({ hasText: "Swapped with Star or unstar" })
+      await toast.waitFor()
+      ensure((await keyOf("Next conversation").innerText()).trim() === "S", "Next conversation did not take S")
+      ensure((await keyOf("Star or unstar").innerText()).trim() === "J", "Star did not take Next conversation's J")
+      await toastGone(app)
+      // Esc gives up a capture and keeps the key.
+      await press(app, keyOf("Mark unread"))
+      await page.keyboard.press("Escape")
+      await app.settle()
+      ensure((await keyOf("Mark unread").innerText()).trim() === "U", "Esc did not keep Mark unread's key")
+      ensure(await page.getByRole("button", { name: "Reset keys", exact: true }).isEnabled(), "RESET KEYS stays off with keys changed")
+      await press(app, keyOf("Snooze until tomorrow"))
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // Swipes and keys outlive a reload (scenario settings-kept): the inner tile set to Star from its menu, Archive on X,
+    // and the picture shows the new tile. REMOVE in a key row's menu leaves ADD KEY. RESET KEYS brings the defaults back.
+    name: "settings-shortcuts-kept",
+    scenario: "settings-kept",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Shortcuts and gestures")
+      const swipes = region(page, "Swipes in the mail list")
+      await press(app, swipes.getByRole("group", { name: "Trailing, inner", exact: true }).getByRole("button", { name: "Change", exact: true }))
+      await press(app, page.getByRole(app.phone ? "radio" : "menuitemradio", { name: "Star", exact: true }).last())
+      const mail = region(page, "Keys in Mail")
+      await press(app, mail.getByRole("button", { name: "Change the key for Archive, or back to the inbox" }))
+      await page.keyboard.press("x")
+      await app.settle()
+      await press(app, mail.getByRole("group", { name: "Mark unread", exact: true }).getByRole("button", { name: /^More actions/ }))
+      await press(app, page.getByRole(app.phone ? "button" : "menuitem", { name: "Remove", exact: true }).last())
+      ensure(await mail.getByRole("button", { name: "Add a key for Mark unread" }).isVisible(), "REMOVE left a key on Mark unread")
+      ensure(!(await page.locator("[data-sonner-toast]").count()), "a change raised a toast")
+      await reload(app)
+      await settings(app, "Shortcuts and gestures")
+      ensure((await region(page, "Swipes in the mail list").getByRole("group", { name: "Trailing, inner", exact: true }).textContent()).includes("Star"), "the inner tile did not survive a reload")
+      ensure((await region(page, "Swipes in the mail list").locator('[inert] [data-slot="swipe-action"]').count()) === 3, "the picture does not show the third tile")
+      ensure((await region(page, "Keys in Mail").getByRole("button", { name: "Change the key for Archive, or back to the inbox" }).innerText()).trim() === "X", "Archive's key did not survive a reload")
+      ensure(await region(page, "Keys in Mail").getByRole("button", { name: "Add a key for Mark unread" }).isVisible(), "the removed key came back after a reload")
+      await press(app, page.getByRole("button", { name: "Reset keys", exact: true }))
+      const toast = page.locator("[data-sonner-toast]").filter({ hasText: "Keys reset to the defaults" })
+      await toast.waitFor()
+      ensure((await region(page, "Keys in Mail").getByRole("button", { name: "Change the key for Archive, or back to the inbox" }).innerText()).trim() === "E", "RESET KEYS did not bring E back")
+      await press(app, toast.getByRole("button", { name: "Undo", exact: true }))
+      ensure((await region(page, "Keys in Mail").getByRole("button", { name: "Change the key for Archive, or back to the inbox" }).innerText()).trim() === "X", "UNDO did not bring the keys back")
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // AI summaries and replies (brief T7): the caption first, MODEL RUNS as four RadioRows, Off chosen; nothing else.
+    name: "settings-ai",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "ai" },
+    run: (app) => settings(app, "AI summaries and replies"),
+    assert: async ({ page }) => {
+      ensure(await page.getByText("Off unless you turn it on. A conversation goes to the model only when you ask for its summary or replies.").isVisible(), "the caption is missing")
+      const runs = page.getByRole("radiogroup", { name: "Model runs" })
+      ensure((await runs.getByRole("radio").count()) === 4, "MODEL RUNS is not four choices")
+      ensure(await runs.getByRole("radio", { name: "Off" }).isChecked(), "Off is not chosen")
+      ensure(!(await page.getByRole("group", { name: "Connection" }).count()), "a connection row shows while AI is off")
+      ensure(!(await page.getByRole("switch", { name: /Summaries/ }).count()), "the drawn Summaries switch is built (W6)")
+    },
+  },
+  {
+    // Claude with your key (brief T7): API KEY is write-only with SAVE; saved, the row says where it is with REPLACE
+    // and REMOVE, MODEL is a menu of what the service lists, and the connection says Connected. No toast.
+    name: "settings-ai-key",
+    sizes: ["desktop", "phone"],
+    sean: { kind: "undrawn", area: "settings", screen: "ai-key" },
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "AI summaries and replies")
+      await press(app, page.getByRole("radiogroup", { name: "Model runs" }).getByRole("radio", { name: "Claude, with your API key" }))
+      const connection = () => page.getByRole("group", { name: "Connection" })
+      ensure(/Add your API key first\./.test(await connection().textContent()), "the connection does not ask for the key first")
+      const key = page.getByRole("form", { name: "API key" })
+      await key.getByLabel("API key").fill("sk-ant-api03-demo-key-0042")
+      await press(app, key.getByRole("button", { name: "Save", exact: true }))
+      const saved = page.getByRole("group", { name: "API key" })
+      ensure(/Saved in your system keychain/.test(await saved.textContent()), "the saved key's row does not say where it is")
+      for (const name of ["Replace", "Remove"]) ensure(await saved.getByRole("button", { name, exact: true }).isVisible(), `the saved key has no ${name}`)
+      ensure(!(await page.getByText("sk-ant-api03-demo-key-0042").count()), "the key is shown back")
+      const model = page.getByRole("group", { name: "Model" })
+      ensure(/claude-opus-5-5/.test(await model.textContent()) && (await model.getByRole("button", { name: "Change", exact: true }).isVisible()), "MODEL is not the listed model with CHANGE")
+      ensure(/Connected\./.test(await connection().textContent()), "the connection does not say Connected.")
+      ensure(!(await page.locator("[data-sonner-toast]").count()), "saving the key raised a toast")
+      // REMOVE asks first, focus on Cancel.
+      await press(app, saved.getByRole("button", { name: "Remove", exact: true }))
+      ensure(await page.getByRole("dialog", { name: /Remove the API key\?/ }).isVisible(), "REMOVE did not ask")
+      ensure((await page.evaluate(() => document.activeElement?.textContent?.trim())) === "Cancel", "focus is not on Cancel")
+      await page.keyboard.press("Escape")
+      await app.settle()
+      await page.mouse.move(0, 0)
+      await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
+    },
+  },
+  {
+    // A model server on this computer (brief T7): SERVER ADDRESS with its helper, MODEL with what it lists, Connected.
+    // The choice outlives a reload (scenario settings-kept).
+    name: "settings-ai-kept",
+    scenario: "settings-kept",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "AI summaries and replies")
+      await press(app, page.getByRole("radiogroup", { name: "Model runs" }).getByRole("radio", { name: "On this computer" }))
+      ensure(await page.getByRole("textbox", { name: "Server address" }).isVisible(), "no SERVER ADDRESS")
+      await press(app, page.getByRole("group", { name: "Model" }).getByRole("button", { name: "Change", exact: true }))
+      await press(app, page.getByRole("menuitemradio", { name: "qwen3:8b" }))
+      await reload(app)
+      await settings(app, "AI summaries and replies")
+      ensure(await page.getByRole("radiogroup", { name: "Model runs" }).getByRole("radio", { name: "On this computer" }).isChecked(), "the choice did not survive a reload")
+      ensure(/qwen3:8b/.test(await page.getByRole("group", { name: "Model" }).textContent()), "the model did not survive a reload")
+      ensure(/Connected\./.test(await page.getByRole("group", { name: "Connection" }).textContent()), "the connection does not say Connected.")
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // Settings › Notes (brief T5): SYNC (Off, SET UP; encryption Off with its reason), READING's two switches, MOVING's
+    // IMPORT and EXPORT. Everything the Notes More menu held. A team member has no Notes section (settings-member).
+    name: "settings-notes",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "notes" },
+    run: (app) => settings(app, "Notes"),
+    assert: async ({ page }) => {
+      const sync = region(page, "Sync")
+      const row = (name) => page.getByRole("group", { name, exact: true })
+      ensure(/Off/.test(await row("Sync between devices").textContent()) && (await row("Sync between devices").getByRole("button", { name: "Set up", exact: true }).isVisible()), "SYNC BETWEEN DEVICES is not Off with SET UP")
+      ensure(/Off/.test(await sync.getByRole("group", { name: "End-to-end encryption" }).textContent()), "END-TO-END ENCRYPTION is not Off")
+      ensure(await page.getByText("Needs sync between devices.").isVisible(), "TURN ON does not say why it is off")
+      ensure(await page.getByRole("switch", { name: "Find text in images" }).isChecked() && (await page.getByText("Read on this device.").isVisible()), "Find text in images is not on with its line")
+      ensure(await page.getByRole("switch", { name: "Move checked items down" }).isChecked(), "Move checked items down is not on")
+      ensure(/Apple Notes, Google Keep, Markdown/.test(await row("Import").textContent()), "IMPORT does not name its sources")
+      ensure(/All notes as Markdown/.test(await row("Export").textContent()), "EXPORT does not say what it saves")
+    },
+  },
+  {
+    // The two switches outlive a reload (scenario settings-kept), and save without a toast.
+    name: "settings-notes-kept",
+    scenario: "settings-kept",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Notes")
+      await press(app, page.getByRole("switch", { name: "Find text in images" }))
+      await press(app, page.getByRole("switch", { name: "Move checked items down" }))
+      ensure(!(await page.locator("[data-sonner-toast]").count()), "a switch raised a toast")
+      await reload(app)
+      await settings(app, "Notes")
+      ensure(!(await page.getByRole("switch", { name: "Find text in images" }).isChecked()), "Find text in images did not survive a reload")
+      ensure(!(await page.getByRole("switch", { name: "Move checked items down" }).isChecked()), "Move checked items down did not survive a reload")
+    },
+  },
+  {
+    // Set up sync (brief T5) in the form layer: its parts, Esc, Discard changes?, and Ctrl+Enter's TURN ON SYNC; the
+    // row then reads Connecting… with CHANGE, and after a reload too. The picture: the form again, now SAVE and TURN OFF SYNC.
+    name: "settings-sync-setup",
+    sizes: ["desktop", "phone"],
+    sean: { kind: "undrawn", area: "settings", screen: "sync-setup" },
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Notes")
+      const row = () => page.getByRole("group", { name: "Sync between devices", exact: true })
+      const open = async () => {
+        await press(app, row().getByRole("button", { name: /^(Set up|Change)$/ }))
+        return page.getByRole("dialog", { name: /Sync between devices/ })
+      }
+      await formLayer(app, {
+        open,
+        write: async (form) => {
+          await form.getByRole("textbox", { name: "Relay address" }).fill("ws://localhost:1")
+          await form.getByLabel("Access token").fill("relay-token-from-the-demo-0042")
+        },
+        primary: "Turn on sync",
+      })
+      ensure(/Connecting…/.test(await row().textContent()) && (await row().getByRole("button", { name: "Change", exact: true }).isVisible()), "the row does not read Connecting… with CHANGE")
+      ensure(await page.getByRole("group", { name: "End-to-end encryption" }).getByRole("button", { name: "Turn on", exact: true }).isEnabled(), "TURN ON stays off with sync on")
+      await reload(app)
+      await settings(app, "Notes")
+      ensure(await row().getByRole("button", { name: "Change", exact: true }).isVisible(), "sync did not survive a reload")
+      const form = await open()
+      ensure(await formPrimary(form, "Save").isVisible(), "the form has no SAVE once sync is on")
+      ensure(await form.getByRole("button", { name: "Turn off sync", exact: true }).isVisible(), "the form has no TURN OFF SYNC")
+      ensure((await form.getByRole("textbox", { name: "Relay address" }).inputValue()) === "ws://localhost:1", "the form does not hold the relay")
+      await page.mouse.move(0, 0)
+      await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
+    },
+  },
+  {
+    // openSyncSetup() (ADR-0111): the Notes banner's OPEN SYNC lands on Settings › Notes, its sync row giving the relay's words.
+    name: "settings-sync-from-notes",
+    scenario: "relay-error",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await area(app, "Notes")
+      await press(app, page.locator('[data-slot="banner"]').filter({ hasText: "Notes didn't sync" }).getByRole("button", { name: "Open sync" }))
+      ensure(await sectionShows(page, "Notes"), "OPEN SYNC did not open Settings › Notes")
+      const row = page.getByRole("group", { name: "Sync between devices", exact: true })
+      ensure(/The relay refused the token/.test(await row.textContent()), "the sync row does not give the relay's words")
+    },
+  },
+  {
+    // Turn on end-to-end encryption (brief T5): the question with its line and three consequences, the yes TURN ON,
+    // focus on Cancel. A relay is set up and up to date (scenario notes-synced).
+    name: "settings-encryption-confirm",
+    scenario: "notes-synced",
+    sizes: ["desktop", "phone"],
+    sean: { kind: "undrawn", area: "settings", screen: "encryption" },
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Notes")
+      ensure(/Up to date/.test(await page.getByRole("group", { name: "Sync between devices", exact: true }).textContent()), "sync is not Up to date")
+      await press(app, page.getByRole("group", { name: "End-to-end encryption" }).getByRole("button", { name: "Turn on", exact: true }))
+    },
+    assert: async ({ page }) => {
+      const question = page.getByRole("dialog", { name: /Turn on end-to-end encryption\?/ })
+      ensure(await question.isVisible(), "TURN ON did not ask")
+      ensure(/Only your devices will be able to read your notes\./.test(await question.innerText()), "the question has no line")
+      const lines = question.getByRole("listitem")
+      ensure((await lines.count()) === 3, `the question lists ${await lines.count()} consequences, not three`)
+      for (const [i, words] of ["You'll get a key.", "stop working", "deletes the readable copies"].entries()) ensure((await lines.nth(i).innerText()).includes(words), `consequence ${i + 1} does not say “${words}”`)
+      ensure((await page.evaluate(() => document.activeElement?.textContent?.trim())) === "Cancel", "focus is not on Cancel")
+      ensure(await question.getByRole("button", { name: "Turn on", exact: true }).isVisible(), "the yes is not TURN ON")
+    },
+  },
+  {
+    // TURN ON runs: the row reads On and the KEY row shows, hold to show and COPY; after a reload too.
+    name: "settings-encryption-on",
+    scenario: "notes-synced",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Notes")
+      await press(app, page.getByRole("group", { name: "End-to-end encryption" }).getByRole("button", { name: "Turn on", exact: true }))
+      const question = page.getByRole("dialog", { name: /Turn on end-to-end encryption\?/ })
+      await press(app, question.getByRole("button", { name: "Turn on", exact: true }))
+      await question.waitFor({ state: "detached" })
+      await app.settle()
+      ensure(/On/.test(await page.getByRole("group", { name: "End-to-end encryption" }).textContent()), "encryption does not read On")
+      ensure(!(await page.getByRole("group", { name: "End-to-end encryption" }).getByRole("button", { name: "Turn on", exact: true }).count()), "TURN ON stays once it is on")
+      ensure(await page.getByRole("button", { name: /^Hold to show Key/ }).isVisible() && (await page.getByRole("button", { name: /^Copy Key/ }).isVisible()), "the KEY row has no hold to show and COPY")
+      await reload(app)
+      await settings(app, "Notes")
+      ensure(await page.getByRole("button", { name: /^Copy Key/ }).isVisible(), "the key did not survive a reload")
+      await page.mouse.move(0, 0)
+    },
+  },
   // "New mail on your phone" until ADR-0085 named it Notifications; the scene keeps its name so its pictures pair up.
   // Brief T8: the two choices, the phone's schedule chosen; nothing else until the relay is.
   {

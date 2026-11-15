@@ -8,11 +8,12 @@ import { AccountsSection } from "@/features/accounts"
 import { AiSettingsForm } from "@/features/ai-settings"
 import { AppearanceSettings } from "@/features/appearance-settings"
 import { ShortcutSettings } from "@/features/grammar"
+import { NotesSettings } from "@/features/notes/notes-settings"
 import { PushSettingsSection } from "@/features/push-settings"
 import { Members } from "@/features/team-members"
 import { WritingSettings } from "@/features/writing-settings"
 
-import { AboutBody, CalendarBody, MailBody, NotesBody } from "./section-bodies"
+import { AboutBody, CalendarBody, MailBody } from "./section-bodies"
 
 /**
  * The settings sections, in one place (ADR-0085; brief T0). The settings
@@ -66,15 +67,15 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   { id: "team", name: "Team members", group: "Accounts", icon: "user--multiple", description: "People you add read and reply from this gateway's accounts. Everything else stays yours.", keywords: ["settings", "people", "invite", "shared inbox"], when: (c) => c.remote && !c.member, body: Members },
   { id: "mail", name: "Mail", group: "Mail", icon: "email", description: "The defaults keep your reading private. Change them here.", keywords: ["settings", "privacy", "images", "screener", "mark as read", "quote", "receipts"], when: (c) => c.hasAccount && !c.member, body: MailBody },
   { id: "writing", name: "Signatures and templates", group: "Mail", icon: "edit", description: "What goes under your messages, and text you reuse.", keywords: ["settings", "signature", "template", "snippet"], when: (c) => c.hasAccount && !c.member, body: WritingSettings },
-  { id: "ai", name: "AI summaries and replies", group: "Mail", icon: "bot", description: "Off unless you turn it on. A conversation goes to the model only when you ask.", keywords: ["settings", "model", "summary", "assistant"], when: (c) => c.hasAccount && !c.member, body: AiSettingsForm },
+  { id: "ai", name: "AI summaries and replies", group: "Mail", icon: "bot", description: "Summaries and suggested replies from a model you choose.", keywords: ["settings", "model", "summary", "assistant", "api key", "claude", "ollama"], when: (c) => c.hasAccount && !c.member, body: AiSettingsForm },
   // "New mail on your phone" until ADR-0085; the id was "phone".
   { id: "notifications", name: "Notifications", group: "Mail", icon: "mobile", description: "How new mail reaches your phone while Vale is closed.", keywords: ["settings", "push", "phone", "new mail", "alerts"], when: (c) => c.hasAccount && !c.remote && !c.member, body: PushSettingsSection },
   { id: "calendar", name: "Calendar", group: "Calendar and notes", icon: "calendar", description: "How meetings open, and the hours you see.", keywords: ["settings", "meetings", "menu bar", "time zone", "second zone"], when: (c) => !c.member, body: CalendarBody },
-  // Registered so its id is the store's already; hidden until the notes lane gives it rows (brief T5).
-  { id: "notes", name: "Notes", group: "Calendar and notes", icon: "notebook", description: "Where notes sync.", keywords: ["settings"], when: () => false, body: NotesBody },
+  // The Notes More menu's set-up, as rows (brief T5; ADR-0111). Notes are the owner's: a team member has none (ADR-0063).
+  { id: "notes", name: "Notes", group: "Calendar and notes", icon: "notebook", description: "Sync between your devices, and notes in and out.", keywords: ["settings", "sync", "relay", "encryption", "end-to-end", "key", "import", "export", "markdown", "apple notes", "google keep", "obsidian", "text in images", "checked items"], when: (c) => !c.member, body: NotesSettings },
   // Everyone has it, a team member too: the theme is this device's, not the gateway's (ADR-0082).
   { id: "appearance", name: "Appearance", group: "Vale", icon: "contrast", description: "How Vale looks on this device.", keywords: ["settings", "theme", "stone", "graphite", "dark mode", "light mode", "system"], when: () => true, body: AppearanceSettings },
-  { id: "shortcuts", name: "Shortcuts and gestures", group: "Vale", icon: "keyboard", description: "Every key and swipe, so nothing is gesture-only.", keywords: ["settings", "keyboard", "swipe", "change keys", "change keys and swipes"], when: () => true, body: ShortcutSettings },
+  { id: "shortcuts", name: "Shortcuts and gestures", group: "Vale", icon: "keyboard", description: "Every key and swipe, so nothing is gesture-only.", keywords: ["settings", "keyboard", "keys", "swipe", "swipes", "change keys", "change keys and swipes", "reset keys"], when: () => true, body: ShortcutSettings },
   // The desktop app's own updates (ADR-0076), and a gateway's for its owner (ADR-0077; brief T12, "Server").
   { id: "about", name: "About", group: "Vale", icon: "information", description: "This version of Vale, and its updates.", keywords: ["settings", "version", "updates", "server", "gateway", "image"], when: (c) => !c.member && (c.desktopApp || c.remote), body: AboutBody },
 ]

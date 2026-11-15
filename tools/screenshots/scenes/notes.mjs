@@ -1,5 +1,5 @@
 // Notes: the list, cards and map, a note and its menu, folders, import, sync and the quick note.
-import { area, button, ensure, formatBar, formLayer, formPrimary, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, switcherLayer, toastGone } from "./helpers.mjs"
+import { area, button, ensure, formatBar, formLayer, formPrimary, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, settingsButton, switcherLayer, toastGone } from "./helpers.mjs"
 import { conversation } from "./mail.mjs"
 
 /** The notes list: its sections of rows, or of cards (ADR-0105). */
@@ -90,12 +90,13 @@ const SHARED_LINK = linkOf({ id: "k3Jd9QpL2xVr8TfA", mode: "edit", token: "s1.de
 const THREAD_LINK = linkOf({ id: "w7Hn2BcQ5zYe1UgM", mode: "edit", token: "s1.demo-token", title: "Venue options", from: "Priya Raman", kind: "thread" })
 /** Is the note open: its pane on a desktop, its pushed screen on a phone. */
 const noteOpen = async (page) => (await page.getByRole("article", { name: "Note" }).count()) > 0
-/** An item from the Notes area's More menu. */
-export const notesMenu = async (app, item) => {
-  await area(app, "Notes")
-  await press(app, button(app.page, "More"))
-  await press(app, app.page.getByRole("menuitem", { name: item }))
+/** Settings › Notes (brief T5; ADR-0111), where the Notes More menu's set-up went: from the sidebar's or the phone's way into Settings. */
+export const notesSettings = async (app) => {
+  await press(app, settingsButton(app.page))
+  await press(app, app.page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Notes", exact: true }))
 }
+/** Is Settings › Notes the open section: its column, headed by its title. */
+const notesSettingsOpen = async (page) => (await page.getByRole("region", { name: "Notes", exact: true }).count()) > 0 && (await page.getByRole("heading", { name: "Notes", level: 2, exact: true }).isVisible())
 
 /** The sketch layer (brief N3), by its title. */
 const sketchLayer = (page) => page.getByRole("dialog", { name: /^(Sketch|Edit sketch)$/ })
@@ -329,7 +330,8 @@ export const scenes = [
     },
   },
   {
-    // The relay's error (brief N1; channel 4): one critical banner over Notes, and OPEN SYNC opens the set-up.
+    // The relay's error (brief N1; channel 4): one critical banner over Notes, and OPEN SYNC opens Settings › Notes
+    // (openSyncSetup(), ADR-0111), whose sync row gives the relay's words. The picture is Notes again, with its banner.
     name: "notes-relay-error",
     scenario: "relay-error",
     run: async (app) => {
@@ -339,9 +341,10 @@ export const scenes = [
       ensure(await banner.isVisible(), "no banner says the notes didn't sync")
       ensure((await banner.textContent()).includes("The relay refused the token"), "the banner does not give the relay's words")
       await press(app, banner.getByRole("button", { name: "Open sync" }))
-      ensure(await page.getByRole("dialog", { name: "Sync notes between devices" }).isVisible(), "Open sync did not open the sync set-up")
-      await page.keyboard.press("Escape")
-      await app.settle()
+      ensure(await notesSettingsOpen(page), "Open sync did not open Settings › Notes")
+      const row = page.getByRole("group", { name: "Sync between devices", exact: true })
+      ensure(/Not syncing/.test(await row.textContent()) && /The relay refused the token/.test(await row.textContent()), "the sync row does not give the relay's words")
+      await area(app, "Notes")
       await page.evaluate(() => document.activeElement?.blur())
     },
   },
@@ -371,43 +374,36 @@ export const scenes = [
     },
   },
   {
-    // The More menu keeps the set-up until Settings › Notes takes it (brief T5): every item still works.
+    // The Notes More menu's set-up moved to Settings › Notes (brief T5; ADR-0111): the menu is gone from the page
+    // head, and every item it held works from the section. The two switches turn and turn back, so the demo is as it was.
     name: "notes-more",
     run: async (app) => {
       const { page } = app
-      const menu = async () => {
-        await area(app, "Notes")
-        await press(app, button(page, "More"))
-      }
-      const item = (name) => page.getByRole("menuitem", { name })
-      const check = (name) => page.getByRole("menuitemcheckbox", { name })
-      await menu()
-      await press(app, item("Import notes…"))
-      ensure(await page.getByRole("dialog", { name: "Import notes" }).isVisible(), "Import notes… opened nothing")
+      await area(app, "Notes")
+      ensure(!(await button(page, "More").count()), "the Notes page head still has a More menu")
+      await notesSettings(app)
+      const row = (name) => page.getByRole("group", { name, exact: true })
+      await press(app, row("Import").getByRole("button", { name: "Import", exact: true }))
+      ensure(await page.getByRole("dialog", { name: /Import notes/ }).isVisible(), "IMPORT opened nothing")
       await page.keyboard.press("Escape")
       await app.settle()
-      await menu()
-      await press(app, item("Export all as Markdown"))
-      ensure(await page.locator("[data-sonner-toast]").filter({ hasText: "Notes saved to" }).count(), "Export all as Markdown saved nothing")
+      await press(app, row("Export").getByRole("button", { name: "Export", exact: true }))
+      ensure(await page.locator("[data-sonner-toast]").filter({ hasText: "Saved notes to" }).count(), "EXPORT saved nothing")
       await toastGone(app)
-      await menu()
-      await press(app, item("Sync between devices…"))
-      ensure(await page.getByRole("dialog", { name: "Sync notes between devices" }).isVisible(), "Sync between devices… opened nothing")
+      await press(app, row("Sync between devices").getByRole("button", { name: "Set up", exact: true }))
+      ensure(await page.getByRole("dialog", { name: /Sync between devices/ }).isVisible(), "SET UP opened nothing")
       await page.keyboard.press("Escape")
       await app.settle()
-      // The two switches keep the menu open: each turns, says so, and turns back, so the demo is as it was.
       for (const name of ["Move checked items down", "Find text in images"]) {
-        await menu()
-        const before = await check(name).getAttribute("aria-checked")
-        await press(app, check(name))
-        const after = await check(name).getAttribute("aria-checked")
-        ensure(before !== after, `${name} did not change`)
-        await press(app, check(name))
-        ensure((await check(name).getAttribute("aria-checked")) === before, `${name} did not turn back`)
-        await page.keyboard.press("Escape")
-        await app.settle()
+        const on = page.getByRole("switch", { name })
+        const before = await on.isChecked()
+        await press(app, on)
+        ensure((await on.isChecked()) !== before, `${name} did not change`)
+        await press(app, on)
+        ensure((await on.isChecked()) === before, `${name} did not turn back`)
       }
-      await menu()
+      ensure(!(await page.locator("[data-sonner-toast]").count()), "a switch raised a toast")
+      await page.mouse.move(0, 0)
     },
   },
   {
@@ -838,7 +834,7 @@ export const scenes = [
     },
   },
   {
-    // No notes relay (brief N6): sharing works through it; OPEN SYNC opens the sync set-up.
+    // No notes relay (brief N6): sharing works through it; OPEN SYNC opens Settings › Notes, where sync is set up (ADR-0111).
     name: "notes-share-no-relay",
     run: async (app) => {
       const { page } = app
@@ -847,7 +843,8 @@ export const scenes = [
       ensure((await form.innerText()).includes("Sharing works through your notes relay, the same one that syncs your devices."), "the form does not say sharing needs the relay")
       await press(app, form.getByRole("button", { name: "Open sync", exact: true }))
       ensure(!(await shareForm(page).count()), "the share form stayed open under the sync set-up")
-      ensure(await page.getByRole("dialog").count(), "OPEN SYNC opened nothing")
+      ensure(await notesSettingsOpen(page), "OPEN SYNC did not open Settings › Notes")
+      ensure(await page.getByRole("group", { name: "Sync between devices", exact: true }).getByRole("button", { name: "Set up", exact: true }).isVisible(), "Settings › Notes has no SET UP")
     },
   },
   {
@@ -1320,8 +1317,46 @@ export const scenes = [
       await write(await open())
     },
   },
-  { name: "notes-import", run: (app) => notesMenu(app, "Import notes…") },
-  { name: "notes-sync", run: (app) => notesMenu(app, "Sync between devices…") },
+  {
+    // Import notes (brief T5): from the empty list's IMPORT, Settings › Notes with its form in the form layer: the three
+    // sources, each with its line; CHOOSE A FOLDER… the primary, CHOOSE FILES… beside it, and the caption.
+    name: "notes-import",
+    scenario: "notes-empty",
+    sean: { kind: "undrawn", area: "settings", screen: "import" },
+    run: async (app) => {
+      const { page } = app
+      await area(app, "Notes")
+      await press(app, page.getByRole("button", { name: "Import", exact: true }))
+      let form = page.getByRole("dialog", { name: /Import notes/ })
+      ensure(await form.isVisible(), "IMPORT did not open the import form")
+      // Under the form (which hides the page from screen readers while it is open): Settings › Notes.
+      await page.keyboard.press("Escape")
+      await app.settle()
+      ensure(await notesSettingsOpen(page), "IMPORT did not open Settings › Notes")
+      await press(app, page.getByRole("group", { name: "Import", exact: true }).getByRole("button", { name: "Import", exact: true }))
+      form = page.getByRole("dialog", { name: /Import notes/ })
+      for (const name of ["Apple Notes", "Google Keep", "Obsidian, Bear or any Markdown"]) ensure(await form.getByRole("button", { name: new RegExp(`^${name}`) }).isVisible(), `the import form has no ${name}`)
+      ensure(await formPrimary(form, "Choose a folder…").isVisible(), "the import form has no CHOOSE A FOLDER…")
+      ensure(await form.getByRole("button", { name: "Choose files…", exact: true }).isVisible(), "the import form has no CHOOSE FILES…")
+      ensure(await form.getByText("Notes are copied in. Nothing changes where they came from.").isVisible(), "the import form has no caption")
+      await page.mouse.move(0, 0)
+      await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
+    },
+  },
+  {
+    // Set up sync (brief T5), from Settings › Notes: RELAY ADDRESS, ACCESS TOKEN, TURN ON SYNC; no key field for a relay not known to be encrypted.
+    name: "notes-sync",
+    run: async (app) => {
+      const { page } = app
+      await notesSettings(app)
+      await press(app, page.getByRole("group", { name: "Sync between devices", exact: true }).getByRole("button", { name: "Set up", exact: true }))
+      const form = page.getByRole("dialog", { name: /Sync between devices/ })
+      ensure(await form.getByText("Any Hocuspocus server works.").isVisible(), "RELAY ADDRESS has no helper")
+      ensure(await form.getByText("Kept in your system keychain.").isVisible(), "ACCESS TOKEN has no helper")
+      ensure(!(await form.getByText("Encryption key").count()), "the form asks for a key the relay was not known to need")
+      ensure(await formPrimary(form, "Turn on sync").isVisible(), "the form has no TURN ON SYNC")
+    },
+  },
   {
     // Quick Note from a conversation (brief N7): QUICK NOTE // the conversation with UNLINK; DONE saves it, linked,
     // with "Saved to Notes" and OPEN; opened again there, the note is under HERE ALREADY.
