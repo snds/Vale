@@ -97,3 +97,36 @@ export function rangeLabel(start: number, end: number, allDay: boolean) {
   if (sameDay(a, b) || end === start) return end === start ? fmt.time(start) : `${fmt.time(start)} – ${fmt.time(end)}`
   return `${fmt.monthDay(a)} ${fmt.time(start)} – ${fmt.monthDay(b)} ${fmt.time(end)}`
 }
+
+const two = (n: number) => String(n).padStart(2, "0")
+
+/** A time by the clock, as the frames write one: `16:30`. */
+export const clock = (s: number) => {
+  const d = fromSecs(s)
+  return `${two(d.getHours())}:${two(d.getMinutes())}`
+}
+
+/** A day as the frames write one in a mono line: `Wed 11.18` (the line sets the capitals). */
+export const folio = (d: Date) => `${d.toLocaleDateString(undefined, { weekday: "short" })} ${two(d.getMonth() + 1)}.${two(d.getDate())}`
+
+/** The month and day as Mobile / 08 writes them beside the weekday: `11.12`. */
+export const monthDay = (d: Date) => `${two(d.getMonth() + 1)}.${two(d.getDate())}`
+
+/** A range for the status line: `Nov 09 – Nov 15` (the line sets the capitals). */
+export function rangeFact(from: Date, last: Date) {
+  const one = (d: Date) => `${d.toLocaleDateString(undefined, { month: "short" })} ${two(d.getDate())}`
+  return sameDay(from, last) ? one(from) : `${one(from)} – ${one(last)}`
+}
+
+/** The ISO week of the week that holds `d`, counted by its Thursday, whichever day the locale starts on: "Week 46". */
+export function weekNumber(weekStart: Date) {
+  const thursday = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)).find((d) => d.getDay() === 4)!
+  // Week 1 is the week of the year's first Thursday.
+  const jan1 = new Date(thursday.getFullYear(), 0, 1)
+  const firstThursday = addDays(jan1, (4 - jan1.getDay() + 7) % 7)
+  return 1 + Math.round((startOfDay(thursday).getTime() - startOfDay(firstThursday).getTime()) / (7 * DAY * 1000))
+}
+
+/** The occurrences that touch a day: timed ones that overlap it, all-day ones that cover it, and a zero-length one on it. */
+export const eventsOn = <T extends { start: number; end: number }>(list: T[], d: Date) =>
+  list.filter((o) => o.start < secs(d) + DAY && (o.end > secs(d) || (o.end === o.start && o.start >= secs(d))))

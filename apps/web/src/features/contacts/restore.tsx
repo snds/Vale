@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
-import { useState } from "react"
+import { useId, useState } from "react"
 
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogAction, DialogActions, FilterChip, FilterChipGroup, toast } from "@unicron/ui"
+import { AdaptiveDialog, AdaptiveMenu, AdaptiveMenuRadioGroup, AdaptiveMenuRadioItem, Button, FieldRow, FieldRowAction, Icon, SectionHeader, Skeleton, toast, useAppFrame } from "@unicron/ui"
 import { getCoreClient } from "@/core/client"
 import { usePimAction } from "@/core/queries"
 
@@ -14,92 +14,134 @@ const POINTS = [
   { label: "A week ago", secs: 7 * 86_400 },
   { label: "30 days ago", secs: 30 * 86_400 },
 ] as const
+/** The brief's pick (P5): RESTORE TO starts at Yesterday. */
+const FIRST = 2
 
-/** A short list of names: "Ana, Sam, and 3 more". */
+/** A short list of names: "Ana, Sam and 3 more". */
 const few = (names: string[]) => {
-  if (names.length <= 3) return names.length === 3 ? `${names[0]}, ${names[1]}, and ${names[2]}` : names.join(" and ")
-  return `${names.slice(0, 2).join(", ")}, and ${names.length - 2} more`
+  if (names.length <= 2) return names.join(" and ")
+  if (names.length === 3) return `${names[0]}, ${names[1]} and ${names[2]}`
+  return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`
 }
+
+const NOTHING = "No contacts changed since then."
 
 /**
- * Undo every contact change since a point in time, from this device or a
- * sync (Google Contacts' "Undo changes"). Shows what it will do first; the
- * restore itself can be undone.
+ * Restore contacts (brief P5): every contact back the way it was at a point
+ * in time, undoing edits, deletes and additions from here or from a sync
+ * (Google Contacts' "Undo changes"). A form-size layer (a sheet on a phone),
+ * opened by its intent (`openRestoreContacts`). It shows what it will do,
+ * by name, first; the restore itself can be undone.
  */
-export function RestoreContactsDialog({ openedAt, onClose }: { openedAt: number | null; onClose: () => void }) {
-  return (
-    <Dialog open={openedAt !== null} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent size="md">{openedAt !== null && <RestoreForm openedAt={openedAt} onDone={onClose} />}</DialogContent>
-    </Dialog>
-  )
+export function RestoreContactsLayer({ openedAt, onClose }: { openedAt: number | null; onClose: () => void }) {
+  const [shown, setShown] = useState(openedAt)
+  // The last moment stays while the layer closes, so its words don't blank out as it fades.
+  if (openedAt !== null && openedAt !== shown) setShown(openedAt)
+  const at = openedAt ?? shown
+  return at === null ? null : <RestoreForm key={at} open={openedAt !== null} openedAt={at} onDone={onClose} />
 }
 
-/** `openedAt`: Unix seconds when the dialog opened, so "an hour ago" means an hour before that. */
-function RestoreForm({ openedAt, onDone }: { openedAt: number; onDone: () => void }) {
-  const [pick, setPick] = useState<number>(1)
+/** `openedAt`: Unix seconds when it opened, so "an hour ago" means an hour before that. */
+function RestoreForm({ open, openedAt, onDone }: { open: boolean; openedAt: number; onDone: () => void }) {
+  const phone = useAppFrame().phone
+  const [pick, setPick] = useState<number>(FIRST)
   // Fixed when chosen, so the preview and the restore agree.
-  const [since, setSince] = useState(openedAt - POINTS[1].secs)
-  const choose = (i: number) => (setPick(i), setSince(openedAt - POINTS[i]!.secs))
+  const since = openedAt - POINTS[pick]!.secs
   const { data: plan, isPending } = useQuery({
     queryKey: ["pim", "restore-preview", since],
     queryFn: async () => (await getCoreClient()).contactsRestorePreview({ since }),
   })
   const restore = usePimAction((c, point: { since?: number; after?: number }) => c.restoreContacts(point))
   const total = plan ? plan.added.length + plan.edited.length + plan.deleted.length : 0
+  const when = POINTS[pick]!.label
 
   const run = async () => {
     try {
       const done = await restore.mutateAsync({ since })
       onDone()
-      toast(`Restored ${done.changed} ${done.changed === 1 ? "contact" : "contacts"} to ${POINTS[pick]!.label.toLowerCase()}`, {
-        // The dialog is gone by now; the core's pim:changed refreshes the lists.
+      toast(`Restored ${done.changed} ${done.changed === 1 ? "contact" : "contacts"} to ${when.toLowerCase()}`, {
+        // The layer is gone by now; the core's pim:changed refreshes the lists.
         action: { label: "Undo", onClick: () => void getCoreClient().then((c) => c.restoreContacts({ after: done.mark })).catch(fail) },
-        duration: 8000,
       })
     } catch (e) {
       fail(e)
     }
   }
 
+  // Nothing changed: the line under WHAT CHANGES is RESTORE's visible reason (decisions §14).
+  const nothing = !isPending && !!plan && total === 0
+  const reasonId = useId()
+  const rows = [
+    { label: "Puts back", names: plan?.edited ?? [] },
+    { label: "Brings back", names: plan?.deleted ?? [] },
+    { label: "Removes", names: plan?.added ?? [], description: "They go to Recently deleted." },
+  ].filter((r) => r.names.length > 0)
+  const size = phone ? "stacked" : "default"
+
   return (
-    <div className="flex flex-col gap-4">
-      <DialogHeader>
-        <DialogTitle>Restore contacts</DialogTitle>
-        <DialogDescription>Put every contact back the way it was, undoing edits, deletes, and additions since then, from here or from a sync.</DialogDescription>
-      </DialogHeader>
-      <FilterChipGroup label="Restore to" value={String(pick)} onValueChange={(i) => choose(Number(i))}>
-        {POINTS.map((p, i) => (
-          <FilterChip key={p.label} value={String(i)}>
-            {p.label}
-          </FilterChip>
-        ))}
-      </FilterChipGroup>
-      <div role="status" aria-label="What changes" className="min-h-16 rounded-xl bg-muted/50 px-3 py-2.5 text-sm">
-        {isPending || !plan ? (
-          <span className="text-muted-foreground">Checking…</span>
-        ) : total === 0 ? (
-          <span className="text-muted-foreground">No contacts changed since then.</span>
-        ) : (
-          <ul className="flex flex-col gap-1">
-            {plan.edited.length > 0 && <li>Puts back {few(plan.edited)} as they were</li>}
-            {plan.deleted.length > 0 && <li>Brings back {few(plan.deleted)}</li>}
-            {plan.added.length > 0 && <li>Removes {few(plan.added)}, added since (they go to Recently deleted)</li>}
-          </ul>
-        )}
-        {plan && plan.readOnly > 0 && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            {plan.readOnly} {plan.readOnly === 1 ? "change is" : "changes are"} in an address book you can't edit, so {plan.readOnly === 1 ? "it stays" : "they stay"}.
-          </p>
-        )}
+    <AdaptiveDialog
+      open={open}
+      onOpenChange={(o) => !o && onDone()}
+      size="form"
+      overline="Contacts"
+      title="Restore contacts"
+      description="Puts every contact back the way it was then."
+      footer={
+        <>
+          <Button variant="secondary" onClick={onDone}>
+            Cancel
+          </Button>
+          <Button disabled={total === 0 || isPending} focusableWhenDisabled aria-describedby={nothing ? reasonId : undefined} loading={restore.isPending} onClick={() => void run()}>
+            Restore
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-8">
+        <FieldRow
+          size={size}
+          label="Restore to"
+          action={
+            <AdaptiveMenu title="Restore to" align="end" trigger={<FieldRowAction>Change</FieldRowAction>}>
+              <AdaptiveMenuRadioGroup value={String(pick)} onValueChange={(v) => setPick(Number(v))}>
+                {POINTS.map((p, i) => (
+                  <AdaptiveMenuRadioItem key={p.label} value={String(i)}>
+                    {p.label}
+                  </AdaptiveMenuRadioItem>
+                ))}
+              </AdaptiveMenuRadioGroup>
+            </AdaptiveMenu>
+          }
+        >
+          {when}
+        </FieldRow>
+        <section className="flex flex-col" aria-label="What changes" aria-busy={isPending}>
+          <SectionHeader title="What changes" level={3} />
+          {isPending ? (
+            <div aria-hidden data-slot="restore-checking">
+              <Skeleton variant="row" />
+              <Skeleton variant="row" />
+              <Skeleton variant="row" />
+            </div>
+          ) : total === 0 ? (
+            <p id={reasonId} className="pt-4 type-body text-muted-foreground">
+              {NOTHING}
+            </p>
+          ) : (
+            rows.map((r) => (
+              <FieldRow key={r.label} size={size} label={r.label} description={r.description}>
+                {few(r.names)}
+              </FieldRow>
+            ))
+          )}
+          {plan && plan.readOnly > 0 && (
+            <p className="flex items-center gap-2 pt-4 type-caption text-muted-foreground">
+              <Icon name="locked" size="sm" aria-hidden />
+              {plan.readOnly} {plan.readOnly === 1 ? "change is" : "changes are"} in an address book you can't edit, so {plan.readOnly === 1 ? "it stays as it is" : "they stay as they are"}.
+            </p>
+          )}
+        </section>
       </div>
-      <DialogActions>
-        <DialogAction kind="cancel" onClick={onDone}>
-          Cancel
-        </DialogAction>
-        <DialogAction disabled={total === 0 || restore.isPending} onClick={() => void run()}>
-          Restore {total > 0 ? total : ""}
-        </DialogAction>
-      </DialogActions>
-    </div>
+    </AdaptiveDialog>
   )
 }

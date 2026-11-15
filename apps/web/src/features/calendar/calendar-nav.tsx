@@ -1,6 +1,6 @@
 import { useNavPicked } from "@/app/places"
 import { useUi } from "@/app/ui-store"
-import { IconButton, NavItem, NavSection, Skeleton } from "@unicron/ui"
+import { IconButton, NavItem, NavSection, SectionHeader, Skeleton, ToggleRow, useAppFrame } from "@unicron/ui"
 import { useAccounts, useCollections, usePimAction } from "@/core/queries"
 import type { Collection } from "@/core/types"
 
@@ -8,6 +8,7 @@ import { calendarSwatches } from "@/lib/swatches"
 import { openAddCalendars } from "./open-add-calendars"
 import { useCalendars } from "./use-calendars"
 import { openSaveSet, useSets } from "./use-sets"
+import { setCalendarHours, useCalendarViewPrefs } from "./view-prefs"
 
 /**
  * Calendar's second level (ADR-0084; brief X1): the calendars to show, one
@@ -15,6 +16,8 @@ import { openSaveSet, useSets } from "./use-sets"
  * and the two tools, Tasks and Booking links, which are places. `standalone`
  * (the page head's sheet and popover, where APPS is not beside it) adds the
  * calendar itself as the first place, so there is a row to return by.
+ * On a phone's sheet a last group, MORE, holds the Hours switch (brief C1).
+ * Quick add left the list for the event form's title (ADR-0099; brief C4, Q5).
  */
 export function CalendarNav({ standalone = false }: { standalone?: boolean }) {
   const calendars = useCalendars()
@@ -31,6 +34,10 @@ export function CalendarNav({ standalone = false }: { standalone?: boolean }) {
   // Added holidays and moon phases get their own group, after the rest.
   const groupOf = (c: Collection) => (c.id.startsWith("interesting:") ? "interesting" : c.accountId)
   const groups = [...new Set(all.map(groupOf))].sort((a, b) => Number(a === "interesting") - Number(b === "interesting"))
+  // An account whose calendars did not sync: its rows say so (brief C5). NavSection has no critical tone of its own.
+  const failing = new Set(accounts.filter((a) => a.davError).map((a) => a.id))
+  const hours = useCalendarViewPrefs().hours
+  const phoneSheet = useAppFrame().phone && standalone
   const name = (id: string | null) => (id === "interesting" ? "Holidays and more" : id ? (accounts.find((a) => a.id === id)?.displayName ?? "Account") : "On this device")
   const add = (
     <IconButton
@@ -51,7 +58,13 @@ export function CalendarNav({ standalone = false }: { standalone?: boolean }) {
     <>
       {groups.length === 0 && (
         <NavSection title="Calendars" action={add} aria-busy={isPending || undefined}>
-          {isPending && [0, 1, 2].map((i) => <Skeleton key={i} className="h-9" />)}
+          {/* Sized by a plain box: the library owns the bar's look (brief X1: three skeleton rows). */}
+          {isPending &&
+            [0, 1, 2].map((i) => (
+              <div key={i} className="grid h-9">
+                <Skeleton />
+              </div>
+            ))}
         </NavSection>
       )}
       {groups.map((g, i) => (
@@ -67,6 +80,8 @@ export function CalendarNav({ standalone = false }: { standalone?: boolean }) {
                 // Toggling a calendar keeps the list open: it is a filter, and more than one may change.
                 onCheckedChange={(on) => toggle.mutate({ id: c.id, hidden: !on })}
                 description={c.writable ? undefined : "Read-only"}
+                tone={g && failing.has(g) ? "critical" : undefined}
+                toneLabel={g && failing.has(g) ? "didn't sync" : undefined}
               />
             ))}
         </NavSection>
@@ -78,8 +93,10 @@ export function CalendarNav({ standalone = false }: { standalone?: boolean }) {
               key={s.id}
               label={s.name}
               checked={active === s.id}
-              onCheckedChange={() => apply(s.id)}
-              action={<IconButton label={`Delete set ${s.name}`} icon="close" size="icon-xs" onClick={() => remove(s.id)} />}
+              // Picking a set shows exactly its calendars, and says so: "Showing Work" (brief C5).
+              onCheckedChange={() => apply(s)}
+              // Deleting it can be taken back: the toast's UNDO saves it again (brief X6).
+              action={<IconButton label={`Delete set ${s.name}`} icon="close" size="icon-xs" onClick={() => remove(s)} />}
             />
           ))}
           {sets.length === 0 && <SaveAsSet onPick={picked} />}
@@ -91,6 +108,13 @@ export function CalendarNav({ standalone = false }: { standalone?: boolean }) {
         <NavItem label="Tasks" icon="task" current={!settings && place === "tasks"} onClick={() => go("tasks")} />
         <NavItem label="Booking links" icon="link" current={!settings && place === "booking"} onClick={() => go("booking")} />
       </NavSection>
+      {phoneSheet ? (
+        <section className="flex flex-col gap-4" aria-label="More">
+          <SectionHeader title="More" />
+          {/* Hours on a phone turns the Day into the time grid; the Week keeps its day sections (brief C1). */}
+          <ToggleRow label="Hours" description="The Day as a grid of hours." checked={hours} onCheckedChange={setCalendarHours} />
+        </section>
+      ) : null}
     </>
   )
 }

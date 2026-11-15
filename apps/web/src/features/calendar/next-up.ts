@@ -22,3 +22,6 @@ export function whenLabel(o: Occurrence, at: number) {
   const [h, m] = [Math.floor(mins / 60), mins % 60]
   return h === 0 ? `in ${m} min` : m === 0 ? `in ${h} h` : `in ${h} h ${m} min`
 }
+
+/** The line a card shows for the next event (brief C1): `Next // in 1 h 18 min`, or `Now` while it is on. */
+export const nextLine = (o: Occurrence, at: number) => (o.start <= at ? "Now" : `Next // ${whenLabel(o, at)}`)

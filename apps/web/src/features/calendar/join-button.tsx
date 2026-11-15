@@ -1,13 +1,11 @@
 import { Icon, buttonVariants } from "@unicron/ui"
-import { useCore, useMeetingPrefs } from "@/core/queries"
 import { cn } from "@/lib/utils"
 
-import { meetingService } from "./meeting"
+import { useJoin } from "./meeting"
 
 /**
  * Joins the event's call (ADR-0030): in Zoom's or Teams' app when there's a
- * link for it and you haven't chosen the browser, else on the web. The
- * desktop app hands the link to the system, which knows which app takes it.
+ * link for it and you haven't chosen the browser, else on the web.
  */
 export function JoinButton({
   url,
@@ -26,34 +24,28 @@ export function JoinButton({
   long?: boolean
   className?: string
 }) {
-  const { data: prefs } = useMeetingPrefs()
-  const { data: core } = useCore()
-  const inApp = !!appUrl && (prefs?.openInApps ?? true)
-  const href = inApp ? appUrl! : url
-  const service = meetingService(url)
-  // The desktop (not a gateway's browser) opens links through the system.
-  const native = core?.kind === "native" && !core.remote
+  const join = useJoin(url, appUrl)
   // A real link (not a button rendered as one), so it opens, copies, and reads as a link.
   return (
     <a
-      href={href}
+      href={join.href}
       // App links open the app; a new tab for them would stay blank.
-      target={inApp ? undefined : "_blank"}
+      target={join.inApp ? undefined : "_blank"}
       rel="noreferrer"
-      aria-label={long ? undefined : `Join ${service}`}
-      title={inApp ? `Opens the ${service} app` : undefined}
-      data-opens={inApp ? "app" : "browser"}
+      aria-label={long ? undefined : `Join ${join.service}`}
+      title={join.inApp ? `Opens the ${join.service} app` : undefined}
+      data-opens={join.inApp ? "app" : "browser"}
       onClick={(e) => {
         // Keep the click from also selecting the row or card it sits in.
         e.stopPropagation()
-        if (native && core) {
+        if (join.native) {
           e.preventDefault()
-          void core.openMeeting(href)
+          join.open()
         }
       }}
       className={cn(buttonVariants({ size, variant }), className)}
     >
-      <Icon name="video" data-icon="inline-start" /> {long ? `Join ${service}` : "Join"}
+      <Icon name="video" data-icon="inline-start" /> {long ? `Join ${join.service}` : "Join"}
     </a>
   )
 }
