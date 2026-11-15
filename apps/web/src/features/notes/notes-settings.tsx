@@ -1,6 +1,6 @@
 import { useState } from "react"
 
-import { FieldRow, FieldRowAction, ToggleRow, toast } from "@unicron/ui"
+import { FieldRow, FieldRowAction, FieldRowValue, ToggleRow, toast } from "@unicron/ui"
 import { FormLayer } from "@/components/editor-frame"
 import { getCoreClient } from "@/core/client"
 import { useNoteAction, useNotesPrefs, useNotesRelay } from "@/core/queries"
@@ -90,10 +90,11 @@ export function NotesSettings() {
 
       <SettingBlock title="Moving">
         <FieldRow size={size} label="Import" action={<FieldRowAction onClick={() => openNotesForm("import")}>Import</FieldRowAction>}>
-          Apple Notes, Google Keep, Markdown
+          {/* A list of names: it wraps between words on a phone rather than being cut in the middle. */}
+          <FieldRowValue truncate="wrap">Apple Notes, Google Keep, Markdown</FieldRowValue>
         </FieldRow>
         <FieldRow size={size} label="Export" action={<FieldRowAction loading={exporting} onClick={() => void exportAll()}>Export</FieldRowAction>}>
-          All notes as Markdown
+          <FieldRowValue truncate="wrap">All notes as Markdown</FieldRowValue>
         </FieldRow>
       </SettingBlock>
 
