@@ -47,6 +47,7 @@ In Mail a failed send is the Mail Banner (with EDIT), the NOT SENT row and the O
 - Search: a note's row says when it was edited as the Notes list does (`04:16`, `WED`), in the mono meta.
 - The Notes block in a conversation, a person, an event and the sender panel is a `SectionHeader` with its count and actions, compact `ListRow`s, and "NOTES // 00" in its heading when empty.
 - Removed, with no readers: `components/list-row.tsx` (`EntryRow`), `features/notes/shared-note-card.tsx` (`SharedNoteCards`) with `SharedPreview`, and `PRIMARY` in `features/mail/vocabulary.ts`. Raw elements **4 → 3** in `.dsa/baseline.json`.
+- Every create flow from anywhere (the command menu's CREATE group: New message, New event, New contact, New note) is one move away from a form in the pane: its whole body runs through `leaveThen`, so the form opens, or the note is made, only after DISCARD. Before, the section change waited for the question but the form opened at once, over it. `contacts-leave-guard` presses ⌘K › New message, New event and New note with typed changes.
 
 ### The browser test gate
 

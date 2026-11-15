@@ -259,6 +259,18 @@ export const scenes = [
         await menu.getByRole("combobox").fill("new contact")
         await press(app, menu.getByRole("option", { name: "New contact", exact: true }))
         await keep("⌘K › New contact")
+        // Another kind's new form (or note) is a move away too: it opens only after DISCARD, never over the question.
+        for (const [words, title] of [["new message", "New message"], ["new event", "New event"], ["new note", "New note"]]) {
+          await page.keyboard.press("Control+KeyK")
+          await app.settle()
+          await menu.getByRole("combobox").fill(words)
+          // Its name can carry its key (⌘N), so it is matched by its first words.
+          await press(app, menu.getByRole("option", { name: new RegExp(`^${title}`) }))
+          ensure(!(await page.getByRole("dialog", { name: title, exact: true }).count()), `⌘K › ${title} opened its form before the question was answered`)
+          await keep(`⌘K › ${title}`)
+          ensure(!(await page.getByRole("dialog", { name: title, exact: true }).count()), `KEEP EDITING still opened ${title}`)
+          ensure((await headTitle(page)) === "People", `KEEP EDITING after ⌘K › ${title} still left Contacts`)
+        }
         await field(contactForm(app), "Name").press("Escape")
         await app.settle()
         await keep("Esc")

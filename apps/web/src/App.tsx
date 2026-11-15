@@ -7,6 +7,7 @@ import { useUi } from "@/app/ui-store"
 import { type VerticalId } from "@/app/verticals"
 import { Toaster, TooltipProvider } from "@unicron/ui"
 import { LeaveQuestion } from "@/components/editor-frame"
+import { leaveThen } from "@/lib/leave-guard"
 import { type AppJump, getCoreClient, isMember } from "@/core/client"
 import { queryClient, useCoreEvents } from "@/core/queries"
 import { APP_JUMP_KEY } from "@/lib/app-jump"
@@ -69,11 +70,13 @@ function Root() {
   }
   const View = VIEWS[active]
   // Each kind's create flow from anywhere: the command menu's CREATE group and quick create run the same ones.
+  // Each is one move away from a form in the pane (brief X6): the whole flow waits for DISCARD, so after
+  // KEEP EDITING no form opens over the pane and no note is made.
   const create = {
-    mail: () => (setActive("mail"), openComposer()),
-    calendar: () => (setActive("calendar"), openEventEditor()),
-    contacts: () => (setActive("contacts"), openContactEditor()),
-    notes: () => (setActive("notes"), newNote()),
+    mail: () => leaveThen(() => (setActive("mail"), openComposer())),
+    calendar: () => leaveThen(() => (setActive("calendar"), openEventEditor())),
+    contacts: () => leaveThen(() => (setActive("contacts"), openContactEditor())),
+    notes: () => leaveThen(() => (setActive("notes"), newNote())),
   }
 
   return (
