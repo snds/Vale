@@ -1,5 +1,5 @@
 // Settings (ADR-0104): the page on unicron's SettingsFrame, each section the demo shows, Accounts.
-import { area, button, ensure, press, settingsButton, sidebar } from "./helpers.mjs"
+import { area, button, ensure, formatBar, formPrimary, press, settingsButton, sidebar, toastGone } from "./helpers.mjs"
 
 /** The list of sections: the frame's own nav. */
 const sectionList = (page) => page.getByRole("navigation", { name: "Settings sections" })
@@ -18,6 +18,16 @@ const sectionShows = async (page, name) => (await page.getByRole("region", { nam
 
 /** The section list's names, in order. */
 const listed = (page) => sectionList(page).getByRole("button").evaluateAll((els) => els.map((el) => el.textContent.trim()))
+
+/** A group of the open section, by its overline (ADR-0110's SettingBlock). */
+const region = (page, name) => page.getByRole("region", { name, exact: true })
+
+/** A reload, as a browser that kept this tab's storage: the app starts again on what it saved. */
+const reload = async (app) => {
+  await app.page.reload()
+  await app.page.waitForFunction(() => !!document.getElementById("root")?.innerText.trim())
+  await app.settle()
+}
 
 /** The Manage screen of the account named `name`, from Settings › Accounts. */
 const manage = async (app, name) => {
@@ -185,12 +195,12 @@ export const scenes = [
     run: async (app) => {
       const { page } = app
       await settings(app, "Mail")
-      const quote = page.getByRole("switch", { name: "Include the message you're replying to" })
+      const quote = page.getByRole("switch", { name: "Quote the message" })
       ensure(await quote.isChecked(), "the quote switch does not start on")
       await press(app, quote)
     },
     assert: async ({ page }) => {
-      ensure(await page.getByRole("switch", { name: "Include the message you're replying to" }).isChecked(), "the switch did not return to on")
+      ensure(await page.getByRole("switch", { name: "Quote the message" }).isChecked(), "the switch did not return to on")
       const line = page.locator('[data-slot="save-failed"]')
       ensure((await line.count()) === 1, `${await line.count()} failure lines show, not one`)
       ensure(/read-only on this computer/.test(await line.innerText()), "the line does not give the server's words")
@@ -231,9 +241,242 @@ export const scenes = [
       ensure(await row.getByRole("button", { name: "Sign out", exact: true }).isVisible(), "the gateway's row has no SIGN OUT")
     },
   },
-  { name: "settings-signatures", run: (app) => settings(app, "Signatures and templates") },
-  { name: "settings-mail", run: (app) => settings(app, "Mail") },
-  { name: "settings-calendar", run: (app) => settings(app, "Calendar") },
+  {
+    // Signatures and templates (brief T3): a row per account with its signature's first line and EDIT;
+    // TEMPLATES with a count, NEW TEMPLATE, and a row per template.
+    name: "settings-signatures",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "signatures" },
+    run: (app) => settings(app, "Signatures and templates"),
+    assert: async ({ page }) => {
+      const signatures = region(page, "Signatures")
+      for (const name of ["Personal", "Work"]) {
+        const row = signatures.getByRole("group", { name, exact: true })
+        ensure(/No signature/.test(await row.textContent()), `${name}'s signature row does not say No signature`)
+        ensure(await row.getByRole("button", { name: "Edit", exact: true }).isVisible(), `${name}'s signature row has no EDIT`)
+      }
+      const templates = region(page, "Templates")
+      ensure(/01/.test(await templates.getByRole("heading").innerText()), "TEMPLATES does not count 01")
+      ensure(await templates.getByRole("button", { name: "New template", exact: true }).isVisible(), "TEMPLATES has no NEW TEMPLATE")
+      ensure(await templates.getByRole("button", { name: "Thanks, will reply soon", exact: true }).isVisible(), "the demo's template has no row")
+    },
+  },
+  {
+    // EDIT opens the form layer with the rich-text field and its format bar; SAVE keeps it, and the row
+    // shows its first line. Opened again, the form holds what was saved (the picture).
+    name: "settings-signature-edit",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "signature-edit" },
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Signatures and templates")
+      const row = () => region(page, "Signatures").getByRole("group", { name: "Personal", exact: true })
+      const open = async () => {
+        await press(app, row().getByRole("button", { name: "Edit", exact: true }))
+        return page.getByRole("dialog", { name: /Signature/ })
+      }
+      let form = await open()
+      ensure(/Personal/.test(await form.innerText()), "the signature form does not name the account")
+      const text = form.getByRole("textbox", { name: "Signature for me@personal.example" })
+      await text.click()
+      await page.keyboard.type("Robin Ash")
+      await page.keyboard.press("Enter")
+      await page.keyboard.type("Ash and Oak Studio · +1 503 555 0142")
+      await formatBar(app, form, ["Bold", "Italic", "Link", "Bulleted list", "Numbered list", "Quote", "Code"])
+      await press(app, formPrimary(form, "Save"))
+      await form.waitFor({ state: "detached" })
+      await app.settle()
+      ensure(/Robin Ash/.test(await row().textContent()), "the row does not show the signature's first line")
+      ensure(!/Studio/.test(await row().textContent()), "the row shows more than the first line")
+      form = await open()
+      ensure(/Ash and Oak Studio/.test(await form.innerText()), "the form does not hold the saved signature")
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // A template's form (brief T3): NAME, SUBJECT ("Fills an empty subject."), the text, SAVE TEMPLATE.
+    name: "settings-template-form",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "template-form" },
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Signatures and templates")
+      await press(app, region(page, "Templates").getByRole("button", { name: "New template", exact: true }))
+      const form = page.getByRole("dialog", { name: /New template/ })
+      ensure(await form.getByText("Fills an empty subject.").isVisible(), "SUBJECT has no helper")
+      ensure(await formPrimary(form, "Save template").isDisabled(), "SAVE TEMPLATE works without a name")
+      await form.getByRole("textbox", { name: "Name" }).fill("Invoice reminder")
+      await form.getByRole("textbox", { name: "Subject" }).fill("Invoice 0142 is due Friday")
+      await form.getByRole("textbox", { name: "Template text" }).click()
+      await page.keyboard.type("Hi, a quick note that invoice 0142 is due on Friday. Thanks for sorting it.")
+      ensure(await formPrimary(form, "Save template").isEnabled(), "SAVE TEMPLATE stays off with a name")
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // A template saved from its form shows in the list with its subject; its menu's DELETE raises
+    // "Deleted {name}" with UNDO, and UNDO brings it back (cross-app decisions §10).
+    name: "settings-template-delete",
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Signatures and templates")
+      const templates = region(page, "Templates")
+      await press(app, templates.getByRole("button", { name: "New template", exact: true }))
+      const form = page.getByRole("dialog", { name: /New template/ })
+      await form.getByRole("textbox", { name: "Name" }).fill("Invoice reminder")
+      await form.getByRole("textbox", { name: "Subject" }).fill("Invoice 0142 is due Friday")
+      await form.getByRole("textbox", { name: "Template text" }).click()
+      await page.keyboard.type("Hi, a quick note that invoice 0142 is due on Friday.")
+      await press(app, formPrimary(form, "Save template"))
+      await form.waitFor({ state: "detached" })
+      await app.settle()
+      const row = () => templates.getByRole("button", { name: "Invoice reminder", exact: true })
+      ensure(await row().isVisible(), "the saved template has no row")
+      ensure(/Invoice 0142 is due Friday/.test(await templates.innerText()), "the row does not show the subject")
+      ensure(/02/.test(await templates.getByRole("heading").innerText()), "TEMPLATES does not count 02")
+      await press(app, templates.getByRole("button", { name: /More actions.*Invoice reminder/ }))
+      await press(app, page.getByRole("menuitem", { name: "Delete", exact: true }))
+      ensure(!(await row().count()), "DELETE left the row")
+      const toast = page.locator("[data-sonner-toast]").filter({ hasText: "Deleted Invoice reminder" })
+      ensure(await toast.isVisible(), "no toast Deleted Invoice reminder")
+      await press(app, toast.getByRole("button", { name: "Undo", exact: true }))
+      await row().waitFor()
+      ensure(/Invoice 0142 is due Friday/.test(await templates.innerText()), "UNDO did not bring the template back with its subject")
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // Mail (brief T2): READING, REPLYING, SENDING, CHECKING and SCREENER. Undo send is a fact with no
+    // action (W4); there is no Notify for (W4) and no Summaries switch (W6).
+    name: "settings-mail",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "mail" },
+    run: (app) => settings(app, "Mail"),
+    assert: async ({ page }) => {
+      for (const group of ["Reading", "Replying", "Sending", "Checking", "Screener"]) ensure(await region(page, group).count(), `Mail has no ${group} group`)
+      const images = page.getByRole("radiogroup", { name: "Remote images" })
+      ensure((await images.getByRole("radio").count()) === 3 && (await images.getByRole("radio", { name: "Ask" }).isChecked()), "Remote images is not three choices on Ask")
+      ensure(await page.getByRole("radiogroup", { name: "Mark as read" }).getByRole("radio", { name: "On open" }).isChecked(), "Mark as read is not on On open")
+      const undo = region(page, "Sending").getByRole("group", { name: "Undo send" })
+      ensure(/10 seconds/.test(await undo.textContent()) && !(await undo.getByRole("button").count()), "Undo send is not the fact 10 seconds")
+      ensure(/Every 2 minutes/.test(await region(page, "Checking").textContent()), "Check for new mail does not read Every 2 minutes")
+      ensure(!(await page.getByText(/Notify for|Summaries/).count()), "Mail shows a row it has no setting for")
+      ensure(!(await page.locator("[data-sonner-toast]").count()), "Mail raised a toast")
+    },
+  },
+  {
+    // Each Mail row changes its real setting and the change outlives a reload (brief T2): the demo
+    // keeps what was saved in this tab, as the core keeps it on disk (scenario settings-kept).
+    name: "settings-mail-kept",
+    scenario: "settings-kept",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Mail")
+      await press(app, page.getByRole("radiogroup", { name: "Remote images" }).getByRole("radio", { name: "From contacts" }))
+      const mark = page.getByRole("radiogroup", { name: "Mark as read" })
+      await press(app, mark.getByRole("radio", { name: "After 3 s" }))
+      ensure(/A glance doesn't count\./.test(await page.getByRole("group", { name: "Mark as read" }).textContent()), "After 3 s does not show its line")
+      await press(app, page.getByRole("switch", { name: "Write below the quote" }))
+      await press(app, page.getByRole("switch", { name: "Ask for read receipts" }))
+      await press(app, region(page, "Checking").getByRole("button", { name: "Change", exact: true }))
+      await press(app, page.getByRole(app.phone ? "radio" : "menuitemradio", { name: "Every 15 minutes" }).last())
+      await press(app, page.getByRole("switch", { name: "Screener", exact: true }))
+      // Quote off turns Write below the quote off, with its reason.
+      await press(app, page.getByRole("switch", { name: "Quote the message" }))
+      ensure(await page.getByText("Needs Quote the message.").isVisible(), "Write below the quote does not say why it is off")
+      ensure(!(await page.locator("[data-sonner-toast]").count()), "a saved setting raised a toast")
+      await reload(app)
+      await settings(app, "Mail")
+    },
+    assert: async ({ page }) => {
+      ensure(await page.getByRole("radiogroup", { name: "Remote images" }).getByRole("radio", { name: "From contacts" }).isChecked(), "Remote images did not survive a reload")
+      ensure(await page.getByRole("radiogroup", { name: "Mark as read" }).getByRole("radio", { name: "After 3 s" }).isChecked(), "Mark as read did not survive a reload")
+      ensure(!(await page.getByRole("switch", { name: "Quote the message" }).isChecked()), "Quote the message did not survive a reload")
+      ensure(await page.getByRole("switch", { name: "Ask for read receipts" }).isChecked(), "Ask for read receipts did not survive a reload")
+      ensure(/Every 15 minutes/.test(await region(page, "Checking").textContent()), "Check for new mail did not survive a reload")
+      ensure(await page.getByRole("switch", { name: "Screener", exact: true }).isChecked(), "the Screener did not survive a reload")
+    },
+  },
+  {
+    // SENDERS YOU DECIDED (brief T2): a count; one or two tags; the trailing way back; a second decision
+    // in the row's menu. LET IN AGAIN takes the row away and the count follows.
+    name: "settings-senders-decided",
+    scenario: "senders-decided",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "senders" },
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Mail")
+      const list = region(page, "Senders you decided")
+      ensure(/04/.test(await list.getByRole("heading").innerText()), "SENDERS YOU DECIDED does not count 04")
+      const text = await list.innerText()
+      for (const tag of ["Screened out", "Blocked", "Always in People", "Always in Updates"]) ensure(new RegExp(tag, "i").test(text), `no sender is tagged ${tag}`)
+      ensure(await list.getByRole("button", { name: /^Unblock, / }).isVisible(), "the blocked sender has no UNBLOCK")
+      ensure(await list.getByRole("button", { name: /^Reset category, / }).isVisible(), "the sender in People has no RESET CATEGORY")
+      // The sender with two decisions: LET IN AGAIN, and RESET CATEGORY in its menu.
+      await press(app, list.getByRole("button", { name: /More actions.*Design Systems Weekly/ }))
+      ensure(await page.getByRole("menuitem", { name: "Reset category", exact: true }).isVisible(), "the second decision is not in the row's menu")
+      await page.keyboard.press("Escape")
+      await app.settle()
+      await press(app, list.getByRole("button", { name: /^Let in again, (Riley Growth|hi@growth\.example)/ }))
+      await page.waitForFunction(() => !document.querySelector('[aria-label="Senders you decided"]')?.textContent?.includes("hi@growth.example"))
+      await app.settle()
+      ensure(/03/.test(await list.getByRole("heading").innerText()), "the count did not follow LET IN AGAIN")
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // Calendar (brief T4): CALLS, MENU BAR (not on a gateway) and TIME, with WEEK STARTS a fact from the
+    // device's region (Sunday in en-US). No week numbers and no default alert (W4).
+    name: "settings-calendar",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "calendar" },
+    run: (app) => settings(app, "Calendar"),
+    assert: async ({ page }) => {
+      for (const group of ["Calls", "Menu bar", "Time"]) ensure(await region(page, group).count(), `Calendar has no ${group} group`)
+      ensure(await page.getByRole("switch", { name: "Calls open in their apps" }).isChecked(), "Calls open in their apps is not on")
+      ensure(await page.getByRole("switch", { name: "Show what's next" }).isChecked(), "Show what's next is not on")
+      const week = page.getByRole("group", { name: "Week starts" })
+      ensure(/Sunday/.test(await week.textContent()) && !(await week.getByRole("button").count()), "Week starts is not the fact Sunday")
+      ensure(!(await page.getByText(/Week numbers|Default alert/).count()), "Calendar shows a row it has no setting for")
+    },
+  },
+  {
+    // Calendar's switches change their settings and outlive a reload; Show what's next needs the menu
+    // bar and says so. A failed save returns the switch with its line (scenario settings-save-fails).
+    name: "settings-calendar-kept",
+    scenario: "settings-kept",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Calendar")
+      await press(app, page.getByRole("switch", { name: "Calls open in their apps" }))
+      await press(app, page.getByRole("switch", { name: "Calendar in the menu bar" }))
+      ensure(await page.getByText("Needs Calendar in the menu bar.").isVisible(), "Show what's next does not say why it is off")
+      await reload(app)
+      await settings(app, "Calendar")
+      ensure(!(await page.getByRole("switch", { name: "Calls open in their apps" }).isChecked()), "Calls open in their apps did not survive a reload")
+      ensure(!(await page.getByRole("switch", { name: "Calendar in the menu bar" }).isChecked()), "Calendar in the menu bar did not survive a reload")
+      await press(app, page.getByRole("switch", { name: "Calendar in the menu bar" }))
+      ensure(await page.getByRole("switch", { name: "Show what's next" }).isChecked(), "Show what's next lost its own setting")
+    },
+  },
+  {
+    // A failed save in Calendar and Notifications: the control returns, one line under its row (brief T0).
+    name: "settings-calendar-save-failed",
+    scenario: "settings-save-fails",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Calendar")
+      const calls = page.getByRole("switch", { name: "Calls open in their apps" })
+      await press(app, calls)
+      ensure(await calls.isChecked(), "Calls open in their apps did not return to on")
+      ensure(/read-only on this computer/.test(await region(page, "Calls").locator('[data-slot="save-failed"]').innerText()), "no line under Calls open in their apps")
+      ensure(!(await page.locator("[data-sonner-toast]").count()), "a failed save raised a toast")
+    },
+  },
   {
     // The second time zone (ADR-0088; brief T4): a row in Settings › Calendar on the zone picker,
     // "None" first. Picked there, it still adds its column of hours to the calendar's time grid.
@@ -305,5 +548,66 @@ export const scenes = [
   { name: "settings-shortcuts", run: (app) => settings(app, "Shortcuts and gestures") },
   { name: "settings-ai", run: (app) => settings(app, "AI summaries and replies") },
   // "New mail on your phone" until ADR-0085 named it Notifications; the scene keeps its name so its pictures pair up.
-  { name: "settings-phone", run: (app) => settings(app, "Notifications") },
+  // Brief T8: the two choices, the phone's schedule chosen; nothing else until the relay is.
+  {
+    name: "settings-phone",
+    run: (app) => settings(app, "Notifications"),
+    assert: async ({ page }) => {
+      const choices = page.getByRole("radiogroup", { name: "How new mail reaches this phone" })
+      ensure(await choices.getByRole("radio", { name: "On the phone's schedule" }).isChecked(), "the phone's schedule is not chosen")
+      ensure(!(await page.getByRole("button", { name: "Send a test" }).count()), "SEND A TEST shows without a relay")
+    },
+  },
+  {
+    // Brief T8 with the relay: RELAY ADDRESS, RELAY TOKEN, UNIFIEDPUSH ADDRESS (this browser has no push
+    // service) and the primary CONNECT TO RELAY; then ACCOUNTS ON THE RELAY with their tags, SAVE, and
+    // SEND A TEST with its toast. The choice outlives a reload; the phone's schedule saves at once.
+    name: "settings-notifications-relay",
+    scenario: "settings-kept",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "notifications" },
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Notifications")
+      const choices = () => page.getByRole("radiogroup", { name: "How new mail reaches this phone" })
+      await press(app, choices().getByRole("radio", { name: "Instant, through your relay" }))
+      const form = page.getByRole("form", { name: "Relay" })
+      await form.getByRole("textbox", { name: "Relay address" }).fill("https://push.ash-home.example")
+      await form.getByLabel("Relay token").fill("relay-token-from-the-demo-0042")
+      await form.getByRole("textbox", { name: "UnifiedPush address" }).fill("https://ntfy.sh/vale-ash-7f3k")
+      await press(app, form.getByRole("button", { name: "Connect to relay", exact: true }))
+      await region(page, "Accounts on the relay").waitFor()
+      ensure(await form.getByText("Saved. Leave empty to keep it.").isVisible(), "the token's helper does not say it is saved")
+      ensure(await form.getByRole("button", { name: "Save", exact: true }).isVisible(), "CONNECT TO RELAY did not become SAVE")
+      await press(app, page.getByRole("button", { name: "Send a test", exact: true }))
+      ensure(await page.locator("[data-sonner-toast]").filter({ hasText: "Test sent" }).isVisible(), "SEND A TEST raised no Test sent")
+      await toastGone(app)
+      await reload(app)
+      await settings(app, "Notifications")
+      ensure(await choices().getByRole("radio", { name: "Instant, through your relay" }).isChecked(), "the relay did not survive a reload")
+      // The picture: the relay connected.
+      await page.mouse.move(0, 0)
+      await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
+    },
+    assert: async ({ page }) => {
+      const accounts = region(page, "Accounts on the relay")
+      ensure(/02/.test(await accounts.getByRole("heading").innerText()), "ACCOUNTS ON THE RELAY does not count 02")
+      ensure((await accounts.getByText("Instant", { exact: true }).count()) === 2, "the accounts are not both INSTANT")
+      ensure((await page.getByRole("button", { name: "Connect to relay" }).count()) === 0, "CONNECT TO RELAY shows once connected")
+    },
+  },
+  {
+    // Back to the phone's schedule: saved at once, the relay's rows go; a refused save returns the choice.
+    name: "settings-notifications-schedule",
+    scenario: "relay-connected",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Notifications")
+      await region(page, "Accounts on the relay").waitFor()
+      await press(app, page.getByRole("radio", { name: "On the phone's schedule" }))
+      ensure(!(await region(page, "Accounts on the relay").count()), "the relay's rows stay on the phone's schedule")
+      ensure(!(await page.getByRole("form", { name: "Relay" }).count()), "the relay's form stays on the phone's schedule")
+    },
+  },
 ]
