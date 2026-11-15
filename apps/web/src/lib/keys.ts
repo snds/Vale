@@ -10,6 +10,12 @@ export interface KeyCommand {
   area: KeyArea
   does: string
   default: string
+  /**
+   * The key works in every section, not only its own (ADR-0085). Its id and
+   * area stay as the core keeps them; the lists show it under "Everywhere",
+   * and no other command in any area may share its key.
+   */
+  everywhere?: boolean
 }
 
 export const KEY_COMMANDS: KeyCommand[] = [
@@ -23,12 +29,12 @@ export const KEY_COMMANDS: KeyCommand[] = [
   { id: "mail.remind", area: "mail", does: "Remind me in 3 days if nobody replies", default: "" },
   { id: "mail.newsletters", area: "mail", does: "Always in Newsletters", default: "" },
   { id: "mail.compose", area: "mail", does: "Write a message", default: "c" },
-  { id: "mail.search", area: "mail", does: "Search mail", default: "/" },
+  { id: "mail.search", area: "mail", does: "Search", default: "/", everywhere: true },
   { id: "calendar.today", area: "calendar", does: "Go to today", default: "t" },
   { id: "calendar.day", area: "calendar", does: "Day view", default: "d" },
   { id: "calendar.week", area: "calendar", does: "Week view", default: "w" },
   { id: "calendar.month", area: "calendar", does: "Month view", default: "m" },
-  { id: "calendar.agenda", area: "calendar", does: "Agenda", default: "a" },
+  { id: "calendar.agenda", area: "calendar", does: "Upcoming", default: "a" },
   { id: "calendar.previous", area: "calendar", does: "Previous day, week, or month", default: "ArrowLeft" },
   { id: "calendar.next", area: "calendar", does: "Next day, week, or month", default: "ArrowRight" },
 ]
@@ -51,12 +57,22 @@ const NAMED: Record<string, string> = {
   Backspace: "⌫",
 }
 
-/** Keys that never change: Esc closes, ? lists the keys, and ⌘K. */
-export const FIXED_KEYS: { area: KeyArea | "everywhere"; keys: string[]; does: string }[] = [
+/**
+ * Keys that never change (ADR-0096; brief X7, DC14): Esc closes, ? lists
+ * the keys, ⌘K, ⌘, and ⌘\, ⌥N, ⌘Z while a send can be taken back, and a
+ * row's menu. `notes` marks a key a team member does not have (notes are
+ * the gateway owner's).
+ */
+export const FIXED_KEYS: { area: KeyArea | "everywhere"; keys: string[]; does: string; notes?: true }[] = [
   { area: "mail", keys: ["Esc"], does: "Close the conversation" },
   { area: "everywhere", keys: ["⌘K"], does: "Commands and search" },
-  { area: "everywhere", keys: ["⌥N"], does: "Quick note, linked to what's open" },
+  { area: "everywhere", keys: ["⌘,"], does: "Settings" },
+  { area: "everywhere", keys: ["⌘\\"], does: "Collapse or show the sidebar" },
+  { area: "everywhere", keys: ["⌥N"], does: "Quick note, linked to what's open", notes: true },
   { area: "everywhere", keys: ["?"], does: "This list" },
+  { area: "everywhere", keys: ["⌘Z"], does: "Take back a send, while its window is open" },
+  { area: "everywhere", keys: ["Menu", "⇧F10"], does: "A row's menu" },
+  { area: "everywhere", keys: ["Esc"], does: "Close the top layer" },
 ]
 
 /** How a key is printed: "E", "⇧E" for Shift+E, "←". */
@@ -81,6 +97,12 @@ export function keyProblem(key: string): string | null {
   return `“${key}” can't be a shortcut: use one key (Shift is fine)`
 }
 
+/** Where a command is listed: its own area, or "everywhere" for one that works in every section. */
+export const listedUnder = (c: KeyCommand): KeyArea | "everywhere" => (c.everywhere ? "everywhere" : c.area)
+
+/** The key that opens Search from every section ("" for none). */
+export const searchKey = (bindings: KeyBindings | undefined): string => (bindings ?? DEFAULT_KEYS)["mail.search"] ?? ""
+
 /** Which command `key` does in `area`, if any. */
 export function commandFor(bindings: KeyBindings | undefined, area: KeyArea, key: string): string | undefined {
   const keys = bindings ?? DEFAULT_KEYS
@@ -99,11 +121,13 @@ export function mergedKeys(saved: KeyBindings): KeyBindings {
 
 /**
  * Sets `id` to `key`. If another command in the area has that key, it
- * takes `id`'s old one (a swap), so nothing is lost silently.
+ * takes `id`'s old one (a swap), so nothing is lost silently. A command that
+ * works everywhere shares every area, so it swaps with any of them.
  */
 export function rebind(bindings: KeyBindings, id: string, key: string): { next: KeyBindings; swapped?: KeyCommand } {
   const area = id.split(".")[0] as KeyArea
-  const other = KEY_COMMANDS.find((c) => c.id !== id && c.area === area && key !== "" && bindings[c.id] === key)
+  const everywhere = KEY_COMMANDS.find((c) => c.id === id)?.everywhere
+  const other = KEY_COMMANDS.find((c) => c.id !== id && (c.area === area || c.everywhere || everywhere) && key !== "" && bindings[c.id] === key)
   const next = { ...bindings, [id]: key }
   if (other) next[other.id] = bindings[id] ?? ""
   return { next, swapped: other }

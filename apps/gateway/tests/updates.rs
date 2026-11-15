@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::future::BoxFuture;
 use serde_json::{Value, json};
-use vale_gateway::updates::{MAIN_ENDPOINT, ManifestSource, OFF_NOT_MAIN, UPDATE_COMMAND, Updates};
+use vale_gateway::updates::{BRIDGE_ENDPOINT, MAIN_ENDPOINT, ManifestSource, OFF_NOT_MAIN, UPDATE_COMMAND, Updates};
 use vale_gateway::{Config, Gateway, Members, SealedFile, router};
 
 const PASSWORD: &str = "gateway-password-for-tests";
@@ -172,14 +172,17 @@ async fn the_owner_checks_for_updates_and_sees_the_command_for_a_newer_image() {
     assert_eq!(no_header.status(), 403);
     assert!(source.1.lock().unwrap().is_empty());
 
-    // Check for updates: one read of the manifest beside the image, and the command.
+    // Check for updates: one read each of the feed and the bridge (ADR-0090), and the command.
     let s: Value = post(&owner, "/api/updates/check", json!({}))
         .await
         .unwrap()
         .json()
         .await
         .unwrap();
-    assert_eq!(*source.1.lock().unwrap(), vec![MAIN_ENDPOINT.to_string()]);
+    assert_eq!(
+        *source.1.lock().unwrap(),
+        vec![MAIN_ENDPOINT.to_string(), BRIDGE_ENDPOINT.to_string()]
+    );
     assert_eq!(s["state"], "available");
     assert_eq!(s["offered"], "0.1.0-main.20261109120000");
     assert_eq!(s["line"], "Version 0.1.0-main.20261109120000 is out.");
@@ -281,6 +284,10 @@ impl vale_gateway::helper::HostHelper for Helper {
                 ),
                 digest: request.expect_digest.clone().unwrap_or_default(),
                 services: vec!["gateway".into()],
+                // One image, no before or after step (the helper at the kit's 2a2a63f can have several).
+                images: Vec::new(),
+                before: None,
+                after: None,
             }),
         }
     }
@@ -434,6 +441,7 @@ async fn the_owner_updates_and_reloads_through_the_host_helper() {
         vec![host_helper::UpdateRequest {
             tag: Some(newer.into()),
             expect_digest: Some(digest),
+            expect_digests: None,
         }]
     );
 

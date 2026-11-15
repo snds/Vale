@@ -1,43 +1,48 @@
 import { useEffect, useRef, useState } from "react"
 
-import { Icon, Button, AdaptiveSheetContent, Sheet, SheetDescription, SheetTitle, ToggleGroup, ToggleGroupItem, IconButton } from "@unicron/ui"
+import { AdaptiveDialog, Button, ToggleGroup, ToggleGroupItem, Toolbar, ToolbarButton, ToolbarSeparator, ToolbarToggle, useAppFrame } from "@unicron/ui"
+import { useConfirm } from "@/lib/confirm"
 import { hits, MARKER_COLORS, MAX_H, PEN_COLORS, SIZES, type Sketch, SKETCH_H, SKETCH_W, type Stroke, strokePath, strokeStyle } from "@/lib/sketch"
-import { cn } from "@/lib/utils"
 
-import { useSketchSheet } from "./sketch-store"
+import { type OpenSketch, useSketchSheet } from "./sketch-store"
 
 type Mode = "pen" | "marker" | "eraser"
 const ERASER = 14
 const ROOM = 350
+const PHONE_H = 1600
+const mod = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+"
 
-const blank = (): Sketch => ({ v: 1, w: SKETCH_W, h: SKETCH_H, strokes: [] })
+/** A new sketch: landscape on a desktop; on a phone, upright, to fill the screen it is drawn on. */
+const blank = (phone: boolean): Sketch => ({ v: 1, w: SKETCH_W, h: phone ? PHONE_H : SKETCH_H, strokes: [] })
 
 /**
- * Drawing in a note (ADR-0046), with a mouse, a finger, or a pen (its
- * pressure shapes the line). A bottom sheet on phones, a wide side panel
- * above. Done saves the sketch into the note; editing one replaces it.
+ * Drawing in a note (ADR-0046, ADR-0108; brief N3), with a mouse, a finger or a pen (its pressure
+ * shapes the line). A viewer layer of 960 on a desktop, the whole screen on a phone: the tools, the
+ * canvas on its paper, and one primary, ADD TO NOTE or SAVE SKETCH. Editing one replaces it.
  */
-export function SketchSheet({ onDone }: { onDone: (sketch: Sketch, pos: number | null) => void }) {
+export function SketchPad({ onDone }: { onDone: (sketch: Sketch, pos: number | null) => void }) {
   const state = useSketchSheet((s) => s.open)
   const close = useSketchSheet((s) => s.close)
-  return (
-    <Sheet open={!!state} onOpenChange={(o) => !o && close()}>
-      <AdaptiveSheetContent wide className="flex flex-col gap-3 px-5 pb-5 sm:pt-5">
-        {state && <Drawing start={state.sketch ?? blank()} editing={!!state.sketch} onCancel={close} onDone={(s) => (onDone(s, state.pos), close())} />}
-      </AdaptiveSheetContent>
-    </Sheet>
-  )
+  if (!state) return null
+  if (!state.sketch && state.image) return <SketchPicture image={state.image} onClose={close} />
+  // A new layer for each sketch opened: its strokes and its history start from what was opened.
+  return <SketchLayer state={state} onClose={close} onDone={(s) => (onDone(s, state.pos), close())} />
 }
 
-function Drawing({ start, editing, onCancel, onDone }: { start: Sketch; editing: boolean; onCancel: () => void; onDone: (s: Sketch) => void }) {
+function SketchLayer({ state, onClose, onDone }: { state: OpenSketch; onClose: () => void; onDone: (s: Sketch) => void }) {
+  const phone = useAppFrame().phone
+  const confirm = useConfirm()
+  const editing = !!state.sketch
+  const [start] = useState(() => state.sketch ?? blank(phone))
   const [sketch, setSketch] = useState(start)
-  // Undo and redo: whole sketches, so erasing several strokes undoes as one.
+  // Undo and redo: whole sketches, so erasing several strokes undoes as one, and so does Clear.
   const [past, setPast] = useState<Sketch[]>([])
   const [future, setFuture] = useState<Sketch[]>([])
   const [mode, setMode] = useState<Mode>("pen")
   const [penColor, setPenColor] = useState<string>(PEN_COLORS[0].value)
   const [markerColor, setMarkerColor] = useState<string>(MARKER_COLORS[0].value)
   const [size, setSize] = useState(1)
+  const [full, setFull] = useState(false)
   // The stroke being drawn: a ref, so every sample lands even when several
   // arrive before React draws again; the state copy is what's on screen.
   const liveRef = useRef<Stroke | null>(null)
@@ -76,7 +81,14 @@ function Drawing({ start, editing, onCancel, onDone }: { start: Sketch; editing:
     return () => window.removeEventListener("keydown", onKey)
   })
 
-  const at = (e: React.PointerEvent): [number, number, number] => {
+  // Closing asks only when there is drawing to lose (cross-app decisions §10).
+  const changed = sketch !== start
+  const requestClose = async () => {
+    if (!changed) return onClose()
+    if (await confirm.ask({ title: "Discard changes?", confirmLabel: "Discard", cancelLabel: "Keep editing" })) onClose()
+  }
+
+  const at = (e: { clientX: number; clientY: number; pointerType: string; pressure: number }): [number, number, number] => {
     const r = svg.current!.getBoundingClientRect()
     const x = ((e.clientX - r.left) / r.width) * sketch.w
     const y = ((e.clientY - r.top) / r.height) * sketch.h
@@ -107,7 +119,7 @@ function Drawing({ start, editing, onCancel, onDone }: { start: Sketch; editing:
     if (!live) return
     // Coalesced events: every sample the pen made, not just one per frame.
     const samples = e.nativeEvent.getCoalescedEvents?.() ?? []
-    const pts = (samples.length ? samples : [e.nativeEvent]).map((ev) => at({ clientX: ev.clientX, clientY: ev.clientY, pointerType: e.pointerType, pressure: ev.pressure } as React.PointerEvent))
+    const pts = (samples.length ? samples : [e.nativeEvent]).map((ev) => at({ clientX: ev.clientX, clientY: ev.clientY, pointerType: e.pointerType, pressure: ev.pressure }))
     setLive({ ...live, points: [...live.points, ...pts] })
   }
   const up = () => {
@@ -123,92 +135,132 @@ function Drawing({ start, editing, onCancel, onDone }: { start: Sketch; editing:
     commit({ ...sketch, strokes: [...sketch.strokes, done] })
   }
 
-  const colors = mode === "marker" ? MARKER_COLORS : PEN_COLORS
-  const color = mode === "marker" ? markerColor : penColor
+  const inks = mode === "marker" ? MARKER_COLORS : PEN_COLORS
+  const ink = mode === "marker" ? markerColor : penColor
   const empty = sketch.strokes.length === 0
+  const drawing = mode !== "eraser"
+  const pick = (m: Mode) => (pressed: boolean) => pressed && setMode(m)
+
+  const tools = (
+    // One Tab stop; the arrow keys move along it. On a phone it scrolls sideways (notes.css).
+    <div className="sketch-tools" data-place={phone ? "below" : "above"}>
+      <Toolbar aria-label="Drawing tools">
+        <ToolbarToggle icon="pen" label="Pen" pressed={mode === "pen"} onPressedChange={pick("pen")} />
+        <ToolbarToggle icon="text--highlight" label="Marker" pressed={mode === "marker"} onPressedChange={pick("marker")} />
+        <ToolbarToggle icon="erase" label="Eraser" pressed={mode === "eraser"} onPressedChange={pick("eraser")} />
+        <ToolbarSeparator />
+        {/* The inks are the sketch's own stored values, drawn on its paper: content, not tokens (brief 1.3). */}
+        <ToggleGroup aria-label="Ink" size="sm" value={[ink]} disabled={!drawing} onValueChange={(v) => v[0] && (mode === "marker" ? setMarkerColor(v[0]) : setPenColor(v[0]))}>
+          {inks.map((c) => (
+            <ToggleGroupItem key={c.value} value={c.value} size="sm" aria-label={c.name}>
+              <span className="sketch-ink" aria-hidden>
+                <span style={{ background: c.value }} />
+              </span>
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <ToolbarSeparator />
+        <ToggleGroup aria-label="Thickness" size="sm" value={[String(size)]} disabled={!drawing} onValueChange={(v) => v[0] && setSize(Number(v[0]))}>
+          {SIZES.map((s, i) => (
+            <ToggleGroupItem key={s.name} value={String(i)} size="sm" aria-label={s.name}>
+              <span className="sketch-weight" aria-hidden style={{ height: 2 + i * 3 }} />
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <ToolbarSeparator />
+        <ToolbarButton icon="undo" label="Undo" shortcut={`${mod}Z`} disabled={!past.length} onClick={undo} />
+        <ToolbarButton icon="redo" label="Redo" shortcut={`${mod}⇧Z`} disabled={!future.length} onClick={redo} />
+        {/* No question: Undo brings the strokes back. */}
+        <ToolbarButton icon="clean" label="Clear" disabled={empty} onClick={() => commit({ ...sketch, strokes: [] })} />
+        <ToolbarSeparator />
+        <ToolbarButton icon="unfold--open" label="More room" disabled={sketch.h >= MAX_H} onClick={() => setSketch((s) => ({ ...s, h: Math.min(MAX_H, s.h + ROOM) }))} />
+        {/* A phone's layer is the whole screen already. */}
+        {!phone && <ToolbarToggle icon={full ? "minimize" : "maximize"} label="Full screen" pressed={full} onPressedChange={setFull} />}
+      </Toolbar>
+    </div>
+  )
+
+  const canvas = (
+    // The paper is light in every theme, so the inks look the same everywhere; inside it, the stone ground's words.
+    <div className="light sketch-paper" data-full={full ? "" : undefined}>
+      <svg
+        ref={svg}
+        role="img"
+        aria-label={empty ? "Empty sketch" : `Sketch with ${sketch.strokes.length} ${sketch.strokes.length === 1 ? "stroke" : "strokes"}`}
+        viewBox={`0 0 ${sketch.w} ${sketch.h}`}
+        data-tool={mode}
+        onPointerDown={down}
+        onPointerMove={move}
+        onPointerUp={up}
+        onPointerCancel={up}
+      >
+        {[...sketch.strokes, ...(live ? [live] : [])].map((s, i) => (
+          <path key={i} d={strokePath(s)} {...strokeStyle(s)} />
+        ))}
+      </svg>
+      {empty && !live && <p className="sketch-caption type-caption text-muted-foreground">Draw with a mouse, a finger or a pen.</p>}
+    </div>
+  )
+
+  const footer = (
+    <>
+      <Button type="button" variant="ghost" onClick={() => void requestClose()}>
+        Cancel
+      </Button>
+      <Button type="button" disabled={empty} onClick={() => onDone(sketch)}>
+        {editing ? "Save sketch" : "Add to note"}
+      </Button>
+    </>
+  )
+
   return (
     <>
-      <div className="flex flex-col gap-1">
-        <SheetTitle>{editing ? "Edit sketch" : "Sketch"}</SheetTitle>
-        <SheetDescription>Draw with a mouse, a finger, or a pen. A pen's pressure shapes the line.</SheetDescription>
-      </div>
-      <div role="toolbar" aria-label="Drawing tools" className="flex flex-wrap items-center gap-2">
-        <ToggleGroup value={[mode]} onValueChange={(v) => v[0] && setMode(v[0] as Mode)} variant="outline" size="sm" aria-label="Tool">
-          <ToggleGroupItem value="pen" aria-label="Pen">
-            <Icon name="edit" />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="marker" aria-label="Marker">
-            <Icon name="ink_highlighter" />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="eraser" aria-label="Eraser">
-            <Icon name="ink_eraser" />
-          </ToggleGroupItem>
-        </ToggleGroup>
-        {mode !== "eraser" && (
-          <>
-            <div role="radiogroup" aria-label="Color" className="flex items-center gap-1">
-              {colors.map((c) => (
-                <button
-                  key={c.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={color === c.value}
-                  aria-label={c.name}
-                  title={c.name}
-                  onClick={() => (mode === "marker" ? setMarkerColor(c.value) : setPenColor(c.value))}
-                  className="grid size-8 place-items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <span
-                    className={cn("size-5 rounded-full border border-foreground/15 ring-offset-2 ring-offset-popover", color === c.value && "ring-2 ring-foreground")}
-                    style={{ background: c.value }}
-                  />
-                </button>
-              ))}
-            </div>
-            <ToggleGroup value={[String(size)]} onValueChange={(v) => v[0] && setSize(Number(v[0]))} variant="outline" size="sm" aria-label="Thickness">
-              {SIZES.map((s, i) => (
-                <ToggleGroupItem key={s.name} value={String(i)} aria-label={s.name}>
-                  <span className="rounded-full bg-foreground" style={{ width: 4 + i * 4, height: 4 + i * 4 }} />
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          </>
-        )}
-        <span className="ml-auto flex items-center gap-0.5">
-          <IconButton icon="undo" label="Undo" size="icon-sm" disabled={!past.length} onClick={undo} />
-          <IconButton icon="redo" label="Redo" size="icon-sm" disabled={!future.length} onClick={redo} />
-          <IconButton icon="delete_sweep" label="Clear" size="icon-sm" disabled={empty} onClick={() => commit({ ...sketch, strokes: [] })} />
-        </span>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border bg-(--c-sketch-paper)">
-        <svg
-          ref={svg}
-          role="img"
-          aria-label={empty ? "Empty sketch" : `Sketch with ${sketch.strokes.length} ${sketch.strokes.length === 1 ? "stroke" : "strokes"}`}
-          viewBox={`0 0 ${sketch.w} ${sketch.h}`}
-          className={cn("block w-full touch-none", mode === "eraser" ? "cursor-cell" : "cursor-crosshair")}
-          onPointerDown={down}
-          onPointerMove={move}
-          onPointerUp={up}
-          onPointerCancel={up}
-        >
-          {[...sketch.strokes, ...(live ? [live] : [])].map((s, i) => (
-            <path key={i} d={strokePath(s)} {...strokeStyle(s)} />
-          ))}
-        </svg>
-      </div>
-      <div className="flex flex-wrap items-center gap-2 max-sm:pr-14">
-        <Button type="button" variant="ghost" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button type="button" variant="outline" disabled={sketch.h >= MAX_H} onClick={() => setSketch((s) => ({ ...s, h: Math.min(MAX_H, s.h + ROOM) }))}>
-          <Icon name="expand" data-icon="inline-start" /> More room
-        </Button>
-        <Button type="button" className="ml-auto" disabled={empty} onClick={() => onDone(sketch)}>
-          {editing ? "Save sketch" : "Add to note"}
-        </Button>
-      </div>
+      <AdaptiveDialog
+        open
+        onOpenChange={(o) => !o && void requestClose()}
+        size={full ? "full" : "viewer"}
+        height="full"
+        overline="Sketch"
+        title={editing ? "Edit sketch" : "Sketch"}
+        closeOnOutsideClick={false}
+        footer={footer}
+      >
+        <div className="sketch-body" data-phone={phone ? "" : undefined}>
+          {!phone && tools}
+          {canvas}
+          {phone && tools}
+        </div>
+      </AdaptiveDialog>
+      {confirm.question()}
     </>
   )
 }
 
+/**
+ * A sketch whose strokes this device can't read (made elsewhere, or by an older or newer Vale): its
+ * picture, and the reason it can't be edited (brief N3).
+ */
+function SketchPicture({ image, onClose }: { image: string; onClose: () => void }) {
+  return (
+    <AdaptiveDialog
+      open
+      onOpenChange={(o) => !o && onClose()}
+      size="viewer"
+      height="full"
+      overline="Sketch"
+      title="Edit sketch"
+      footer={
+        <Button type="button" variant="outline" onClick={onClose}>
+          Close
+        </Button>
+      }
+    >
+      <div className="sketch-body">
+        <div className="light sketch-paper" data-still="">
+          <img src={image} alt="The sketch" draggable={false} />
+        </div>
+        <p className="type-body text-muted-foreground">This sketch can&apos;t be edited here.</p>
+      </div>
+    </AdaptiveDialog>
+  )
+}

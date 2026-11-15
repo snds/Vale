@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { toast } from "sonner"
+import { toast } from "@unicron/ui"
 
 import { useCore, useNotesRelay } from "@/core/queries"
 
@@ -21,7 +21,8 @@ export function NotesSyncRunner() {
   useEffect(() => {
     if (!core) return
     return startGuestShares(core, (title, from) =>
-      toast(`${from ?? "The owner"} stopped sharing “${title || "a note"}”`, { description: "What you had is now your own note. Only you can see it.", duration: 8000 }),
+      // Brief N6: what you had stays, as your own note.
+      toast(`${from ?? "The owner"} stopped sharing ${title || "a note"}`, { description: "It's your own note now", duration: 8000 }),
     )
   }, [core])
   return null

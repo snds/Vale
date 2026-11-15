@@ -1,69 +1,120 @@
 import { useState } from "react"
-import { toast } from "sonner"
 
-import { Icon, Button } from "@unicron/ui"
-import { useDuplicates, usePimAction } from "@/core/queries"
-import type { ContactSummary } from "@/core/types"
+import { useUi } from "@/app/ui-store"
+import { AppFrameInset, Button, EmptyState, ListRow, RadioGroup, RadioGroupItem, SectionHeader, Skeleton, toast, useAppFrame } from "@unicron/ui"
+import { useAccounts, useCollections, useDuplicates, usePimAction } from "@/core/queries"
+import type { Account, Collection, ContactSummary } from "@/core/types"
+import { useConfirm } from "@/lib/confirm"
 
-import { PersonAvatar } from "./person"
+/**
+ * The card to keep at first: the fullest name ("Ana Duarte", not "Ana D."), since the kept card keeps its
+ * name; then the one with most emails and phones, then a company. The others' details join it either way.
+ */
+const fullest = (g: ContactSummary[]) =>
+  [...g].sort(
+    (a, b) =>
+      b.fullName.trim().length - a.fullName.trim().length ||
+      b.emails.length + b.phones.length - (a.emails.length + a.phones.length) ||
+      Number(!!b.org) - Number(!!a.org),
+  )[0]!
 
-/** The card that keeps the most: most emails and phones, then a company. */
-const richest = (g: ContactSummary[]) =>
-  [...g].sort((a, b) => b.emails.length + b.phones.length - (a.emails.length + a.phones.length) || Number(!!b.org) - Number(!!a.org))[0]!
+/** What the merged card holds: every address and number in the set, each once, as the core merges them. */
+function keeps(group: ContactSummary[]) {
+  const emails = new Set(group.flatMap((c) => c.emails.map((e) => e.value.trim().toLowerCase())))
+  const phones = new Set(group.flatMap((c) => c.phones.map((p) => p.value.replace(/[^\d+]/g, ""))))
+  const n = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`
+  const parts = [emails.size && n(emails.size, "email"), phones.size && n(phones.size, "phone")].filter(Boolean)
+  return parts.length ? `Keeps ${parts.join(", ")}.` : "Keeps the name and company."
+}
 
-function Group({ group }: { group: ContactSummary[] }) {
-  const [primary, setPrimary] = useState(() => richest(group).id)
+/** The address book a card lives in, as the list's rows name it. */
+function bookOf(books: Collection[], accounts: Account[], id: string) {
+  const b = books.find((x) => x.id === id)
+  return accounts.find((a) => a.id === b?.accountId)?.displayName ?? (b?.accountId ? b.name : "On this device")
+}
+
+/**
+ * One set (brief P4): the person's name and how many cards; "Keep which?"
+ * as rows with a leading radio, each with its real addresses and numbers and
+ * its address book; what the kept card will hold; MERGE, which asks.
+ */
+function DuplicateSet({ group }: { group: ContactSummary[] }) {
+  const phone = useAppFrame().phone
+  const { data: books = [] } = useCollections("contacts")
+  const { data: accounts = [] } = useAccounts()
+  const [keep, setKeep] = useState(() => fullest(group).id)
   const merge = usePimAction((c, args: { primary: string; others: string[] }) => c.mergeContacts(args.primary, args.others))
-  const keep = group.find((g) => g.id === primary)!
+  const confirm = useConfirm()
+  const kept = group.find((g) => g.id === keep) ?? group[0]!
+  // The set is named by its fullest name, whichever card is kept.
+  const [name] = useState(() => fullest(group).fullName)
   const run = async () => {
-    try {
-      const merged = await merge.mutateAsync({ primary, others: group.filter((g) => g.id !== primary).map((g) => g.id) })
-      toast.success(`Merged into ${merged.fullName}`, { description: `${merged.emails.length} email${merged.emails.length === 1 ? "" : "s"}, ${merged.phones.length} phone${merged.phones.length === 1 ? "" : "s"}`, duration: 3000 })
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
-    }
+    let merged: ContactSummary | null = null
+    const yes = await confirm.ask({
+      title: `Merge ${group.length} cards into ${kept.fullName}?`,
+      description: "The other cards go to Recently deleted. Merged details can't be split again.",
+      confirmLabel: "Merge",
+      confirmIcon: "merge",
+      tone: "default",
+      run: async () => {
+        merged = await merge.mutateAsync({ primary: kept.id, others: group.filter((g) => g.id !== kept.id).map((g) => g.id) })
+      },
+    })
+    const done = merged as ContactSummary | null
+    if (!yes || !done) return
+    toast.success(`Merged into ${done.fullName}`, { action: { label: "Open", onClick: () => useUi.getState().jumpTo({ kind: "contact", id: done.id }) } })
   }
   return (
-    <section className="rounded-xl border" aria-label={`Possible duplicates of ${keep.fullName}`}>
-      <fieldset>
-        <legend className="sr-only">Keep which card?</legend>
+    <section className="flex flex-col gap-4" aria-label={name}>
+      <SectionHeader title={name} count={group.length} level={2} inset={phone} />
+      <RadioGroup aria-label="Keep which?" value={keep} onValueChange={(v) => setKeep(String(v))}>
         {group.map((c) => (
-          <label key={c.id} className="flex cursor-pointer items-center gap-3 border-b px-4 py-3 last:border-0 has-checked:bg-muted/50">
-            <input type="radio" name={`keep-${group[0]!.id}`} checked={primary === c.id} onChange={() => setPrimary(c.id)} className="accent-(--primary)" aria-label={`Keep ${c.fullName}`} />
-            <PersonAvatar contact={c} size="sm" />
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-sm font-medium">{c.fullName}</span>
-              <span className="truncate text-xs text-muted-foreground">{[c.org, ...c.emails.map((e) => e.value), ...c.phones.map((p) => p.value)].filter(Boolean).join(" · ") || "No details"}</span>
-            </span>
-          </label>
+          <ListRow
+            key={c.id}
+            // The whole row is the radio's label, so a press on the name picks it too.
+            render={<label />}
+            leading={<RadioGroupItem value={c.id} />}
+            title={c.fullName}
+            meta={[...c.emails.map((e) => e.value), ...c.phones.map((p) => p.value)].join(" // ") || c.org || "No email or phone"}
+            metaStyle="plain"
+            status={bookOf(books, accounts, c.bookId)}
+          />
         ))}
-      </fieldset>
-      <div className="flex items-center justify-between gap-2 px-4 py-2">
-        <p className="text-xs text-muted-foreground">Keeps {keep.fullName}'s name and adds everything missing from the others.</p>
-        <Button size="sm" onClick={() => void run()} disabled={merge.isPending}>
-          <Icon name="merge" data-icon="inline-start" /> Merge
-        </Button>
-      </div>
+      </RadioGroup>
+      <AppFrameInset>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <p className="type-caption text-muted-foreground">{keeps(group)}</p>
+          <Button variant="secondary" onClick={() => void run()} loading={merge.isPending}>
+            Merge
+          </Button>
+        </div>
+      </AppFrameInset>
+      {confirm.question()}
     </section>
   )
 }
 
-/** Possible duplicates: a shared email or phone number, or the same full name. */
+/** Possible duplicates (brief P4): one column up to 720, a set after another. Cards that share an email, a phone number or a full name. */
 export function DuplicatesPane() {
   const { data: groups = [], isPending } = useDuplicates()
+  if (isPending)
+    return (
+      <div className="flex max-w-180 flex-col" aria-hidden data-slot="duplicates-loading">
+        <Skeleton variant="row" />
+        <Skeleton variant="row" />
+        <Skeleton variant="row" />
+      </div>
+    )
+  if (groups.length === 0)
+    return (
+      <AppFrameInset>
+        <EmptyState overline="Duplicates // 00" title="No duplicates left." />
+      </AppFrameInset>
+    )
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-4 px-4 pb-10 md:px-8 md:pt-8">
-      <header>
-        <h2 className="text-2xl font-semibold tracking-tight">Possible duplicates</h2>
-        <p className="text-sm text-muted-foreground">Cards that share an email, a phone number, or a full name. Pick the one to keep; nothing merges without you.</p>
-      </header>
-      {!isPending && groups.length === 0 && (
-        <p className="flex items-center gap-2 rounded-xl border p-4 text-sm text-muted-foreground">
-          <Icon name="check_circle" className="size-5" /> No duplicates left.
-        </p>
-      )}
+    <div className="flex max-w-180 flex-col gap-8 pb-10">
       {groups.map((g) => (
-        <Group key={g.map((c) => c.id).join()} group={g} />
+        <DuplicateSet key={g.map((c) => c.id).join()} group={g} />
       ))}
     </div>
   )

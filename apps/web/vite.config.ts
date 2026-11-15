@@ -4,6 +4,8 @@ import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig, type Plugin } from "vite"
 
+import { buildStamp } from "./build-stamp.ts"
+
 /**
  * The on-device text reader (Tesseract, ADR-0045), served from this app at
  * fixed names under `ocr/`, so it never loads from a CDN. Only the LSTM
@@ -40,7 +42,8 @@ function ocrFiles(): Plugin {
 const host = process.env.TAURI_DEV_HOST
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), ocrFiles()],
+  // buildStamp: the build's id in the page and in build.json, for the build watch (ADR-0091).
+  plugins: [react(), tailwindcss(), ocrFiles(), buildStamp()],
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
     // One instance each across the app and @unicron/ui, or hooks and Base UI's

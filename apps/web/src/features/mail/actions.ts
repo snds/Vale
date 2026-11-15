@@ -1,4 +1,4 @@
-import { toast } from "sonner"
+import { toast } from "@unicron/ui"
 
 import { useMailAction } from "@/core/queries"
 import type { MessageSummary } from "@/core/types"
@@ -8,6 +8,9 @@ import type { MessageSummary } from "@/core/types"
  * gestures. Anything that moves mail out of view toasts with Undo
  * (principle: reversibility).
  */
+/** A conversation as a toast names it: its subject. */
+const name = (m: MessageSummary) => m.subject || "(no subject)"
+
 export function useTriage(onLeave: () => void) {
   const seen = useMailAction<{ threadId: string; seen: boolean }>((c, a) => c.setThreadSeen(a.threadId, a.seen))
   const flag = useMailAction<{ threadId: string; flagged: boolean }>((c, a) => c.setThreadFlagged(a.threadId, a.flagged))
@@ -29,7 +32,8 @@ export function useTriage(onLeave: () => void) {
           onError: fail,
           onSuccess: () => {
             onLeave()
-            toast(archived ? "Archived" : "Moved to Inbox", {
+            // Toasts name the thing (cross-app decisions §12).
+            toast(archived ? `Archived ${name(m)}` : `Moved ${name(m)} to Inbox`, {
               action: { label: "Undo", onClick: () => archive.mutate({ threadId: m.threadId, archived: !archived }) },
             })
           },
@@ -43,7 +47,8 @@ export function useTriage(onLeave: () => void) {
           onError: fail,
           onSuccess: () => {
             onLeave()
-            toast(`Snoozed until ${label.toLowerCase()}`, {
+            // A preset's name reads in lower case ("tomorrow"); a picked date and time keeps its capitals ("Fri, Nov 13, 11:00 AM").
+            toast(`Snoozed ${name(m)} until ${/\d/.test(label) ? label : label.toLowerCase()}`, {
               action: { label: "Undo", onClick: () => unsnooze.mutate({ threadId: m.threadId }) },
             })
           },

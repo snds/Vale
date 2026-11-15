@@ -44,6 +44,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 mod members;
 pub use members::Members;
+pub mod feed;
 pub mod helper;
 pub mod updates;
 
@@ -381,11 +382,14 @@ const CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; wor
 pub fn router(gw: Gw) -> Router {
     let index = gw.config.web_dir.join("index.html");
     let page: axum::routing::MethodRouter = get(move || app_page(index.clone()));
+    let build = gw.config.web_dir.join("build.json");
     // Files as they are; the page itself, and every deep link, get the marked page.
     let spa = ServeDir::new(&gw.config.web_dir).append_index_html_on_directories(false).fallback(page.clone());
     Router::new()
         .route_service("/", page.clone())
         .route_service("/index.html", page)
+        // The web app's build id, which an open page asks for to learn of a newer build (ADR-0091).
+        .route("/build.json", get(move || build_json(build.clone())))
         .route("/healthz", get(|| async { "ok" }))
         .route("/api/session", get(get_session).post(sign_in).delete(sign_out))
         // Note images arrive as base64 (up to 10 MB each, ADR-0044); axum's 2 MB default is too small.
@@ -426,6 +430,22 @@ async fn app_page(index: PathBuf) -> Response {
     };
     let html = html.replacen("<head>", &format!("<head>{GATEWAY_META}"), 1);
     ([(header::CONTENT_TYPE, "text/html; charset=utf-8"), (header::CACHE_CONTROL, "no-cache")], html).into_response()
+}
+
+/// The web app's `build.json` (`{"build": "<id>"}`, written by its build),
+/// read on each request and never cached: an open page compares it with its
+/// own id to learn of a newer build (ADR-0091). Without the file (a web app
+/// built before ADR-0091) it is a plain 404, which the page reads as "can't
+/// tell", never as the app page.
+async fn build_json(file: PathBuf) -> Response {
+    match tokio::fs::read(&file).await {
+        Ok(body) => ([(header::CONTENT_TYPE, "application/json"), (header::CACHE_CONTROL, "no-cache")], body).into_response(),
+        Err(_) => {
+            let mut res = err(StatusCode::NOT_FOUND, "the web app has no build id");
+            res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+            res
+        }
+    }
 }
 
 /// Lets the page ask for a session only when it's on a gateway. A static
@@ -786,7 +806,7 @@ async fn update_now(State(gw): State<Gw>, headers: HeaderMap, Json(body): Json<U
         log_helper(&who, helper::Kind::Update, Some(&tag), Err(updates::OFFER_CHANGED));
         return err(StatusCode::CONFLICT, updates::OFFER_CHANGED);
     }
-    let request = host_helper::UpdateRequest { tag: Some(tag.clone()), expect_digest: gw.updates.offered_digest() };
+    let request = host_helper::UpdateRequest { tag: Some(tag.clone()), expect_digest: gw.updates.offered_digest(), expect_digests: None };
     start_helper(&gw, who, helper::Kind::Update, Some(tag), move |h| h.update(&request).map(|r| helper::updated(&r)))
 }
 

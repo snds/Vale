@@ -1,179 +1,166 @@
 import { useState } from "react"
-import { toast } from "sonner"
 
-import { Icon, Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, NativeSelect, NativeSelectOption, Switch, DialogAction, DialogActions } from "@unicron/ui"
-import { useNoteAction, useNoteFolders, useNoteTags } from "@/core/queries"
-import { NOTE_COLORS, type NoteColor, type NoteFolder, type NoteFolderInput } from "@/core/types"
-import { cn } from "@/lib/utils"
+import { useUi } from "@/app/ui-store"
+import { FormLayer, FormLayerForm } from "@/components/editor-frame"
+import { AdaptiveMenu, AdaptiveMenuRadioGroup, AdaptiveMenuRadioItem, Button, ChipField, FieldRow, FieldRowAction, TextField, ToggleRow, toast, useAppFrame } from "@unicron/ui"
+import { useNoteAction, useNoteTags } from "@/core/queries"
+import type { NoteFolder, NoteFolderInput } from "@/core/types"
+import { useLeaveGuard } from "@/lib/leave-guard"
 
-import { NOTE_COLOR_LABEL, noteEdge, noteFill } from "./note-color"
+import { useNoteFolderEditor } from "./open-note-folder"
+import { SwatchChoice } from "./swatch-picker"
 
 const fail = (e: unknown) => toast.error(e instanceof Error ? e.message : String(e))
-const noteCount = (n: number) => `${n} ${n === 1 ? "note" : "notes"}`
 
-/** Smart folders as chips (ADR-0042): saved searches that fill themselves. */
-export function NoteFolderChips({ active, onPick }: { active: string | null; onPick: (id: string | null) => void }) {
-  const { data: folders = [] } = useNoteFolders()
-  const [editing, setEditing] = useState<{ folder?: NoteFolder } | null>(null)
-  const current = folders.find((f) => f.id === active)
+type Linked = NoteFolderInput["linked"]
+const NO_LINK = "none"
+/** LINKED TO's choices, in the order the brief gives them (N1). */
+const LINKED: [Exclude<Linked, null> | typeof NO_LINK, string][] = [
+  [NO_LINK, "It doesn't matter"],
+  ["any", "Anything"],
+  ["event", "An event"],
+  ["contact", "A person"],
+  ["thread", "A conversation"],
+]
+const linkedLabel = (l: Linked) => LINKED.find(([v]) => v === (l ?? NO_LINK))![1]
+
+/** A tag as typed: without its #, and with nothing left it is no tag. */
+const parseTag = (text: string) => text.trim().replace(/^#+/, "").trim() || null
+
+/**
+ * Smart folders are saved searches that fill themselves (ADR-0042; brief N1,
+ * ADR-0105). Notes mounts this; a saved folder becomes the place, a deleted
+ * one gives way to all notes, and UNDO brings it back.
+ */
+export function NoteFolderEditor() {
+  const editing = useNoteFolderEditor((s) => s.editing)
+  const close = () => useNoteFolderEditor.setState({ editing: null })
   return (
-    <div role="group" aria-label="Smart folders" className="-mx-4 no-scrollbar flex items-center gap-1.5 overflow-x-auto px-4">
-      {folders.map((f) => (
-        <Button
-          key={f.id}
-          size="xs"
-          variant={active === f.id ? "secondary" : "ghost"}
-          aria-pressed={active === f.id}
-          shape="pill"
-          onClick={() => onPick(active === f.id ? null : f.id)}
-        >
-          <Icon name="folder_special" data-icon="inline-start" className="text-vertical-notes-text" />
-          {f.name}
-          <span className="text-muted-foreground tabular-nums">{f.count}</span>
-        </Button>
-      ))}
-      {current ? (
-        <Button size="icon-xs" variant="ghost" shape="pill" aria-label="Edit smart folder" onClick={() => setEditing({ folder: current })}>
-          <Icon name="tune" />
-        </Button>
-      ) : (
-        <Button size="xs" variant="ghost-muted" shape="pill" onClick={() => setEditing({})}>
-          <Icon name="add" data-icon="inline-start" /> Smart folder
-        </Button>
+    <FormLayer open={editing !== null} onClose={close}>
+      {editing && (
+        <NoteFolderForm
+          key={editing.folder?.id ?? "new"}
+          folder={editing.folder}
+          onDone={(id) => {
+            close()
+            if (id !== undefined) useUi.getState().setNotesFolder(id ? { kind: "folder", id } : { kind: "all" })
+          }}
+        />
       )}
-      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent size="md">
-          {editing && (
-            <NoteFolderForm
-              key={editing.folder?.id ?? "new"}
-              folder={editing.folder}
-              onDone={(id) => {
-                setEditing(null)
-                if (id !== undefined) onPick(id)
-              }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
+    </FormLayer>
   )
 }
 
 function NoteFolderForm({ folder, onDone }: { folder?: NoteFolder; onDone: (picked?: string | null) => void }) {
   const { data: tags = [] } = useNoteTags()
+  const phone = useAppFrame().phone
   const [name, setName] = useState(folder?.name ?? "")
   const [picked, setPicked] = useState<string[]>(folder?.tags ?? [])
   const [words, setWords] = useState(folder?.words ?? "")
-  const [linked, setLinked] = useState<NoteFolderInput["linked"]>(folder?.linked ?? null)
+  const [linked, setLinked] = useState<Linked>(folder?.linked ?? null)
   const [color, setColor] = useState<NoteFolderInput["color"]>(folder?.color ?? null)
   const [hasReminder, setHasReminder] = useState(folder?.hasReminder ?? false)
   const [hasOpenTasks, setHasOpenTasks] = useState(folder?.hasOpenTasks ?? false)
-  const save = useNoteAction((c, input: NoteFolderInput) => c.saveNoteFolder(folder?.id ?? null, input))
+  const save = useNoteAction((c, args: { id: string | null; input: NoteFolderInput }) => c.saveNoteFolder(args.id, args.input))
   const remove = useNoteAction<void>((c) => c.deleteNoteFolder(folder!.id))
-  // Tags in use plus any this folder names that no note carries right now.
-  const choices = [...new Set([...tags.map((t) => t.tag), ...picked])]
-  const toggle = (t: string) => setPicked((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]))
+  // Closing asks first once a value differs from when the form opened (ADR-0087).
+  const values = JSON.stringify([name, picked, words, linked, color, hasReminder, hasOpenTasks])
+  const [opened] = useState(values)
+  useLeaveGuard(values !== opened)
+  // The tags in use, as the line under the field: what can be typed and match something now.
+  const inUse = tags.map((t) => `#${t.tag}`).join(", ")
 
+  const [error, setError] = useState<string | null>(null)
   const submit = async () => {
+    setError(null)
     try {
-      const f = await save.mutateAsync({ name, tags: picked, words: words.trim() || null, linked, color, hasReminder, hasOpenTasks })
-      toast.success(folder ? `Updated “${f.name}”` : `Added “${f.name}”: ${noteCount(f.count)} so far`, { duration: 2500 })
+      const f = await save.mutateAsync({ id: folder?.id ?? null, input: { name, tags: picked, words: words.trim() || null, linked, color, hasReminder, hasOpenTasks } })
+      // Toasts name the thing, with no full stop (cross-app decisions §12).
+      toast.success(folder ? `Saved ${f.name}` : `Created ${f.name}`, { duration: 4000 })
       onDone(f.id)
     } catch (e) {
-      fail(e)
+      // The form stays open with the server's words above its actions.
+      setError(e instanceof Error ? e.message : String(e))
     }
   }
   const del = async () => {
+    const gone = folder!
+    const wasOpen = (() => {
+      const f = useUi.getState().notesPlace.folder
+      return f.kind === "folder" && f.id === gone.id
+    })()
     try {
       await remove.mutateAsync()
-      toast.success(`Deleted “${folder!.name}”. Its notes are still in Notes.`, { duration: 2500 })
       onDone(null)
+      // The core has no undelete: UNDO saves the same rules again, as a folder of the same name.
+      const input: NoteFolderInput = { name: gone.name, tags: gone.tags, words: gone.words, linked: gone.linked, color: gone.color, hasReminder: gone.hasReminder, hasOpenTasks: gone.hasOpenTasks }
+      toast(`Deleted ${gone.name}`, {
+        description: "Its notes are still in Notes",
+        duration: 6000,
+        action: {
+          label: "Undo",
+          onClick: () =>
+            void save
+              .mutateAsync({ id: null, input })
+              .then((f) => {
+                if (wasOpen) useUi.getState().setNotesFolder({ kind: "folder", id: f.id })
+              })
+              .catch(fail),
+        },
+      })
     } catch (e) {
-      fail(e)
+      setError(e instanceof Error ? e.message : String(e))
     }
   }
-  const field = "h-9 w-full rounded-lg border bg-transparent px-2.5 text-sm dark:bg-input/30"
-  const swatch = "size-7 rounded-full border ring-offset-2 ring-offset-popover aria-pressed:ring-2 aria-pressed:ring-foreground"
   return (
-    <form className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), void submit())}>
-      <DialogHeader>
-        <DialogTitle>{folder ? "Edit smart folder" : "New smart folder"}</DialogTitle>
-        <DialogDescription>Notes come and go by themselves as you write. Fill in what applies: they must match all of it.</DialogDescription>
-      </DialogHeader>
-      <label className="flex flex-col gap-1 text-sm">
-        Name
-        <input id="folder-name" className={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="To do, This week, Recipes…" autoFocus />
-      </label>
-      {choices.length > 0 && (
-        <div role="group" aria-label="Has any of these tags" className="flex flex-col gap-1.5 text-sm">
-          Has any of these tags
-          <div className="flex flex-wrap gap-1.5">
-            {choices.map((t) => (
-              <Button key={t} type="button" size="xs" variant={picked.includes(t) ? "secondary" : "outline"} aria-pressed={picked.includes(t)} shape="pill" onClick={() => toggle(t)}>
-                #{t}
-              </Button>
-            ))}
-          </div>
-        </div>
-      )}
-      <label className="flex flex-col gap-1 text-sm">
-        Contains the words
-        <input id="folder-words" className={field} value={words} onChange={(e) => setWords(e.target.value)} placeholder="agenda" />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        Linked to
-        <NativeSelect id="folder-linked" value={linked ?? ""} onChange={(e) => setLinked((e.target.value || null) as NoteFolderInput["linked"])} className="w-full">
-          <NativeSelectOption value="">It doesn't matter</NativeSelectOption>
-          <NativeSelectOption value="any">Anything</NativeSelectOption>
-          <NativeSelectOption value="event">An event</NativeSelectOption>
-          <NativeSelectOption value="contact">A person</NativeSelectOption>
-          <NativeSelectOption value="thread">A conversation</NativeSelectOption>
-        </NativeSelect>
-      </label>
-      <div role="group" aria-label="Color" className="flex flex-col gap-1.5 text-sm">
-        Color
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Button type="button" size="xs" variant={color === null ? "secondary" : "outline"} aria-pressed={color === null} shape="pill" onClick={() => setColor(null)}>
-            Any or none
+    <FormLayerForm
+      overline={folder ? "Smart folder" : "New smart folder"}
+      title={name.trim() || (folder ? "Smart folder" : "New smart folder")}
+      primary={{ label: folder ? "Save" : "Create folder", loading: save.isPending }}
+      error={error}
+      onSubmit={() => void submit()}
+      footerStart={
+        folder && (
+          <Button type="button" variant="ghost-destructive" loading={remove.isPending} onClick={() => void del()}>
+            Delete
           </Button>
-          <Button type="button" size="xs" variant={color === "any" ? "secondary" : "outline"} aria-pressed={color === "any"} shape="pill" onClick={() => setColor("any")}>
-            Any color
-          </Button>
-          {NOTE_COLORS.map((c: NoteColor) => (
-            <button
-              key={c}
-              type="button"
-              aria-label={NOTE_COLOR_LABEL[c]}
-              aria-pressed={color === c}
-              title={NOTE_COLOR_LABEL[c]}
-              className={cn(swatch)}
-              style={{ background: noteFill(c), borderColor: noteEdge(c) }}
-              onClick={() => setColor(color === c ? null : c)}
-            />
-          ))}
-        </div>
+        )
+      }
+    >
+      <p className="type-caption text-support-foreground">Notes join and leave as you write. They must match everything you fill in.</p>
+      <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} data-form-focus="" />
+      <ChipField
+        label="Has any of these tags"
+        value={picked}
+        onValueChange={setPicked}
+        parse={parseTag}
+        removeLabel={(t) => `Remove #${t}`}
+        helper={inUse ? `In use: ${inUse}` : undefined}
+      />
+      <TextField label="Has the words" value={words} onChange={(e) => setWords(e.target.value)} />
+      <FieldRow
+        label="Linked to"
+        size={phone ? "stacked" : "default"}
+        rule="none"
+        action={
+          <AdaptiveMenu title="Linked to" trigger={<FieldRowAction>Change</FieldRowAction>}>
+            <AdaptiveMenuRadioGroup value={linked ?? NO_LINK} onValueChange={(v) => setLinked(v === NO_LINK ? null : (v as Linked))}>
+              {LINKED.map(([v, label]) => (
+                <AdaptiveMenuRadioItem key={v} value={v}>
+                  {label}
+                </AdaptiveMenuRadioItem>
+              ))}
+            </AdaptiveMenuRadioGroup>
+          </AdaptiveMenu>
+        }
+      >
+        {linkedLabel(linked)}
+      </FieldRow>
+      <SwatchChoice label="Color" value={color} onValueChange={setColor} />
+      <div className="flex flex-col">
+        <ToggleRow label="Has a reminder" checked={hasReminder} onCheckedChange={setHasReminder} />
+        <ToggleRow label="Has to-dos left" checked={hasOpenTasks} onCheckedChange={setHasOpenTasks} rule="both" />
       </div>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        Has a reminder
-        <Switch checked={hasReminder} onCheckedChange={setHasReminder} aria-label="Has a reminder" />
-      </label>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        Has to-dos left
-        <Switch checked={hasOpenTasks} onCheckedChange={setHasOpenTasks} aria-label="Has to-dos left" />
-      </label>
-      <DialogActions>
-        {folder && (
-          <DialogAction kind="destructive" type="button" onClick={() => void del()}>
-            Delete folder
-          </DialogAction>
-        )}
-        <DialogAction kind="cancel" type="button" onClick={() => onDone()}>
-          Cancel
-        </DialogAction>
-        <DialogAction type="submit" disabled={save.isPending}>
-          {folder ? "Save" : "Add folder"}
-        </DialogAction>
-      </DialogActions>
-    </form>
+    </FormLayerForm>
   )
 }

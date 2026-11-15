@@ -1,198 +1,308 @@
-import { useState } from "react"
-import { toast } from "sonner"
+import { useMemo, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 
+import { usePushedChrome } from "@/app/screen"
 import { useUi } from "@/app/ui-store"
-import { ListRow } from "@/components/list-row"
-import { Avatar, AvatarFallback, Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle, Field, FieldError, FieldLabel, Icon, Input, Skeleton } from "@unicron/ui"
+import {
+  AdaptiveMenu,
+  AdaptiveMenuItem,
+  AppFrameInset,
+  Badge,
+  Banner,
+  Button,
+  EmptyState,
+  FloatButton,
+  InitialTile,
+  ListRow,
+  MetaItem,
+  MetaList,
+  Skeleton,
+  TextField,
+  Toolbar,
+  ToolbarButton,
+  toast,
+  useAppFrame,
+} from "@unicron/ui"
+import { FormLayer, FormLayerForm } from "@/components/editor-frame"
+import { LoadState } from "@/components/load-state"
 import { getCoreClient } from "@/core/client"
-import { useMailPrefs, useTeamThreads } from "@/core/queries"
+import { useMailPrefs, useTeamThreads, useThread } from "@/core/queries"
 import type { TeamThread } from "@/core/types"
-import { longTime, shortTime } from "@/lib/time"
+import { useConfirm } from "@/lib/confirm"
+import { longTime } from "@/lib/time"
 
 import { initials, replyDraft, replyTarget } from "../mail/format"
+import { LoadingRows } from "../mail/lane-list"
+import { rowTime } from "../mail/row-time"
 import { parseShareUrl } from "../notes/share-link"
-import { ShareThreadDialog } from "./share-thread-dialog"
+import { useShareHere } from "./here"
+import { HereTiles } from "./here-tiles"
+import { openTeamLinkForm, useLinkForm } from "./link-form"
+import { ShareThreadLayer } from "./share-thread-dialog"
+import type { TeamMessage } from "./team-doc"
 import { OwnerFiles, TeammateFiles } from "./team-files"
-import { TeamPanel } from "./team-panel"
+import { TeamTabs } from "./team-panel"
 import { useTeamLive } from "./team-sync"
 import { useOpenTeamLink } from "./use-open-team-link"
 import { useHereIn, useTeamDoc } from "./use-team-doc"
-import { PeopleHere } from "../notes/people-here"
 
 const who = (t: TeamThread) => (t.role === "owner" ? "You shared" : `From ${t.from ?? "a teammate"}`)
 
-/** Mail → Team: conversations you shared, and ones shared with you (ADR-0060). */
+/** The Team lane's head action (brief M9): a text button that opens the link form. */
+export function TeamHeadAction() {
+  return (
+    <Button variant="ghost" onClick={openTeamLinkForm}>
+      Open a link…
+    </Button>
+  )
+}
+
+/**
+ * Mail → Team (ADR-0060, ADR-0097; brief M9): conversations you shared, and ones shared with you, as inline
+ * List Rows: the title, "You shared" or "From {name}", STOPPED when the owner stopped, and when it last changed.
+ */
 export function TeamList() {
-  const { data: list = [], isPending } = useTeamThreads()
+  const { data: list = [], isPending, error, refetch, isRefetching } = useTeamThreads()
   const open = useUi((s) => s.teamOpen)
   const setOpen = useUi((s) => s.setTeamOpen)
-  const [paste, setPaste] = useState(false)
-  if (isPending) return null
+  const linkForm = useLinkForm((s) => s.open)
   return (
     <>
-      {list.length === 0 ? (
-        <div className="py-16">
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Icon name="group" />
-            </EmptyMedia>
-            <EmptyTitle>Write replies with your team</EmptyTitle>
-            <EmptyDescription>Share a conversation from its toolbar, and teammates comment and write the reply with you. Conversations shared with you show up here too.</EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <Button variant="outline" onClick={() => setPaste(true)}>
-              <Icon name="link" data-icon="inline-start" /> Open a link…
-            </Button>
-          </EmptyContent>
-        </Empty>
-        </div>
+      {isPending ? (
+        <LoadingRows count={3} label="Loading Team" />
       ) : (
-        <>
-          <ul aria-label="Team" className="flex flex-col">
-            {list.map((t) => (
-              <li key={t.id}>
+        <LoadState place="Team" overline="Team" error={error} hasData={list.length > 0} onRetry={() => void refetch()} retrying={isRefetching}>
+          {list.length === 0 ? (
+            <EmptyState overline="Team // 00" title="Nothing shared." body="Share a conversation from its menu." actionLabel="Open a link…" onAction={openTeamLinkForm} />
+          ) : (
+            <ul aria-label="Team" className="flex flex-col">
+              {list.map((t) => (
                 <ListRow
+                  key={t.id}
+                  render={<li />}
+                  layout="inline"
                   selected={open === t.id}
-                  onSelect={() => setOpen(t.id)}
-                  leading={
-                    <Avatar>
-                      <AvatarFallback>{t.role === "owner" ? <Icon name="group" /> : initials({ name: t.from, email: t.from ?? "?" })}</AvatarFallback>
-                    </Avatar>
-                  }
+                  onClick={() => setOpen(t.id)}
                   title={t.title || "(no subject)"}
-                  meta={shortTime(t.updated)}
-                  supporting={t.revoked ? `${who(t)} · stopped` : who(t)}
+                  meta={who(t)}
+                  metaStyle="plain"
+                  badge={t.revoked ? <Badge>Stopped</Badge> : undefined}
+                  status={rowTime(t.updated)}
                 />
-              </li>
-            ))}
-          </ul>
-          <div className="flex justify-center p-4">
-            <Button variant="ghost" size="sm" onClick={() => setPaste(true)}>
-              <Icon name="link" data-icon="inline-start" /> Open a link…
-            </Button>
-          </div>
-        </>
+              ))}
+            </ul>
+          )}
+        </LoadState>
       )}
-      <OpenTeamLinkDialog open={paste} onOpenChange={setPaste} />
+      <OpenTeamLinkLayer open={linkForm} onOpenChange={(o) => useLinkForm.setState({ open: o })} />
     </>
   )
 }
 
-/** One shared conversation: its copy of the messages, and the team panel. */
-export function TeamThreadView({ id }: { id: string }) {
-  const { data: list = [] } = useTeamThreads()
-  const t = list.find((x) => x.id === id)
-  const { doc, data } = useTeamDoc(id)
-  const live = useTeamLive((s) => !!s[id])
-  useHereIn(id, live && !t?.revoked)
-  const { data: mailPrefs } = useMailPrefs()
-  const openComposer = useUi((s) => s.openComposer)
-  const setOpen = useUi((s) => s.setTeamOpen)
-  const [sharing, setSharing] = useState(false)
-
-  if (!t || !doc || !data) {
-    return (
-      <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 md:px-8 md:pt-6 [&>*>*]:size-full">
-        <div className="h-7 w-2/3">
-          <Skeleton />
-        </div>
-        <div className="h-40 w-full [&>*]:rounded-2xl">
-          <Skeleton />
-        </div>
-      </div>
-    )
-  }
-  const owner = t.role === "owner"
-  const subject = data.subject || t.title || "(no subject)"
-  const remove = () =>
-    void getCoreClient()
-      .then(async (c) => {
-        if (!owner && !t.revoked) await c.stopTeamThread(t.id)
-        await c.removeTeamThread(t.id)
-      })
-      .then(
-        () => {
-          setOpen(null)
-          toast.success(owner ? "Removed" : "You left the conversation", { duration: 2000 })
-        },
-        (e: Error) => toast.error(e.message),
-      )
-  // The owner's reply goes on their real conversation, quoted as Advanced settings say.
-  const answerWith = async (html: string) => {
-    const thread = t.threadId ? await getCoreClient().then((c) => c.getThread(t.threadId!)).catch(() => []) : []
-    const target = replyTarget(thread)
-    if (!target) return void toast.error("That conversation isn't in your mail any more.")
-    openComposer(replyDraft(target, { quote: mailPrefs?.quote ?? true, replyBelow: mailPrefs?.replyBelow ?? false, openingHtml: html }))
-  }
-
+/** Loading (brief 4.0): a title bar and three lines. */
+function Loading() {
   return (
-    <article className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 pb-8 md:px-8 md:pt-6">
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 pb-1">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-xl font-semibold tracking-tight break-words">{subject}</h2>
-          <p className="flex flex-wrap items-center gap-2 pt-1 text-xs text-muted-foreground">
-            <span>{owner ? "You shared this conversation" : `Shared by ${t.from ?? "a teammate"}`}</span>
-            {t.revoked ? <Badge variant="secondary">Stopped</Badge> : live ? <Badge variant="secondary">Live</Badge> : <span>Connecting…</span>}
-            {!t.revoked && <PeopleHere shareId={t.id} />}
-          </p>
+    <AppFrameInset>
+      <div role="status" aria-busy="true" aria-label="Opening the shared conversation" className="flex flex-col gap-5 [&_[data-slot=skeleton]]:size-full">
+        <div className="h-9 w-2/3">
+          <Skeleton />
         </div>
-        <div className="flex shrink-0 gap-2">
-          {owner && !t.revoked && t.threadId && (
-            <Button variant="outline" size="sm" onClick={() => setSharing(true)}>
-              <Icon name="group_add" data-icon="inline-start" /> Sharing
-            </Button>
-          )}
-          {(!owner || t.revoked) && (
-            <Button variant="ghost" size="sm" onClick={remove}>
-              {owner || t.revoked ? "Remove" : "Leave"}
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {t.revoked && !owner && (
-        <div role="status" className="flex items-center gap-3 rounded-2xl border bg-muted/40 px-4 py-3 text-sm [&>svg]:size-5 [&>svg]:shrink-0 [&>svg]:text-muted-foreground">
-          <Icon name="link_off" />
-          <span>{t.from ?? "The owner"} stopped sharing. This is your copy, as it was then; only you can see it.</span>
-        </div>
-      )}
-
-      <ol aria-label="Messages" className="flex flex-col gap-3">
-        {data.messages.length === 0 && <li className="text-sm text-muted-foreground">{live ? "No messages yet." : "The messages arrive once the owner's relay can be reached."}</li>}
-        {data.messages.map((m) => (
-          <li key={m.id} className="flex flex-col gap-2 rounded-2xl border px-4 py-3" data-role="team-message">
-            <div className="flex items-baseline gap-2">
-              <span className="truncate text-sm font-medium">{m.from}</span>
-              <span className="ml-auto shrink-0 text-xs text-muted-foreground">{longTime(m.date)}</span>
-            </div>
-            <p className="text-sm break-words whitespace-pre-wrap">{m.text || "(no text)"}</p>
-          </li>
+        {["w-full", "w-11/12", "w-3/4"].map((w) => (
+          <div key={w} className={`h-4 ${w}`}>
+            <Skeleton />
+          </div>
         ))}
-      </ol>
-
-      <TeamPanel doc={doc} comments={data.comments} owner={owner} from={data.from || t.from} readOnly={t.revoked}
-        onUseReply={owner ? (html) => void answerWith(html) : undefined}
-        files={t.revoked ? null : owner && t.threadId ? <OwnerFiles shareId={t.id} threadId={t.threadId} /> : <TeammateFiles shareId={t.id} />}
-      />
-
-      {owner && t.threadId && <ShareThreadDialog threadId={t.threadId} subject={subject} open={sharing} onOpenChange={setSharing} />}
-    </article>
+      </div>
+    </AppFrameInset>
   )
 }
 
-/** Paste a teammate's link to a conversation. */
-export function OpenTeamLinkDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+/**
+ * A shared conversation, open (brief M9): the MetaList (SHARED BY · STATE · HERE), the title, a Toolbar
+ * (Sharing… for the owner; Leave, or Remove once stopped), then line tabs MESSAGES · COMMENTS · REPLY · FILES.
+ * MESSAGES is read-only and there is no Composer here. On a phone it is a pushed screen whose More holds
+ * the toolbar's actions.
+ */
+export function TeamThreadView({ id }: { id: string }) {
+  const { data: list, isPending } = useTeamThreads()
+  const t = list?.find((x) => x.id === id)
+  const { doc, data } = useTeamDoc(id)
+  const live = useTeamLive((s) => !!s[id])
+  useHereIn(id, live && !t?.revoked)
+  const here = useShareHere(t?.revoked ? null : id)
+  const { data: mailPrefs } = useMailPrefs()
+  const openComposer = useUi((s) => s.openComposer)
+  const setOpen = useUi((s) => s.setTeamOpen)
+  const phone = useAppFrame().phone
+  const confirm = useConfirm()
+  const qc = useQueryClient()
+  const [sharing, setSharing] = useState(false)
+  const owner = t?.role === "owner"
+  // The owner's conversation in their own mail: gone if it was deleted or moved away (brief M9, States).
+  const own = useThread(owner && t?.threadId ? t.threadId : null)
+  const removedFromMail = owner && !!t?.threadId && (own.isError || (own.isSuccess && own.data.length === 0))
+  const subject = data?.subject || t?.title || "(no subject)"
+
+  const remove = async () => {
+    if (!t) return
+    const c = await getCoreClient()
+    if (!t.revoked) await c.stopTeamThread(t.id)
+    await c.removeTeamThread(t.id)
+    await qc.invalidateQueries({ queryKey: ["team"] })
+    setOpen(null)
+  }
+  const act = (work: () => Promise<void>, done: string) =>
+    void work().then(
+      () => toast(done),
+      (e: Error) => toast.error(e.message),
+    )
+  const leave = () => act(remove, `Left ${subject}`)
+  const removeIt = async () => {
+    // Removing a share that still works stops the link too: asked first, since it cannot be undone (brief X6).
+    if (t && !t.revoked) {
+      if (await confirm.ask({ title: `Remove ${subject}?`, description: "The link stops working, and the comments and the reply go with it.", confirmLabel: "Remove", run: remove })) toast(`Removed ${subject}`)
+      return
+    }
+    act(remove, `Removed ${subject}`)
+  }
+
+  // A phone (brief M9): Back · More (Sharing…, Leave or Remove) in the top bar; no Composer in the bottom row.
+  const canShare = !!t && owner && !t.revoked && !!t.threadId && !removedFromMail
+  const leaves = !!t && !owner && !t.revoked
+  const chrome = useMemo(
+    () =>
+      phone && t
+        ? {
+            actions: (
+              <AdaptiveMenu title="More" trigger={<FloatButton label="More" icon="overflow-menu--horizontal" size="l" />}>
+                {canShare && (
+                  <AdaptiveMenuItem icon="user--follow" onSelect={() => setSharing(true)}>
+                    Sharing…
+                  </AdaptiveMenuItem>
+                )}
+                {leaves ? (
+                  <AdaptiveMenuItem icon="logout" onSelect={leave}>
+                    Leave
+                  </AdaptiveMenuItem>
+                ) : (
+                  (t.revoked || removedFromMail) && (
+                    <AdaptiveMenuItem icon="trash-can" variant="destructive" onSelect={() => void removeIt()}>
+                      Remove
+                    </AdaptiveMenuItem>
+                  )
+                )}
+              </AdaptiveMenu>
+            ),
+          }
+        : null,
+    // The chrome is drawn again whenever what it offers changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [phone, t?.id, t?.revoked, canShare, leaves, removedFromMail, subject],
+  )
+  usePushedChrome(chrome)
+
+  if (!t) {
+    if (isPending) return <Loading />
+    return (
+      <AppFrameInset>
+        <EmptyState size="sm" overline="Team" title="That shared conversation is gone." />
+      </AppFrameInset>
+    )
+  }
+  if (!doc || !data) return <Loading />
+
+  // The owner's reply goes on their real conversation, quoted as their mail settings say.
+  const answerWith = async (html: string) => {
+    const thread = t.threadId ? await getCoreClient().then((c) => c.getThread(t.threadId!)).catch(() => []) : []
+    const target = replyTarget(thread)
+    if (!target) return void toast.error("That conversation isn't in your mail any more")
+    openComposer(replyDraft(target, { quote: mailPrefs?.quote ?? true, replyBelow: mailPrefs?.replyBelow ?? false, openingHtml: html }))
+  }
+  const state = t.revoked ? <Badge>Stopped</Badge> : live ? <Badge tone="live">Live</Badge> : <Badge>Connecting</Badge>
+  const readOnly = t.revoked || removedFromMail
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Open a shared conversation</DialogTitle>
-          <DialogDescription>Paste the link a teammate sent you. You'll see the conversation, its comments, and the reply you're writing together.</DialogDescription>
-        </DialogHeader>
-        {open && <OpenTeamLinkForm onDone={() => onOpenChange(false)} />}
-      </DialogContent>
-    </Dialog>
+    <div className={phone ? "flex flex-1 flex-col px-4 pb-8" : "flex flex-1 flex-col pb-8"}>
+      <article aria-label={subject} className="flex flex-col gap-6">
+        <div className="flex items-start justify-between gap-6">
+          <MetaList>
+            <MetaItem label="Shared by">{owner ? "You" : (t.from ?? "A teammate")}</MetaItem>
+            <MetaItem label="State">{state}</MetaItem>
+            {here.length > 0 && (
+              <MetaItem label="Here">
+                <HereTiles names={here} />
+              </MetaItem>
+            )}
+          </MetaList>
+          {/* Once the owner's mail no longer has it, the banner below holds REMOVE: one control for one job. */}
+          {!phone && (canShare || leaves || t.revoked) && (
+            <Toolbar aria-label="Shared conversation">
+              {canShare && <ToolbarButton label="Sharing…" onClick={() => setSharing(true)} />}
+              {leaves ? <ToolbarButton label="Leave" onClick={leave} /> : t.revoked && <ToolbarButton label="Remove" onClick={() => void removeIt()} />}
+            </Toolbar>
+          )}
+        </div>
+
+        <h2 className="type-title break-words text-foreground">{subject}</h2>
+
+        {/* States (brief M9): stopped for a guest, everything read-only; the owner's mail no longer has it. */}
+        {t.revoked && !owner && <Banner tone="info" size="compact" title="The owner stopped sharing." body="What you had stays here as your copy. Only you can see it." />}
+        {removedFromMail && (
+          <Banner
+            tone="info"
+            size="compact"
+            title="That conversation isn't in your mail any more."
+            action={
+              <Button variant="secondary" size="sm" onClick={() => void removeIt()}>
+                Remove
+              </Button>
+            }
+          />
+        )}
+
+        <TeamTabs
+          doc={doc}
+          comments={data.comments}
+          owner={owner}
+          from={data.from || t.from}
+          readOnly={readOnly}
+          onUseReply={owner ? (html) => void answerWith(html) : undefined}
+          messages={<SharedMessages messages={data.messages} live={live} />}
+          files={t.revoked ? <p className="type-body text-muted-foreground">Files stopped with the share.</p> : owner && t.threadId ? <OwnerFiles shareId={t.id} threadId={t.threadId} readOnly={removedFromMail} /> : <TeammateFiles shareId={t.id} />}
+        />
+      </article>
+
+      {canShare && t.threadId && <ShareThreadLayer threadId={t.threadId} subject={subject} open={sharing} onOpenChange={setSharing} />}
+      {confirm.question()}
+    </div>
+  )
+}
+
+/** MESSAGES (brief M9): the shared copy, oldest first, each message open, read-only. Rules and space, no cards. */
+function SharedMessages({ messages, live }: { messages: TeamMessage[]; live: boolean }) {
+  if (messages.length === 0) return <p className="type-body text-muted-foreground">{live ? "No messages yet." : "The messages arrive once the owner's relay can be reached."}</p>
+  return (
+    <ol aria-label="Messages" className="flex flex-col rule-b">
+      {messages.map((m) => (
+        <li key={m.id} aria-label={`Message from ${m.from}`} className="flex flex-col gap-4 rule-t pt-4 pb-6" data-role="team-message">
+          <div className="flex min-h-8 items-center gap-3">
+            <InitialTile size="s" initials={initials({ name: m.from, email: m.email })} />
+            <span className="min-w-0 flex-1 truncate type-ui-emphasis text-foreground">{m.from}</span>
+            <span className="shrink-0 type-meta text-muted-foreground">{longTime(m.date)}</span>
+          </div>
+          <p className="max-w-(--c-app-frame-reading) type-body break-words whitespace-pre-wrap text-foreground">{m.text || "(no text)"}</p>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+/** OPEN A LINK… (brief M9): a form with LINK and the primary OPEN. */
+export function OpenTeamLinkLayer({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  return (
+    <FormLayer open={open} onClose={() => onOpenChange(false)}>
+      {open && <OpenTeamLinkForm onDone={() => onOpenChange(false)} />}
+    </FormLayer>
   )
 }
 
@@ -202,32 +312,28 @@ function OpenTeamLinkForm({ onDone }: { onDone: () => void }) {
   const link = parseShareUrl(text)
   const openLink = useOpenTeamLink()
   const wrong = !!text.trim() && (!link || link.kind !== "thread")
+  const ok = link?.kind === "thread"
   return (
-    <form
-      className="flex flex-col gap-4"
-      onSubmit={(e) => {
-        e.preventDefault()
+    <FormLayerForm
+      overline="Team"
+      title="Open a shared conversation"
+      primary={{ label: "Open", icon: "link", disabled: !ok, loading: busy }}
+      onSubmit={() => {
         if (!link || link.kind !== "thread") return
         setBusy(true)
-        void openLink(link).then((ok) => (ok ? onDone() : setBusy(false)))
+        void openLink(link).then((done) => (done ? onDone() : setBusy(false)))
       }}
     >
-      <Field data-invalid={wrong}>
-        <FieldLabel htmlFor="team-paste">Link</FieldLabel>
-        <Input id="team-paste" autoFocus autoComplete="off" placeholder="https://…/share#…" value={text} onChange={(e) => setText(e.target.value)} aria-invalid={wrong} />
-        {wrong && <FieldError>{link?.kind === "note" ? "That's a shared note. Open it in Notes, with Open a shared note…" : "That isn't a shared-conversation link. It looks like https://…/share#…"}</FieldError>}
-      </Field>
-      {link?.kind === "thread" && (
-        <p className="text-sm">
-          <span className="font-medium">{link.title || "A conversation"}</span>
-          <span className="text-muted-foreground">{link.from ? ` · from ${link.from}` : ""}</span>
-        </p>
-      )}
-      <DialogFooter>
-        <Button type="submit" disabled={!link || link.kind !== "thread" || busy}>
-          {busy ? "Opening…" : "Open"}
-        </Button>
-      </DialogFooter>
-    </form>
+      <TextField
+        label="Link"
+        data-form-focus
+        autoComplete="off"
+        placeholder="https://…/share#…"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        error={wrong ? (link?.kind === "note" ? "That's a shared note. Open it in Notes, with Open a shared note…" : "That isn't a shared-conversation link. It looks like https://…/share#…") : undefined}
+        helper={ok ? `${link.title || "A conversation"}${link.from ? ` // from ${link.from}` : ""}` : "Paste the link a teammate sent you."}
+      />
+    </FormLayerForm>
   )
 }

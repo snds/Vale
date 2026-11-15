@@ -1,129 +1,200 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
-import { toast } from "sonner"
+import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
 
 import { useUi } from "@/app/ui-store"
-import { Icon, Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, NativeSelect, NativeSelectOption, DialogAction, DialogActions } from "@unicron/ui"
+import { FormLayer, FormLayerForm } from "@/components/editor-frame"
+import {
+  AdaptiveMenu,
+  AdaptiveMenuRadioGroup,
+  AdaptiveMenuRadioItem,
+  AppFrameInset,
+  AppFramePageHead,
+  Banner,
+  Button,
+  Checkbox,
+  EmptyState,
+  FieldRow,
+  FieldRowAction,
+  FilterChip,
+  FilterChipGroup,
+  Icon,
+  ListRow,
+  Skeleton,
+  TextField,
+  toast,
+  useAppFrame,
+} from "@unicron/ui"
 import { getCoreClient } from "@/core/client"
-import { useCollections, useNoteTasks, useNotesPrefs } from "@/core/queries"
-import type { NoteTask, TimeSlot } from "@/core/types"
+import { useCollections, useNotesPrefs } from "@/core/queries"
+import type { Collection, NoteTask, TimeSlot } from "@/core/types"
+import { useConfirm } from "@/lib/confirm"
+import { leaveThen, useLeaveGuard } from "@/lib/leave-guard"
+import { calendarSwatches, swatchSquare } from "@/lib/swatches"
 
 import { setTaskDone } from "../notes/checklists"
-import { dateInput, dayLabel, deviceTimeZone, fmt, fromSecs, timeInput } from "./dates"
+import { clock, dateInput, deviceTimeZone, folio, fromInputs, fromSecs, secs, timeInput } from "./dates"
+import { DateField } from "./event-editor"
+import { planTask, stopPlanning, useOpenTasks, usePlanning } from "./planning"
 
+/** How many rows a long list shows before SHOW ALL (as before, ADR-0028). */
 const SHOWN = 5
-const fail = (e: unknown) => toast.error(e instanceof Error ? e.message : String(e))
-const when = (s: number) => `${dayLabel(fromSecs(s))}, ${fmt.time(s)}`
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
+/** A task's key: its note and its place among the note's items. */
+const keyOf = (t: NoteTask) => `${t.noteId}:${t.index}`
+/** "Wed 11.18 16:30": when a task is planned, as a mono line writes it (the line sets the capitals). */
+const when = (s: number) => `${folio(fromSecs(s))} ${clock(s)}`
 
 /**
- * Tasks (ADR-0028): the open checklist items from your notes, beside the
- * calendar, so an intention becomes a block of time. A task stays in its
- * note; checking it here checks it there.
+ * Tasks (ADR-0028, ADR-0100; brief C6): the open checklist items from your
+ * notes, so an intention becomes a block of time. A task stays in its note;
+ * checking it here checks it there, with UNDO. It is a place of Calendar
+ * (ADR-0084): the list column, or the whole screen on a phone.
+ *
+ * Each row: a Checkbox, the task's words, a mono line with its note's title
+ * and, once planned, `PLANNED WED 16:30` as a link to the event; then PLAN or
+ * PLAN AGAIN.
  */
-export function TasksPanel({ onOpen }: { onOpen: (eventId: string, start: number) => void }) {
-  const { data: tasks = [] } = useNoteTasks()
+export function TasksPanel({ onOpen, onPlan }: { onOpen: (eventId: string, start: number) => void; /** A plan starts: the view closes an event open beside the list. */ onPlan?: () => void }) {
+  const { data: tasks = [], isPending, error, refetch } = useOpenTasks()
   const { data: prefs } = useNotesPrefs()
   const [all, setAll] = useState(false)
-  const [planning, setPlanning] = useState<NoteTask | null>(null)
+  const planning = usePlanning((s) => s.task)
+  const split = useAppFrame().split
   const qc = useQueryClient()
   const shown = all ? tasks : tasks.slice(0, SHOWN)
+  // Leaving Tasks closes a plan left open (with changes, the move asked first).
+  useEffect(() => stopPlanning, [])
 
   const check = async (t: NoteTask, done: boolean) => {
     try {
       const core = await getCoreClient()
       await setTaskDone(core, t, done, prefs?.sortChecked ?? true)
       await qc.invalidateQueries({ queryKey: ["notes"], predicate: (q) => q.queryKey[1] !== "note" })
-      if (done) toast.success(`Done: ${t.text}`, { duration: 4000, action: { label: "Undo", onClick: () => void check(t, false) } })
+      if (done) {
+        if (planning && keyOf(planning) === keyOf(t)) stopPlanning()
+        toast(`Done: ${t.text}`, { action: { label: "Undo", onClick: () => void check(t, false) } })
+      }
     } catch (e) {
-      fail(e)
+      toast.error(message(e))
     }
   }
+  // The planned link opens its event: in the detail column, or pushed.
+  const open = (t: NoteTask) =>
+    t.planned &&
+    leaveThen(() => {
+      stopPlanning()
+      onOpen(t.planned!.eventId, t.planned!.start)
+    })
+
+  let body: ReactNode
+  if (isPending)
+    body = (
+      <div className="flex flex-col gap-5" aria-hidden>
+        {/* Sized by plain boxes: the library owns the bar's look (brief 4.0: two bars a row). */}
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="grid h-12 gap-2">
+            <Skeleton />
+            <Skeleton />
+          </div>
+        ))}
+      </div>
+    )
+  else if (error && !tasks.length) body = <EmptyState tone="critical" overline="Tasks" title="Can't load tasks." body={message(error)} actionLabel="Try again" onAction={() => void refetch()} />
+  else if (!tasks.length) body = <EmptyState overline="Tasks // 00" title="No tasks." body="Checklist items in your notes show up here." />
+  else
+    body = (
+      <div className="flex flex-col gap-4">
+        <ul aria-label="Open tasks" className="flex flex-col">
+          {shown.map((t) => (
+            <ListRow
+              key={keyOf(t)}
+              render={<li />}
+              selected={!!planning && split && keyOf(planning) === keyOf(t)}
+              // The row has no main control to say it, so the row itself does: it is the one being planned.
+              aria-current={planning && split && keyOf(planning) === keyOf(t) ? "true" : undefined}
+              leading={<Checkbox checked={false} onCheckedChange={(on) => on && void check(t, true)} aria-label={`Done: ${t.text}`} />}
+              title={t.text}
+              meta={
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="truncate">{t.noteTitle || "Untitled note"}</span>
+                  {t.planned && (
+                    <>
+                      <span aria-hidden>//</span>
+                      <Button variant="link" size="inline" onClick={() => open(t)} aria-label={`Planned ${when(t.planned.start)}, open the event`}>
+                        {`Planned ${when(t.planned.start)}`}
+                      </Button>
+                    </>
+                  )}
+                </span>
+              }
+              action={
+                <Button variant="ghost" size="sm" onClick={() => planTask(t, onPlan)} aria-label={`${t.planned ? "Plan again" : "Plan"}: ${t.text}`}>
+                  {t.planned ? "Plan again" : "Plan"}
+                </Button>
+              }
+            />
+          ))}
+        </ul>
+        {tasks.length > SHOWN && (
+          <div className="flex">
+            <Button variant="ghost" size="sm" onClick={() => setAll(!all)}>
+              {all ? "Show fewer" : "Show all"}
+            </Button>
+          </div>
+        )}
+      </div>
+    )
 
   return (
-    <section aria-label="Tasks" className="flex flex-col gap-1">
-      <h3 className="flex items-baseline justify-between pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-        Tasks {tasks.length > 0 && <span className="font-normal tabular-nums normal-case">{tasks.length} open</span>}
-      </h3>
-      {tasks.length === 0 && <p className="text-xs text-muted-foreground">Checklist items in your notes show up here, ready to plan.</p>}
-      {shown.map((t) => (
-        <div key={`${t.noteId}:${t.index}`} className="flex items-start gap-2 rounded-lg px-1 py-1 text-sm hover:bg-accent/50">
-          <Checkbox className="mt-0.5" checked={false} onCheckedChange={(on) => on && void check(t, true)} aria-label={`Done: ${t.text}`} />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate">{t.text}</span>
-            {t.planned ? (
-              <span className="text-xs">
-                {/* In the calendar's hue: it's on the calendar now. */}
-                <Button variant="link" size="inline" className="text-vertical-calendar-text" onClick={() => onOpen(t.planned!.eventId, t.planned!.start)}>
-                  <Icon name="event_available" /> {when(t.planned.start)}
-                </Button>
-              </span>
-            ) : (
-              <span className="truncate text-xs">
-                <Button variant="link" size="inline" className="text-muted-foreground" onClick={() => useUi.getState().jumpTo({ kind: "note", id: t.noteId })}>
-                  {t.noteTitle || "Untitled note"}
-                </Button>
-              </span>
-            )}
-          </div>
-          <Button size="icon-sm" variant="ghost" aria-label={`${t.planned ? "Plan again" : "Plan"}: ${t.text}`} onClick={() => setPlanning(t)}>
-            <Icon name="more_time" />
-          </Button>
-        </div>
-      ))}
-      {tasks.length > SHOWN && (
-        <Button variant="ghost-muted" size="sm" className="justify-start px-1" onClick={() => setAll(!all)}>
-          {all ? "Show fewer" : `Show all ${tasks.length}`}
-        </Button>
+    <section aria-label="Tasks" className="flex flex-col" aria-busy={isPending || undefined}>
+      {body}
+      {/* A phone and medium width plan in the form layer; a desktop, in the detail column. */}
+      {!split && (
+        <FormLayer open={!!planning} onClose={stopPlanning}>
+          {planning && <PlanLayer key={keyOf(planning)} task={planning} onOpen={onOpen} />}
+        </FormLayer>
       )}
-      <Dialog open={planning !== null} onOpenChange={(o) => !o && setPlanning(null)}>
-        <DialogContent size="md">{planning && <PlanForm key={`${planning.noteId}:${planning.index}`} task={planning} onDone={() => setPlanning(null)} onOpen={onOpen} />}</DialogContent>
-      </Dialog>
     </section>
   )
 }
 
-const LENGTHS = [15, 30, 45, 60, 90, 120]
-
-/** Puts a task on the calendar: a time block titled with its words, linked from its note. */
-function PlanForm({ task, onDone, onOpen }: { task: NoteTask; onDone: () => void; onOpen: (eventId: string, start: number) => void }) {
+/** The plan's values, its free times and its save, shared by the pane and the layer. */
+function usePlan(task: NoteTask, onOpen: (eventId: string, start: number) => void, onDone: () => void) {
   const { data: calendars = [] } = useCollections("calendar")
-  const writable = calendars.filter((c) => c.writable && !c.id.startsWith("interesting:"))
-  const [calendarId, setCalendarId] = useState(() => (writable.find((c) => !c.hidden) ?? writable[0])?.id ?? "")
-  const [minutes, setMinutes] = useState(30)
-  // The next half hour, as a starting point.
-  const [soon] = useState(() => new Date(Math.ceil(Date.now() / 1_800_000) * 1_800_000))
-  const [day, setDay] = useState(() => dateInput(soon))
-  const [time, setTime] = useState(() => timeInput(soon))
-  const [free, setFree] = useState<TimeSlot[] | null>(null)
+  const writable = useMemo(() => calendars.filter((c) => c.writable && !c.id.startsWith("interesting:")), [calendars])
+  // The next half hour, for 30 minutes, as a starting point.
+  const [initial] = useState(() => {
+    const start = new Date(Math.ceil(Date.now() / 1_800_000) * 1_800_000)
+    const end = new Date(start.getTime() + 30 * 60_000)
+    return { day: dateInput(start), start: timeInput(start), end: timeInput(end), today: dateInput(new Date()) }
+  })
+  const [day, setDay] = useState(initial.day)
+  const [start, setStart] = useState(initial.start)
+  const [end, setEnd] = useState(initial.end)
+  const firstCalendar = (writable.find((c) => !c.hidden) ?? writable[0])?.id ?? ""
+  const [picked, setCalendarId] = useState<string | null>(null)
+  const calendarId = picked ?? firstCalendar
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const qc = useQueryClient()
-
-  const findFree = async (m = minutes) => {
-    try {
-      const slots = await (await getCoreClient()).findTimes({ from: Math.floor(Date.now() / 1000), minutes: m, dayStart: 8 * 60, dayEnd: 20 * 60, weekdaysOnly: false, limit: 3 })
-      setFree(slots)
-    } catch (e) {
-      fail(e)
-    }
-  }
-  const pickSlot = (s: TimeSlot) => {
-    setDay(dateInput(fromSecs(s.start)))
-    setTime(timeInput(fromSecs(s.start)))
-  }
+  const dirty = day !== initial.day || start !== initial.start || end !== initial.end || picked !== null
+  const from = fromInputs(day, start)
+  const to = fromInputs(day, end)
+  const endError = to.getTime() <= from.getTime() ? "End after it starts." : null
+  const minutes = Math.max(15, Math.round((to.getTime() - from.getTime()) / 60_000))
 
   const submit = async () => {
-    const start = new Date(`${day}T${time}`)
-    if (Number.isNaN(start.getTime())) return toast.error("Pick a day and a time")
-    const end = new Date(start.getTime() + minutes * 60_000)
+    if (endError || !writable.length) return
     setBusy(true)
+    setError(null)
     try {
       const core = await getCoreClient()
       const e = await core.createEvent({
-        calendarId: calendarId || writable[0]?.id || "",
+        calendarId: calendarId || writable[0]!.id,
         title: task.text,
-        notes: `From your note “${task.noteTitle || "Untitled"}”.`,
-        start: `${dateInput(start)}T${timeInput(start)}`,
-        end: `${dateInput(end)}T${timeInput(end)}`,
+        notes: `From your note “${task.noteTitle || "Untitled note"}”.`,
+        start: `${day}T${start}`,
+        end: `${day}T${end}`,
         allDay: false,
         timeZone: deviceTimeZone(),
         repeat: "none",
@@ -136,86 +207,209 @@ function PlanForm({ task, onDone, onOpen }: { task: NoteTask; onDone: () => void
       }
       await qc.invalidateQueries({ queryKey: ["notes"], predicate: (q) => q.queryKey[1] !== "note" })
       await qc.invalidateQueries({ queryKey: ["pim"] })
-      toast.success(`Planned “${task.text}”`, { description: when(e.start), duration: 4000, action: { label: "Show", onClick: () => onOpen(e.eventId, e.start) } })
+      toast(`Planned ${task.text}`, { action: { label: "Show", onClick: () => onOpen(e.eventId, e.start) } })
       onDone()
     } catch (err) {
-      fail(err)
+      // The form stays, with the server's words above its actions (brief 4.0).
+      setError(message(err))
     } finally {
       setBusy(false)
     }
   }
+  const pickSlot = (s: TimeSlot) => {
+    setDay(dateInput(fromSecs(s.start)))
+    setStart(timeInput(fromSecs(s.start)))
+    setEnd(timeInput(fromSecs(s.end)))
+  }
+  return { today: initial.today, writable, day, setDay, start, setStart, end, setEnd, calendarId, setCalendarId, busy, error, dirty, endError, minutes, submit, pickSlot }
+}
+type Plan = ReturnType<typeof usePlan>
 
-  const field = "h-9 w-full rounded-lg border bg-transparent px-2.5 text-sm dark:bg-input/30"
+/**
+ * The plan's words and fields (brief C6): one line, then DAY (the shared
+ * date picker), STARTS, ENDS, CALENDAR, and FIND A FREE TIME.
+ */
+function PlanFields({ plan }: { plan: Plan }) {
+  const { data: all = [] } = useCollections("calendar")
+  const swatches = useMemo(() => calendarSwatches(all), [all])
+  const calendar = plan.writable.find((c) => c.id === plan.calendarId)
   return (
-    <form className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), void submit())}>
-      <DialogHeader>
-        <DialogTitle>Plan “{task.text}”</DialogTitle>
-        <DialogDescription>Block time for it on your calendar. The task stays in “{task.noteTitle || "Untitled"}”, linked to its block.</DialogDescription>
-      </DialogHeader>
-      <div className="grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1 text-sm">
-          Day
-          <input className={field} type="date" value={day} onChange={(e) => setDay(e.target.value)} required />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Start
-          <input className={field} type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)} required />
-        </label>
+    <div className="flex flex-col gap-6">
+      <p className="type-body text-text-secondary">Block time for it. The task stays in its note.</p>
+      <div className="flex flex-col gap-4">
+        <DateField label="Day" name="Day" value={plan.day} onPick={plan.setDay} min={plan.today} />
+        <div className="grid grid-cols-2 gap-4">
+          <TextField type="time" label="Starts" value={plan.start} onChange={(e) => e.target.value && plan.setStart(e.target.value)} />
+          <TextField type="time" label="Ends" value={plan.end} onChange={(e) => e.target.value && plan.setEnd(e.target.value)} error={plan.endError ?? undefined} />
+        </div>
+        <FreeTimes minutes={plan.minutes} onPick={plan.pickSlot} />
       </div>
-      <div className="flex flex-col gap-2">
-        <Button type="button" variant="outline" size="sm" className="self-start" onClick={() => void findFree()}>
-          <Icon name="search" data-icon="inline-start" /> Find a free time
+      {plan.writable.length ? (
+        <FieldRow
+          label="Calendar"
+          action={
+            <AdaptiveMenu title="Calendar" align="end" trigger={<FieldRowAction type="button" aria-label="Change calendar">Change</FieldRowAction>}>
+              <AdaptiveMenuRadioGroup value={plan.calendarId} onValueChange={plan.setCalendarId}>
+                {plan.writable.map((c) => (
+                  <AdaptiveMenuRadioItem key={c.id} value={c.id}>
+                    {c.name}
+                  </AdaptiveMenuRadioItem>
+                ))}
+              </AdaptiveMenuRadioGroup>
+            </AdaptiveMenu>
+          }
+        >
+          <CalendarName calendar={calendar} square={swatchSquare(calendar ? swatches.get(calendar.id) : null)} />
+        </FieldRow>
+      ) : (
+        <Banner size="compact" tone="critical" body="No calendar takes new events. Add an account with a calendar first." />
+      )}
+    </div>
+  )
+}
+
+/** The calendar as its row shows it: the 8 px swatch square, then the name. */
+function CalendarName({ calendar, square }: { calendar: Collection | undefined; square: string | null }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      {square && <span className={square} aria-hidden data-slot="swatch" />}
+      <span className="truncate">{calendar?.name ?? "None"}</span>
+    </span>
+  )
+}
+
+/**
+ * FIND A FREE TIME (brief C6): free slots as long as the plan, between 8 AM
+ * and 8 PM, as single-choice chips; picking one sets the day and the times.
+ */
+function FreeTimes({ minutes, onPick }: { minutes: number; onPick: (s: TimeSlot) => void }) {
+  const [slots, setSlots] = useState<TimeSlot[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [picked, setPicked] = useState<string | null>(null)
+  const find = async () => {
+    setBusy(true)
+    setError(null)
+    setPicked(null)
+    try {
+      setSlots(await (await getCoreClient()).findTimes({ from: secs(new Date()), minutes, dayStart: 8 * 60, dayEnd: 20 * 60, weekdaysOnly: false, limit: 4 }))
+    } catch (e) {
+      // A failed action: one critical line beside the control, in the server's words (decisions §9).
+      setError(message(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="flex flex-col gap-2" data-slot="free-times">
+      <div className="flex">
+        <Button type="button" variant="ghost" size="sm" loading={busy} onClick={() => void find()}>
+          <Icon name="event--schedule" /> Find a free time
         </Button>
-        {free && (free.length === 0 ? (
-          <p className="text-xs text-muted-foreground">Nothing free soon between 8 AM and 8 PM.</p>
-        ) : (
-          <div role="group" aria-label="Free times" className="flex flex-wrap gap-2">
-            {free.map((s) => (
-              <Button key={s.start} type="button" size="sm" variant={dateInput(fromSecs(s.start)) === day && timeInput(fromSecs(s.start)) === time ? "default" : "secondary"} onClick={() => pickSlot(s)}>
-                {when(s.start)}
-              </Button>
-            ))}
-          </div>
-        ))}
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1 text-sm">
-          Length
-          <NativeSelect
-            value={String(minutes)}
-            onChange={(e) => {
-              const m = Number(e.target.value)
-              setMinutes(m)
-              if (free) void findFree(m)
-            }}
-            className="w-full"
-          >
-            {LENGTHS.map((m) => (
-              <NativeSelectOption key={m} value={String(m)}>
-                {m < 60 ? `${m} minutes` : m === 60 ? "1 hour" : `${m / 60} hours`}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Calendar
-          <NativeSelect value={calendarId} onChange={(e) => setCalendarId(e.target.value)} className="w-full">
-            {writable.map((c) => (
-              <NativeSelectOption key={c.id} value={c.id}>
-                {c.name}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </label>
-      </div>
-      <DialogActions>
-        <DialogAction kind="cancel" type="button" onClick={onDone}>
-          Cancel
-        </DialogAction>
-        <DialogAction type="submit" disabled={busy || !writable.length}>
-          Plan it
-        </DialogAction>
-      </DialogActions>
-    </form>
+      {error && (
+        <p className="type-caption text-critical-text" role="alert">
+          {error}
+        </p>
+      )}
+      {slots && slots.length === 0 && <p className="type-caption text-text-secondary">Nothing free soon between 8 AM and 8 PM.</p>}
+      {slots && slots.length > 0 && (
+        <FilterChipGroup
+          type="single"
+          label="Free times"
+          value={picked}
+          onValueChange={(v) => {
+            const s = slots.find((x) => String(x.start) === v)
+            if (!s) return
+            setPicked(v)
+            onPick(s)
+          }}
+        >
+          {slots.map((s) => (
+            <FilterChip key={s.start} value={String(s.start)}>
+              {when(s.start)}
+            </FilterChip>
+          ))}
+        </FilterChipGroup>
+      )}
+    </div>
+  )
+}
+
+const openNote = (t: NoteTask) => useUi.getState().jumpTo({ kind: "note", id: t.noteId })
+
+/**
+ * The plan in the detail column (a desktop): the overline `PLAN // {NOTE}`,
+ * the task's words as the title, the fields, then PLAN (the column's one
+ * primary), OPEN NOTE and CANCEL. Any move away with changes asks first
+ * (brief X6): the places store waits, and so do the list's own moves.
+ */
+export function TaskPlanPane({ onOpen }: { onOpen: (eventId: string, start: number) => void }) {
+  const task = usePlanning((s) => s.task)
+  if (!task) return null
+  return <PlanPane key={keyOf(task)} task={task} onOpen={onOpen} />
+}
+
+function PlanPane({ task, onOpen }: { task: NoteTask; onOpen: (eventId: string, start: number) => void }) {
+  const plan = usePlan(task, onOpen, stopPlanning)
+  useLeaveGuard(plan.dirty, stopPlanning)
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    void plan.submit()
+  }
+  const keys = (e: KeyboardEvent<HTMLFormElement>) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      void plan.submit()
+    } else if (e.key === "Escape" && !e.defaultPrevented) leaveThen(stopPlanning)
+  }
+  return (
+    <AppFrameInset>
+      <AppFramePageHead overline={`Plan // ${task.noteTitle || "Untitled note"}`} title={task.text} size="md" />
+      <form className="flex flex-col gap-8" aria-label={`Plan ${task.text}`} onSubmit={submit} onKeyDown={keys} data-slot="task-plan">
+        <PlanFields plan={plan} />
+        {plan.error && <Banner size="compact" tone="critical" body={plan.error} />}
+        <div className="flex flex-wrap items-center gap-4" role="group" aria-label="Plan actions">
+          <Button type="submit" loading={plan.busy} disabled={!!plan.endError || !plan.writable.length} aria-keyshortcuts="Control+Enter Meta+Enter">
+            Plan
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => openNote(task)}>
+            Open note
+          </Button>
+          <Button type="button" variant="ghost" onClick={() => leaveThen(stopPlanning)}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </AppFrameInset>
+  )
+}
+
+/** The plan in the form layer (a phone, medium width): PLAN is the layer's primary; OPEN NOTE asks first when there are changes. */
+function PlanLayer({ task, onOpen }: { task: NoteTask; onOpen: (eventId: string, start: number) => void }) {
+  const plan = usePlan(task, onOpen, stopPlanning)
+  useLeaveGuard(plan.dirty)
+  const confirm = useConfirm()
+  const toNote = async () => {
+    if (plan.dirty && !(await confirm.ask({ title: "Discard changes?", confirmLabel: "Discard", cancelLabel: "Keep editing" }))) return
+    stopPlanning()
+    openNote(task)
+  }
+  return (
+    <FormLayerForm
+      overline={`Plan // ${task.noteTitle || "Untitled note"}`}
+      title={task.text}
+      primary={{ label: "Plan", disabled: !!plan.endError || !plan.writable.length, loading: plan.busy }}
+      error={plan.error}
+      onSubmit={() => void plan.submit()}
+      footerStart={
+        <Button type="button" variant="secondary" onClick={() => void toNote()}>
+          Open note
+        </Button>
+      }
+    >
+      <PlanFields plan={plan} />
+      {confirm.question()}
+    </FormLayerForm>
   )
 }

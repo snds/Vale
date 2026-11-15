@@ -1,0 +1,97 @@
+/*
+ * Mail: what only the mail area adds to Vale's layer (see shell.css for the
+ * rules). The knobs the composer shares with notes are in shell.css.
+ */
+
+/* ── Tier 3 · Knobs ──────────────────────────────────────────────────────── */
+:root,
+.light,
+.dark,
+[data-theme] {
+  /* The format bar (ADR-0089), wherever it stands: in a field's box, at the
+     foot of the note, above a phone's keyboard. */
+  --c-format-bar-padding-x: 0.5rem;
+  --c-format-bar-padding-y: 0.25rem;
+  --c-format-bar-rule: var(--line-rule);
+  --c-format-bar-ground: var(--surface-ground);
+}
+
+@layer components {
+  /* A row that never wraps: on a narrow screen it scrolls sideways, with no bar. */
+  .format-bar {
+    display: flex;
+    min-width: 0;
+    flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: var(--c-format-bar-padding-y) var(--c-format-bar-padding-x);
+    border-top: 1px solid var(--c-format-bar-rule);
+  }
+  /* At the foot of a column that scrolls: it stays in view over the text. */
+  .format-bar[data-mode="docked"],
+  .format-bar[data-mode="keyboard"] {
+    position: sticky;
+    bottom: 0;
+    background: var(--c-format-bar-ground);
+  }
+  /* A phone: just above the on-screen keyboard (src/lib/keyboard-inset.ts). */
+  .format-bar[data-mode="keyboard"] {
+    bottom: var(--keyboard-inset, 0px);
+  }
+}
+
+/* Composer body (Tiptap). Preflight strips list and quote styling, so the
+   editor puts back just what an email needs. */
+@layer components {
+  .composer-body {
+    & > * + * {
+      margin-top: 0.25em;
+    }
+    & ul {
+      list-style: disc;
+      padding-left: 1.5em;
+    }
+    & ol {
+      list-style: decimal;
+      padding-left: 1.5em;
+    }
+    & blockquote {
+      border-left: 2px solid var(--c-composer-quote-border);
+      color: var(--c-composer-quote-text);
+      padding-left: 0.75em;
+    }
+    & a {
+      color: var(--c-composer-link);
+      text-decoration: underline;
+    }
+    & a.wikilink {
+      color: var(--c-note-wikilink-text);
+      background: var(--c-note-wikilink-bg);
+      border-radius: 0.25em;
+      padding: 0 0.2em;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    & a.wikilink.ProseMirror-selectednode {
+      outline: 2px solid var(--c-note-wikilink-text);
+    }
+    & code {
+      font-family: var(--font-mono);
+      font-size: 0.9em;
+    }
+    & p.is-editor-empty:first-child::before {
+      content: attr(data-placeholder);
+      float: left;
+      height: 0;
+      pointer-events: none;
+      color: var(--c-composer-placeholder);
+    }
+  }
+}
+
+/* The phone's message body (Mobile / 03): no box, so the text lines up with
+   the fields above it instead of sitting 16 px in. Unlayered, so it wins
+   over the field's own padding utility. */
+[data-slot="rich-editor"][data-bare] .composer-body {
+  padding-inline: 0;
+}

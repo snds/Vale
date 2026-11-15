@@ -1,13 +1,16 @@
-//! Update checks for the gateway (ADR-0077; the unified updates proposal, U5).
+//! Update checks for the gateway (ADR-0077, ADR-0090; the unified updates
+//! proposal, U5).
 //!
 //! A server can't swap its own image while it runs, so the gateway only
 //! checks and says. Every push to `main` publishes the image
 //! `ghcr.io/snds/vale-gateway`, tagged with the build's version
 //! (`x.y.z-main.<commit time, UTC>`) and the rolling `main`, and only then
-//! writes the same version into `latest.json` on the rolling `gateway-main`
-//! pre-release of snds/Vale (`.github/workflows/gateway-image.yml`). The
-//! manifest is written after the image is in the registry, so it never names
-//! an image that isn't there. The gateway reads it:
+//! writes the same version into two `latest.json` files
+//! (`.github/workflows/gateway-image.yml`): the feed, `vale-gateway-main` on
+//! snds/releases, and the bridge, `gateway-main` on snds/Vale
+//! ([`crate::feed`]). Both are written after the image is in the registry,
+//! so neither names an image that isn't there. The gateway reads both and
+//! offers the newer of the two:
 //!
 //! - at start and every six hours while "Check for updates automatically"
 //!   is on (on by default; the core's device setting `updates.autoCheck`,
@@ -17,8 +20,8 @@
 //!   the channel comes from the running version, the manifest and every
 //!   redirect must be https on GitHub's hosts ([`app_updates::allowed`]),
 //!   and only a strictly newer version counts ([`app_updates::is_newer`]);
-//! - sending nothing about the gateway: one `GET` with `accept` and the user
-//!   agent `vale-gateway` (no version, no address, no account).
+//! - sending nothing about the gateway: one `GET` of each with `accept` and
+//!   the user agent `vale-gateway` (no version, no address, no account).
 //!
 //! When a newer build is out, Settings shows its version. The gateway has
 //! no Docker socket and no way to restart itself, so who takes it depends
@@ -41,13 +44,17 @@ use futures::future::BoxFuture;
 use pim_app::Shared;
 use pim_app::commands::with_store;
 use semver::Version;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-/// The rolling pre-release whose `latest.json` names the newest image.
-pub const MAIN_ENDPOINT: &str =
-    "https://github.com/snds/Vale/releases/download/gateway-main/latest.json";
+/// The feed: the rolling pre-release on snds/releases whose `latest.json`
+/// names the newest image (ADR-0090).
+pub const MAIN_ENDPOINT: &str = crate::feed::FEED_ENDPOINT;
 
-/// The release page for the newest image.
+/// The bridge: where the feed was first (ADR-0077), still written and read.
+pub const BRIDGE_ENDPOINT: &str = crate::feed::BRIDGE_ENDPOINT;
+
+/// The release page for the newest image. It stays on snds/Vale, where only
+/// this repository's own workflow can write (ADR-0090).
 pub const MAIN_PAGE: &str = "https://github.com/snds/Vale/releases/tag/gateway-main";
 
 /// Where the gateway's builds are announced: its own main channel, GitHub's
@@ -62,7 +69,7 @@ pub const FEED: Feed = Feed {
 };
 
 /// The published image (`gateway-image.yml`).
-pub const IMAGE: &str = "ghcr.io/snds/vale-gateway";
+pub const IMAGE: &str = crate::feed::IMAGE;
 
 /// The command that updates a compose setup by hand, run beside its
 /// `compose.yaml`.
@@ -72,7 +79,7 @@ pub const UPDATE_COMMAND: &str = "docker compose pull && docker compose up -d";
 pub const TIMEOUT: Duration = Duration::from_secs(20);
 
 /// The largest manifest read (the real one is under 1 KB).
-pub const MANIFEST_LIMIT: usize = 64 * 1024;
+pub const MANIFEST_LIMIT: usize = crate::feed::MANIFEST_LIMIT;
 
 /// The most redirects one check follows.
 const MAX_REDIRECTS: usize = 5;
@@ -204,40 +211,27 @@ pub enum Outcome {
     Newer(Version),
 }
 
-#[derive(Deserialize)]
-struct Manifest {
-    version: String,
-}
-
-#[derive(Deserialize)]
-struct Digest {
-    digest: Option<String>,
-}
-
 /// The image digest a manifest names (`sha256:` and 64 hex characters),
-/// when it names a well-formed one. The image workflow writes it beside
-/// `version`; Update passes it to the host helper as `expect_digest`.
+/// when it names a well-formed one, in either shape ([`crate::feed::read`]).
+/// Update passes it to the host helper as `expect_digest`.
 pub fn digest_of(body: &[u8]) -> Option<String> {
-    let d: Digest = serde_json::from_slice(body).ok()?;
-    d.digest
-        .map(|d| d.trim().to_string())
-        .filter(|d| host_helper::protocol::valid_digest(d))
+    crate::feed::read(body)?.digest
 }
 
-/// Reads a manifest (`latest.json` beside the image: only its `version` is
-/// used) against the running version.
-pub fn judge(current: &Version, body: &[u8]) -> Result<Outcome, String> {
-    if body.len() > MANIFEST_LIMIT {
-        return Err(UNREADABLE.into());
-    }
-    let manifest: Manifest = serde_json::from_slice(body).map_err(|_| UNREADABLE.to_string())?;
-    let offered = Version::parse(manifest.version.trim().trim_start_matches('v'))
-        .map_err(|_| UNREADABLE.to_string())?;
-    Ok(if app_updates::is_newer(current, &offered) {
+/// Whether an offer is news for the running version.
+fn outcome(current: &Version, offered: Version) -> Outcome {
+    if app_updates::is_newer(current, &offered) {
         Outcome::Newer(offered)
     } else {
         Outcome::UpToDate
-    })
+    }
+}
+
+/// Reads one manifest (either shape, [`crate::feed::read`]) against the
+/// running version.
+pub fn judge(current: &Version, body: &[u8]) -> Result<Outcome, String> {
+    let offer = crate::feed::read(body).ok_or_else(|| UNREADABLE.to_string())?;
+    Ok(outcome(current, offer.version))
 }
 
 /// Why Update or Reload can't start: the host helper isn't set up.
@@ -483,9 +477,11 @@ impl Updates {
     /// One check now. A build that doesn't check, or a check already
     /// running, returns the status as it is.
     pub async fn check(&self) -> Status {
-        let Some(endpoint) = Channel::of(&self.version).endpoint(&FEED) else {
+        // The channel decides whether this build checks at all; a main
+        // build reads the feed and the bridge.
+        if Channel::of(&self.version).endpoint(&FEED).is_none() {
             return self.status();
-        };
+        }
         {
             let mut s = lock(&self.status);
             if s.state == UpdateState::Checking {
@@ -505,10 +501,12 @@ impl Updates {
             source.clone()
         };
         let result = match source {
-            Some(source) => source
-                .fetch(endpoint)
-                .await
-                .and_then(|body| Ok((judge(&self.version, &body)?, digest_of(&body)))),
+            Some(source) => {
+                let feed = source.fetch(MAIN_ENDPOINT).await;
+                let bridge = source.fetch(BRIDGE_ENDPOINT).await;
+                crate::feed::choose(feed, bridge, UNREADABLE)
+                    .map(|offer| (outcome(&self.version, offer.version), offer.digest))
+            }
             None => Err(UNREACHABLE.to_string()),
         };
         let result = result.map(|(outcome, digest)| {
@@ -615,6 +613,7 @@ mod tests {
     #[test]
     fn checks_go_only_to_githubs_hosts_over_https() {
         assert!(hop_allowed(MAIN_ENDPOINT, 0).is_ok());
+        assert!(hop_allowed(BRIDGE_ENDPOINT, 0).is_ok());
         assert!(hop_allowed(MAIN_PAGE, 0).is_ok());
         assert!(
             hop_allowed(
@@ -681,7 +680,10 @@ mod tests {
             status_line(&s, true),
             "Version 0.1.0-main.20261109000000 is out."
         );
-        assert_eq!(*lock(&source.1), vec![MAIN_ENDPOINT.to_string()]);
+        assert_eq!(
+            *lock(&source.1),
+            vec![MAIN_ENDPOINT.to_string(), BRIDGE_ENDPOINT.to_string()]
+        );
         let r = report(&s, true);
         assert_eq!(r["state"], "available");
         assert_eq!(r["channel"], "main");
@@ -708,17 +710,158 @@ mod tests {
         assert_eq!(report(&s, true)["enabled"], false);
     }
 
+    /// A manifest per address, and every address asked for.
+    struct ByUrl(
+        Vec<(&'static str, Result<Vec<u8>, String>)>,
+        Mutex<Vec<String>>,
+    );
+
+    impl ManifestSource for ByUrl {
+        fn fetch<'a>(&'a self, url: &'a str) -> BoxFuture<'a, Result<Vec<u8>, String>> {
+            lock(&self.1).push(url.to_string());
+            let out = self
+                .0
+                .iter()
+                .find(|(u, _)| *u == url)
+                .map(|(_, r)| r.clone())
+                .unwrap_or_else(|| Err(NOTHING_PUBLISHED.to_string()));
+            Box::pin(async move { out })
+        }
+    }
+
+    fn server_shape(version: &str, digest: &str) -> Vec<u8> {
+        format!(
+            r#"{{"app":"vale-gateway","version":"{version}","commit":"{}","pubDate":"2026-11-14T09:30:00Z","images":{{"gateway":{{"repository":"{IMAGE}","digest":"{digest}"}}}}}}"#,
+            "c".repeat(40)
+        )
+        .into_bytes()
+    }
+
+    fn bridge_shape(version: &str, digest: &str) -> Vec<u8> {
+        format!(r#"{{"version":"{version}","image":"{IMAGE}","digest":"{digest}"}}"#).into_bytes()
+    }
+
+    /// The feed on snds/releases and the bridge on snds/Vale (ADR-0090):
+    /// both are read, and the newer of the two is offered with its digest.
+    #[tokio::test]
+    async fn the_feed_and_the_bridge_are_both_read_and_the_newer_is_offered() {
+        let at = v("0.1.0-main.20261108000000");
+        let (f, b) = (
+            format!("sha256:{}", "f".repeat(64)),
+            format!("sha256:{}", "b".repeat(64)),
+        );
+        let new = "0.1.0-main.20261114093000";
+        let old = "0.1.0-main.20261109000000";
+        let check = async |answers: Vec<(&'static str, Result<Vec<u8>, String>)>| {
+            let source = Arc::new(ByUrl(answers, Mutex::default()));
+            let u = Updates::new(at.clone(), Some(source.clone()));
+            let s = u.check().await;
+            assert_eq!(
+                *lock(&source.1),
+                vec![MAIN_ENDPOINT.to_string(), BRIDGE_ENDPOINT.to_string()]
+            );
+            (s, u.offered_digest())
+        };
+
+        // Both name the same build: the feed's digest.
+        let (s, d) = check(vec![
+            (MAIN_ENDPOINT, Ok(server_shape(new, &f))),
+            (BRIDGE_ENDPOINT, Ok(bridge_shape(new, &b))),
+        ])
+        .await;
+        assert_eq!(
+            (s.state, s.offered.as_deref(), d),
+            (UpdateState::Available, Some(new), Some(f.clone()))
+        );
+
+        // The feed isn't published yet (no token on the repository): the bridge.
+        let (s, d) = check(vec![(BRIDGE_ENDPOINT, Ok(bridge_shape(new, &b)))]).await;
+        assert_eq!(
+            (s.state, s.offered.as_deref(), d),
+            (UpdateState::Available, Some(new), Some(b.clone()))
+        );
+
+        // The feed went stale: the bridge's newer build.
+        let (s, d) = check(vec![
+            (MAIN_ENDPOINT, Ok(server_shape(old, &f))),
+            (BRIDGE_ENDPOINT, Ok(bridge_shape(new, &b))),
+        ])
+        .await;
+        assert_eq!((s.offered.as_deref(), d), (Some(new), Some(b.clone())));
+
+        // The bridge is gone: the feed.
+        let (s, d) = check(vec![(MAIN_ENDPOINT, Ok(server_shape(new, &f)))]).await;
+        assert_eq!((s.offered.as_deref(), d), (Some(new), Some(f.clone())));
+
+        // Another app's manifest on the feed is no offer; the bridge still is.
+        let other = String::from_utf8(server_shape(new, &f))
+            .unwrap()
+            .replace(r#""app":"vale-gateway""#, r#""app":"warpcore""#);
+        let (s, _) = check(vec![
+            (MAIN_ENDPOINT, Ok(other.clone().into_bytes())),
+            (BRIDGE_ENDPOINT, Ok(bridge_shape(old, &b))),
+        ])
+        .await;
+        assert_eq!(s.offered.as_deref(), Some(old));
+        let (s, d) = check(vec![(MAIN_ENDPOINT, Ok(other.into_bytes()))]).await;
+        assert_eq!(
+            (s.state, s.error.as_deref(), d),
+            (UpdateState::Failed, Some(UNREADABLE), None)
+        );
+
+        // Neither answers: the feed's own reason.
+        let (s, _) = check(vec![
+            (MAIN_ENDPOINT, Err(UNREACHABLE.to_string())),
+            (BRIDGE_ENDPOINT, Err(UNREACHABLE.to_string())),
+        ])
+        .await;
+        assert_eq!(
+            (s.state, s.error.as_deref()),
+            (UpdateState::Failed, Some(UNREACHABLE))
+        );
+        let (s, _) = check(vec![]).await;
+        assert_eq!(s.error.as_deref(), Some(NOTHING_PUBLISHED));
+
+        // Both are at this build or older: up to date, no digest kept.
+        let (s, d) = check(vec![
+            (
+                MAIN_ENDPOINT,
+                Ok(server_shape("0.1.0-main.20261108000000", &f)),
+            ),
+            (
+                BRIDGE_ENDPOINT,
+                Ok(bridge_shape("0.1.0-main.20261107000000", &b)),
+            ),
+        ])
+        .await;
+        assert_eq!((s.state, s.offered, d), (UpdateState::UpToDate, None, None));
+    }
+
     #[test]
     fn the_manifest_digest_is_read_only_when_well_formed() {
         let d = format!("sha256:{}", "a".repeat(64));
         assert_eq!(
+            digest_of(format!(r#"{{"version":"1.0.0","digest":"{d}"}}"#).as_bytes()),
+            Some(d.clone())
+        );
+        assert_eq!(digest_of(br#"{"version":"1.0.0"}"#), None);
+        assert_eq!(
+            digest_of(br#"{"version":"1.0.0","digest":"sha256:abc"}"#),
+            None
+        );
+        assert_eq!(digest_of(br#"{"version":"1.0.0","digest":"md5:00"}"#), None);
+        assert_eq!(digest_of(b"not json"), None);
+        // Since ADR-0090 the digest comes from a whole manifest only: without a
+        // version that reads, there is no offer for it to belong to.
+        assert_eq!(
             digest_of(format!(r#"{{"version":"1","digest":"{d}"}}"#).as_bytes()),
+            None
+        );
+        // The server shape's digest is read too.
+        assert_eq!(
+            digest_of(&server_shape("0.1.0-main.20261114093000", &d)),
             Some(d)
         );
-        assert_eq!(digest_of(br#"{"version":"1"}"#), None);
-        assert_eq!(digest_of(br#"{"version":"1","digest":"sha256:abc"}"#), None);
-        assert_eq!(digest_of(br#"{"version":"1","digest":"md5:00"}"#), None);
-        assert_eq!(digest_of(b"not json"), None);
     }
 
     struct FakeHelper;

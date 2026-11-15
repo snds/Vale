@@ -26,11 +26,12 @@ Full research: [competitive analysis](docs/research/competitive-analysis.md).
 | Layer | Choice |
 |---|---|
 | UI | React 19 · Vite 8 · Tailwind CSS v4 · **shadcn/ui** (Base UI, Nova) through **unicron**, the shared design system ([ADR-0047](docs/decisions/0047-unicron.md)) |
-| Icons | **Google Material Symbols** (Rounded variable font, live axes) |
+| Icons | **IBM Carbon**, drawn inline through `@unicron/ui` |
+| Type | **Geist** and **Geist Mono**, through `@unicron/ui` |
 | Shells | **Tauri 2** (desktop now, mobile spike) · PWA for the web |
 | Core | Rust `pim-core`: IMAP/SMTP, Gmail API, Graph, JMAP, CalDAV/CardDAV, SQLite, Tantivy |
 
-Every shipped dependency is MIT, Apache-2.0, BSD, or ISC. See [docs/oss-stack.md](docs/oss-stack.md) for versions, licenses, and open-core traps to avoid. Architecture: [docs/architecture.md](docs/architecture.md).
+Every shipped dependency is MIT, Apache-2.0, BSD, or ISC; the two typefaces are under the SIL Open Font License 1.1. See [docs/oss-stack.md](docs/oss-stack.md) for versions, licenses, and open-core traps to avoid. Architecture: [docs/architecture.md](docs/architecture.md).
 
 ## Getting started
 
@@ -40,6 +41,7 @@ pnpm dev                    # web app at http://localhost:5173
 pnpm build                  # type-check + production build
 cargo test -p pim-core      # Rust core
 pnpm tauri dev              # desktop shell (needs the Tauri prerequisites for your OS)
+pnpm shots --out ~/shots    # a picture of every screen, on sample data (tools/screenshots)
 ```
 
 **Web vs. desktop.** On its own, the web app runs on sample mail, so you can try every flow. For real accounts in a browser, run the [web gateway](apps/gateway/README.md) on a machine you own: it syncs your accounts with the same code as the desktop app and serves the web app (`docker compose up -d` in `apps/gateway`).
@@ -69,15 +71,21 @@ The public key is committed as `apps/web/src-tauri/updater.pub` (key ID `98E8E6D
 2. In this repo's Actions secrets, add `TAURI_SIGNING_PRIVATE_KEY` (the secret key file's contents), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, and `RELEASES_TOKEN` (a fine-grained token with Contents: read and write on snds/releases only).
 3. That's all: CI's `release-main` job publishes each push to `main` once the secrets are there. Until then it's a dry run that says which secret is missing. snds/releases needs at least one commit (a README) before its first release.
 
+A pull request that touches `apps/web/src-tauri/`, a lock file or `ci.yml` runs the same job as a dry run: a throwaway key, nothing published.
+
 Local builds (`pnpm tauri build`) carry the version `0.1.0` and don't check for updates: only CI's `0.1.0-main.<time>` builds follow the main channel.
 
-The web gateway is a server, so it doesn't replace itself ([ADR-0077](docs/decisions/0077-gateway-updates.md)). Every push to `main` publishes its image, `ghcr.io/snds/vale-gateway` (`main` and the build's version), and then the rolling [`gateway-main`](https://github.com/snds/Vale/releases/tag/gateway-main) pre-release names that version. The gateway checks at start and every six hours, and its owner's **Settings → Gateway updates** says when a newer image is out and shows `docker compose pull && docker compose up -d`.
+The web gateway is a server, so it doesn't replace itself ([ADR-0077](docs/decisions/0077-gateway-updates.md)). Every push to `main` publishes its image, `ghcr.io/snds/vale-gateway` (`main` and the build's version), and then two rolling pre-releases name that version: [`vale-gateway-main`](https://github.com/snds/releases/releases/tag/vale-gateway-main) on snds/releases, where every app's feed lives, and [`gateway-main`](https://github.com/snds/Vale/releases/tag/gateway-main) here, which older gateways read ([ADR-0090](docs/decisions/0090-gateway-feed-on-the-shared-releases.md)). The gateway checks at start and every six hours, and its owner's **Settings → Gateway updates** says when a newer image is out and shows `docker compose pull && docker compose up -d`.
+
+A browser tab left open on a gateway learns of a newer front end by itself: it asks the gateway for `build.json`, shows that a new version is ready, and reloads only in a quiet moment when no work would be lost ([ADR-0091](docs/decisions/0091-open-pages-learn-of-a-new-build.md)).
 
 ### The design system (unicron)
 
-Primitives and core tokens come from [unicron](https://github.com/snds/unicron), as the versioned packages `@unicron/ui` and `@unicron/tokens`, installed from its GitHub release tarballs ([ADR-0052](docs/decisions/0052-unicron-packages.md)). Vale's own roles are in `apps/web/src/styles/app-extension.css`. A new or changed primitive goes to unicron first: it ships in a release, and Vale moves to it by changing the version in two URLs (`apps/web/package.json`, and the tokens override in `pnpm-workspace.yaml`).
+Primitives and core tokens come from [unicron](https://github.com/snds/unicron), as the versioned packages `@unicron/ui` and `@unicron/tokens` ([ADR-0052](docs/decisions/0052-unicron-packages.md)). Unicron 1.0 is not released yet, so both install from the pre-release tarballs in `vendor/unicron/` ([ADR-0082](docs/decisions/0082-unicron-1-0.md)). Swap to the `@unicron/ui@1.0.0` and `@unicron/tokens@1.0.0` release URLs when Unicron 1.0 is released, and delete `vendor/unicron/`. The two places are `apps/web/package.json` and the tokens override in `pnpm-workspace.yaml`; the gateway's `Dockerfile` copies `vendor/` and drops that line then too.
 
-Components come from shadcn/ui through unicron's Material Symbols transform (`pnpm regen` in unicron; see its `tools/shadcn-material/README.md`).
+Vale's theme is `data-theme="vale"` on `<html>`, on the graphite (dark) or stone (light) ground. Vale's own layer is `apps/web/src/styles/`, one file per area. A new or changed primitive goes to unicron first: it ships in a release, and Vale moves to it.
+
+The shell is unicron's frame, in `apps/web/src/app/` ([ADR-0083](docs/decisions/0083-shell.md)): `shell.tsx` composes the sidebar (`sidebar.tsx`), the status line (`status-line.tsx`), the phone's floating rows (`phone-chrome.tsx`) and quick create (`quick-create.tsx`). The frame picks the layout from the window's width: the phone's rows under 600 px, the sidebar's rail with one column from 600, the sidebar with list beside detail from 1024. A view sits in the frame's columns through `components/master-detail.tsx`, heads its list with `components/page.tsx`, and tells the shell its place through `app/screen.ts`.
 
 Design-system analytics: `pnpm ds:scan`, `pnpm ds:patterns`, and `pnpm ds:ratchet` (CI fails if misuse of unicron components grows past `.dsa/baseline.json`). The ratchet also counts plain `<button>`s, which bypass the system (dsa's `rawElements`, [ADR-0058](docs/decisions/0058-ds-additions-adopted.md)). The ones left are whole surfaces, like calendar cells and cards, and the ADR says why each stays.
 

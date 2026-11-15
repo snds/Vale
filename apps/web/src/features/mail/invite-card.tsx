@@ -1,188 +1,235 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
-import { toast } from "sonner"
+import { useState, type ReactNode } from "react"
 
-import { Icon, type IconName, Button, NativeSelect, NativeSelectOption } from "@unicron/ui"
-import { useCollections, useMailAction } from "@/core/queries"
+import {
+  AdaptiveMenu,
+  AdaptiveMenuRadioGroup,
+  AdaptiveMenuRadioItem,
+  Button,
+  FieldRow,
+  FieldRowAction,
+  FieldRowValue,
+  SectionHeader,
+  toast,
+} from "@unicron/ui"
+import { useMailAction } from "@/core/queries"
 import type { Invite, InviteResponse } from "@/core/types"
-import { cn } from "@/lib/utils"
 
-import { dayLabel, fromSecs, rangeLabel } from "../calendar/dates"
 import { MeetingPanel } from "../calendar/meeting-panel"
 import { displayName } from "./format"
-import { Conflicts, CounterProposal, ProposeTime } from "./invite-planning"
-
-const ANSWERS: { value: InviteResponse; label: string; icon: IconName }[] = [
-  { value: "accepted", label: "Accept", icon: "check_circle" },
-  { value: "tentative", label: "Maybe", icon: "help" },
-  { value: "declined", label: "Decline", icon: "cancel" },
-]
-
-const STATUS_TEXT: Record<string, string> = {
-  accepted: "You're going",
-  tentative: "You might go",
-  declined: "You declined",
-}
-
-const DONE_TEXT: Record<InviteResponse, string> = {
-  accepted: "Accepted",
-  tentative: "Replied maybe to",
-  declined: "Declined",
-}
-
-const REPLY_TEXT: Record<string, string> = {
-  accepted: "accepted",
-  tentative: "said maybe to",
-  declined: "declined",
-}
+import { CounterRows, ProposeTimeForm, Quote, Result, YourCalendarRow } from "./invite-planning"
+import { ANSWERS, fail, inviteTime, useInviteAnswer, useRowSize } from "./invite-words"
 
 /**
- * The meeting a message carries (iMIP): answer an invitation, apply a
- * cancellation, or record a guest's reply on your event. Sits above the
- * message body, like Outlook's and Apple Mail's invitation banners.
+ * The meeting a message carries (ADR-0093; brief M5): one table of methods
+ * and states, drawn as Field Rows under a section header, with no card.
+ *
+ * - **request**, not answered: what it is (EVENT, WHEN with PROPOSE NEW TIME,
+ *   WHERE, ORGANIZER, YOUR CALENDAR, CALENDAR with CHANGE) and the call rows.
+ *   The answer itself is the conversation's needs-you block (its notice slot).
+ * - **request**, answered: the same rows and YOUR ANSWER with CHANGE.
+ * - **request**, outdated: one caption.
+ * - **cancel**, **reply**, **counter**, **declinecounter**: their own rows and one result button.
  */
-export function InviteCard({ invite, messageId, accountId }: { invite: Invite; messageId: string; accountId: string }) {
-  const { data: calendars = [] } = useCollections("calendar")
-  const qc = useQueryClient()
-  const writable = calendars.filter((c) => c.writable)
-  const fallback = writable.find((c) => c.accountId === accountId) ?? writable[0]
-  const [calendarId, setCalendarId] = useState<string>("")
-  const target = calendarId || fallback?.id || ""
-  const done = () => void qc.invalidateQueries({ queryKey: ["pim"] })
-  const respond = useMailAction((c, r: InviteResponse) => c.respondToInvite(messageId, r, invite.eventId ? null : target))
-  const apply = useMailAction((c) => c.applyInviteUpdate(messageId))
 
-  const when = invite.start != null && invite.end != null ? `${dayLabel(fromSecs(invite.start))} · ${rangeLabel(invite.start, invite.end, invite.allDay)}` : null
-  const answer = async (r: InviteResponse) => {
-    try {
-      await respond.mutateAsync(r)
-      done()
-      const where = invite.eventId ? "" : r === "declined" ? "" : ` · added to ${writable.find((c) => c.id === target)?.name ?? "your calendar"}`
-      toast.success(`${DONE_TEXT[r]} “${invite.title}”${where}`, { duration: 3000 })
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
-    }
+export function InviteCard({ invite, messageId, accountId }: { invite: Invite; messageId: string; accountId: string }) {
+  switch (invite.method) {
+    case "request":
+      return invite.outdated ? (
+        <Section label="Invitation">
+          <p className="type-caption text-muted-foreground">Your calendar has a newer version of this event.</p>
+        </Section>
+      ) : (
+        <Request invite={invite} messageId={messageId} accountId={accountId} />
+      )
+    case "cancel":
+      return <Canceled invite={invite} messageId={messageId} />
+    case "reply":
+      return <Reply invite={invite} messageId={messageId} />
+    case "counter":
+      return (
+        <Section label="New time proposed">
+          <CounterRows invite={invite} messageId={messageId} />
+        </Section>
+      )
+    case "declinecounter":
+      return (
+        <p className="type-body text-foreground" data-slot="invite-card">
+          {invite.organizer ? displayName(invite.organizer) : "The organizer"} kept the original time.
+        </p>
+      )
+    default:
+      return null
   }
-  const runApply = async () => {
+}
+
+/** The invitation's own section: a header and its rows, no card. */
+function Section({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <section aria-label={label} className="flex flex-col" data-slot="invite-card">
+      <SectionHeader title={label} level={3} />
+      <div className="flex flex-col pt-2">{children}</div>
+    </section>
+  )
+}
+
+function Request({ invite, messageId, accountId }: { invite: Invite; messageId: string; accountId: string }) {
+  const size = useRowSize()
+  const { answer, pending, error, writable, target, choose } = useInviteAnswer(invite, messageId, accountId)
+  const [proposing, setProposing] = useState(false)
+  const going = invite.attendees.filter((a) => a.status === "accepted").length
+  const answered = ANSWERS.find((a) => a.value === invite.myStatus)
+  const canPropose = !invite.recurring && invite.start != null
+  return (
+    <Section label="Invitation">
+      {invite.start != null && invite.end != null && (
+        <FieldRow
+          size={size}
+          label="When"
+          rule="none"
+          description={invite.proposed ? `You proposed ${inviteTime(invite.proposed.start, invite.proposed.end, false)}` : undefined}
+          action={canPropose && <FieldRowAction onClick={() => setProposing(true)}>{invite.proposed ? "Propose another" : "Propose new time"}</FieldRowAction>}
+        >
+          <FieldRowValue truncate="wrap">{inviteTime(invite.start, invite.end, invite.allDay)}</FieldRowValue>
+        </FieldRow>
+      )}
+      {invite.location && (
+        <FieldRow size={size} label="Where">
+          <FieldRowValue truncate="end">{invite.location}</FieldRowValue>
+        </FieldRow>
+      )}
+      {invite.organizer && (
+        <FieldRow size={size} label="Organizer">
+          <FieldRowValue truncate="end">{`${displayName(invite.organizer)}${invite.attendees.length > 1 ? ` // ${invite.attendees.length} invited, ${going} going` : ""}`}</FieldRowValue>
+        </FieldRow>
+      )}
+      {!invite.allDay && invite.start != null && <YourCalendarRow conflicts={invite.conflicts ?? []} />}
+      {!invite.eventId && writable.length > 0 && (
+        <FieldRow
+          size={size}
+          label="Calendar"
+          action={
+            writable.length > 1 && (
+              <AdaptiveMenu title="Calendar" align="end" trigger={<FieldRowAction>Change</FieldRowAction>}>
+                <AdaptiveMenuRadioGroup value={target} onValueChange={(v) => choose(String(v))}>
+                  {writable.map((c) => (
+                    <AdaptiveMenuRadioItem key={c.id} value={c.id}>
+                      {c.name}
+                    </AdaptiveMenuRadioItem>
+                  ))}
+                </AdaptiveMenuRadioGroup>
+              </AdaptiveMenu>
+            )
+          }
+        >
+          {writable.find((c) => c.id === target)?.name ?? ""}
+        </FieldRow>
+      )}
+      {answered && (
+        <FieldRow
+          size={size}
+          label="Your answer"
+          aria-live="polite"
+          action={
+            <AdaptiveMenu title="Your answer" align="end" trigger={<FieldRowAction loading={pending}>Change</FieldRowAction>}>
+              <AdaptiveMenuRadioGroup value={invite.myStatus ?? ""} onValueChange={(v) => void answer(v as InviteResponse)}>
+                {ANSWERS.map((a) => (
+                  <AdaptiveMenuRadioItem key={a.value} value={a.value}>
+                    {a.label}
+                  </AdaptiveMenuRadioItem>
+                ))}
+              </AdaptiveMenuRadioGroup>
+            </AdaptiveMenu>
+          }
+        >
+          {`${answered.label}${invite.eventId ? " // in your calendar" : ""}`}
+        </FieldRow>
+      )}
+      {error && (
+        <p role="alert" className="type-caption text-destructive">
+          {error}
+        </p>
+      )}
+      <MeetingPanel meeting={invite.meeting} manage={invite.manage} compact />
+      {canPropose && <ProposeTimeForm invite={invite} messageId={messageId} open={proposing} onClose={() => setProposing(false)} />}
+    </Section>
+  )
+}
+
+/** Applies what a message says about an event you have: a cancellation, or a guest's answer. */
+function useApply(messageId: string, done: string) {
+  const qc = useQueryClient()
+  const [error, setError] = useState<string | null>(null)
+  const apply = useMailAction((c) => c.applyInviteUpdate(messageId))
+  const run = async () => {
+    setError(null)
     try {
       await apply.mutateAsync(undefined)
-      done()
-      toast.success(invite.method === "cancel" ? "Removed from your calendar" : "Your event is up to date", { duration: 2500 })
+      void qc.invalidateQueries({ queryKey: ["pim"] })
+      toast(done)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
+      setError(fail(e))
     }
   }
+  return { run, pending: apply.isPending, error }
+}
 
-  const going = invite.attendees.filter((a) => a.status === "accepted").length
+function Canceled({ invite, messageId }: { invite: Invite; messageId: string }) {
+  const size = useRowSize()
+  const title = invite.title || "(no title)"
+  const remove = useApply(messageId, `Removed ${title} from your calendar`)
   return (
-    <section
-      aria-label={
-        invite.method === "cancel"
-          ? "Canceled event"
-          : invite.method === "reply"
-            ? "Reply to your invitation"
-            : invite.method === "counter"
-              ? "New time proposed"
-              : invite.method === "declinecounter"
-                ? "Time unchanged"
-                : "Invitation"
-      }
-      className={cn("flex flex-col gap-3 rounded-xl border bg-muted/40 p-3", invite.method === "cancel" && "border-destructive/30 bg-destructive/5")}
-      data-slot="invite-card"
-    >
-      <div className="flex items-start gap-3">
-        <span className="flex size-10 shrink-0 flex-col items-center justify-center rounded-lg bg-background text-center shadow-xs" aria-hidden>
-          {invite.start != null && (
-            <>
-              <span className="text-[9px] font-semibold text-(--c-calendar-today-text) uppercase">{fromSecs(invite.start).toLocaleDateString(undefined, { month: "short" })}</span>
-              <span className="text-base leading-none font-semibold tabular-nums">{fromSecs(invite.start).getDate()}</span>
-            </>
-          )}
-        </span>
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className={cn("truncate text-sm font-semibold", invite.method === "cancel" && "line-through decoration-1")}>{invite.title || "(no title)"}</span>
-          {when && invite.method !== "counter" && <span className="text-xs text-muted-foreground">{when}</span>}
-          {invite.method === "counter" && <span className="text-xs text-muted-foreground">{invite.from ? displayName(invite.from) : "A guest"} proposed a new time</span>}
-          {invite.location && <span className="truncate text-xs text-muted-foreground">{invite.location}</span>}
-          {invite.organizer && invite.method === "request" && (
-            <span className="truncate text-xs text-muted-foreground">
-              From {displayName(invite.organizer)}
-              {invite.attendees.length > 1 && ` · ${invite.attendees.length} invited, ${going} going`}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {invite.method !== "cancel" && <MeetingPanel meeting={invite.meeting} manage={invite.manage} compact />}
-
-      {invite.method === "request" &&
-        (invite.outdated ? (
-          <p className="text-xs text-muted-foreground">Your calendar has a newer version of this event.</p>
-        ) : (
-          <>
-            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Your answer">
-              {ANSWERS.map((a) => (
-                <Button
-                  key={a.value}
-                  size="sm"
-                  variant={invite.myStatus === a.value ? "default" : "outline"}
-                  aria-pressed={invite.myStatus === a.value}
-                  disabled={respond.isPending}
-                  onClick={() => void answer(a.value)}
-                >
-                  <Icon name={a.icon} data-icon="inline-start" fill={invite.myStatus === a.value} /> {a.label}
-                </Button>
-              ))}
-              {!invite.eventId && writable.length > 1 && (
-                <NativeSelect size="sm" aria-label="Add to calendar" value={target} onChange={(e) => setCalendarId(e.target.value)} className="ml-auto max-w-44">
-                  {writable.map((c) => (
-                    <NativeSelectOption key={c.id} value={c.id}>
-                      {c.name}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              )}
-            </div>
-            <Conflicts invite={invite} />
-            {invite.myStatus && STATUS_TEXT[invite.myStatus] && (
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
-                <Icon name="event_available" className="size-3.5" /> {STATUS_TEXT[invite.myStatus]}
-                {invite.eventId ? " · in your calendar" : ""}
-              </p>
-            )}
-            <ProposeTime invite={invite} messageId={messageId} />
-          </>
-        ))}
-
-      {invite.method === "cancel" && (
-        <div className="flex items-center gap-2">
-          <p className="flex-1 text-xs text-muted-foreground">{invite.organizer ? `${displayName(invite.organizer)} canceled this event.` : "This event was canceled."}</p>
-          {invite.eventId && (
-            <Button size="sm" variant="outline" onClick={() => void runApply()} disabled={apply.isPending}>
-              Remove from calendar
-            </Button>
-          )}
-        </div>
+    <Section label="Canceled event">
+      <p className="type-body text-foreground">{invite.organizer ? `${displayName(invite.organizer)} canceled this event.` : "This event was canceled."}</p>
+      <FieldRow size={size} label="Event">
+        <FieldRowValue truncate="end">
+          <s>{title}</s>
+        </FieldRowValue>
+      </FieldRow>
+      {invite.start != null && invite.end != null && (
+        <FieldRow size={size} label="When">
+          <FieldRowValue truncate="wrap">{inviteTime(invite.start, invite.end, invite.allDay)}</FieldRowValue>
+        </FieldRow>
       )}
+      <Result error={remove.error}>
+        {invite.eventId && (
+          <Button variant="secondary" loading={remove.pending} onClick={() => void remove.run()}>
+            Remove from calendar
+          </Button>
+        )}
+      </Result>
+    </Section>
+  )
+}
 
-      {invite.method === "counter" && <CounterProposal invite={invite} messageId={messageId} />}
+const REPLIED: Record<string, string> = { accepted: "accepted", tentative: "said maybe to", declined: "declined" }
 
-      {invite.method === "declinecounter" && (
-        <p className="text-xs text-muted-foreground">{invite.organizer ? displayName(invite.organizer) : "The organizer"} kept the original time.</p>
+function Reply({ invite, messageId }: { invite: Invite; messageId: string }) {
+  const size = useRowSize()
+  const title = invite.title || "(no title)"
+  const update = useApply(messageId, `Updated ${title}`)
+  const who = invite.from ? displayName(invite.from) : "A guest"
+  return (
+    <Section label="Reply">
+      <p className="type-body text-foreground">
+        {who} {REPLIED[invite.from?.status ?? ""] ?? "replied to"} your invitation.
+      </p>
+      <FieldRow size={size} label="Event">
+        <FieldRowValue truncate="end">{title}</FieldRowValue>
+      </FieldRow>
+      {invite.start != null && invite.end != null && (
+        <FieldRow size={size} label="When">
+          <FieldRowValue truncate="wrap">{inviteTime(invite.start, invite.end, invite.allDay)}</FieldRowValue>
+        </FieldRow>
       )}
-
-      {invite.method === "reply" && invite.from && (
-        <div className="flex items-center gap-2">
-          <p className="flex-1 text-xs text-muted-foreground">
-            {displayName(invite.from)} {REPLY_TEXT[invite.from.status ?? ""] ?? "replied to"} your invitation.
-          </p>
-          {invite.eventId && (
-            <Button size="sm" variant="outline" onClick={() => void runApply()} disabled={apply.isPending}>
-              Update your event
-            </Button>
-          )}
-        </div>
-      )}
-    </section>
+      {invite.comment && <Quote>{invite.comment}</Quote>}
+      <Result error={update.error}>
+        {invite.eventId && (
+          <Button variant="secondary" loading={update.pending} onClick={() => void update.run()}>
+            Update your event
+          </Button>
+        )}
+      </Result>
+    </Section>
   )
 }

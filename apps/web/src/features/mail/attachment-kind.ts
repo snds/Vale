@@ -25,7 +25,13 @@ export function previewKind(file: Pick<AttachmentInfo, "mimeType" | "size">): Pr
   return null
 }
 
-export const isPdf = (bytes: Uint8Array) => new TextDecoder().decode(bytes.subarray(0, 5)) === "%PDF-"
+/** The type tag a file chip and the viewer show (`PDF`, `TXT`): the name's extension, else the media type's last part. */
+export function fileType(file: Pick<AttachmentInfo, "filename" | "mimeType">) {
+  const ext = /\.([a-z0-9]{1,5})$/i.exec(file.filename)?.[1]
+  return (ext ?? file.mimeType.split("/").at(-1)?.split(/[.+;-]/)[0] ?? "file").toUpperCase()
+}
+
+export const isPdf =(bytes: Uint8Array) => new TextDecoder().decode(bytes.subarray(0, 5)) === "%PDF-"
 
 /** Fetches the bytes once and hands back an object URL, revoked on unmount. */
 export function useAttachmentUrl(id: string, enabled: boolean, mimeType: string) {

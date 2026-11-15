@@ -18,12 +18,37 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm build
+      # The build watch's rules and the build stamp (ADR-0091).
+      - run: pnpm --filter web test
+      # The build wrote its id into the page and into build.json, and they agree.
+      - run: grep -q "<meta name=\"vale-build\" content=\"$(python3 -c 'import json; print(json.load(open("apps/web/dist/build.json"))["build"])')\"" apps/web/dist/index.html
       # Design-system analytics ratchet: fails when correct-use violations on
       # @unicron/ui components, or plain <button>s that bypass them (rawElements),
       # grow beyond .dsa/baseline.json.
       - run: pnpm ds:ratchet
       # Notes relay: two clients merge, refusals, persistence across restart.
       - run: pnpm --filter notes-relay test
+
+  # The browser test gate (ADR-0115): the scenes that carry asserts on safety and flow (swipes, the
+  # discard question, the form layer, one current item, keys, the leave guard), on the built app in
+  # Chromium. Any FAIL fails the job. The full set is `pnpm shots` (ADR-0079).
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright-core install --with-deps chromium
+      - run: >-
+          pnpm shots --out ${{ runner.temp }}/shots --theme dark
+          -g mail-swipe -g mail-screener-swipe -g discard-question -g form-layer
+          -g contacts-leave -g contacts-merge -g contacts-edit -g mail-row-menu
+          -g calendar-delete -g notes-archive-delete -g mail-send-fails -g mail-sync-error
+          -g mail-folders-sheet -g shell-navigation -g keyboard-shortcuts -g command-menu
 
   core:
     runs-on: ubuntu-latest
@@ -38,6 +63,8 @@ jobs:
       # App commands (shared by the desktop shell and the gateway) and the gateway's HTTP surface.
       - run: cargo test -p pim-app -p vale-gateway
       - run: cargo clippy -p pim-app -p vale-gateway --all-targets -- -D warnings
+      # The gateway's shared-feed manifest (ADR-0090): the shape, and never backwards.
+      - run: python3 tools/gateway-feed/test_manifest.py
 
   # The self-hosted images build from a clean checkout (no push).
   images:
@@ -51,6 +78,10 @@ jobs:
           docker run -d --name gw -p 127.0.0.1:8080:8080 -e GATEWAY_PASSWORD=ci-password-0123456789 -e GATEWAY_KEY="$(openssl rand -base64 32)" vale-gateway
           for i in $(seq 1 20); do curl -fs http://127.0.0.1:8080/api/session && break; sleep 1; done
           curl -fs http://127.0.0.1:8080/ | grep -q '<div id="root">'
+          # The web app's build id (ADR-0091): the page's tag and build.json agree, never cached.
+          build=$(curl -fs http://127.0.0.1:8080/build.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["build"])')
+          curl -fs http://127.0.0.1:8080/ | grep -q "<meta name=\"vale-build\" content=\"$build\""
+          curl -fsI http://127.0.0.1:8080/build.json | grep -iq '^cache-control: no-cache'
           docker logs gw
 
   # Real IMAP (Dovecot) + SMTP (aiosmtpd) round trip: sync, flag push, archive
@@ -141,23 +172,54 @@ jobs:
       - run: mkdir -p apps/web/dist && touch apps/web/dist/index.html
       - run: cargo check -p vale-shell
 
+  # Whether this run exercises the desktop release path. A push to main
+  # always does. A pull request does only when it touches that path: the
+  # Tauri folder, a lock file, or this workflow.
+  release-plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A pull request is checked out as its merge commit: HEAD^1 is the base.
+          fetch-depth: 2
+          persist-credentials: false
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          run=true
+          if [ "$EVENT" = pull_request ]; then
+            git diff --name-only HEAD^1 HEAD > changed.txt
+            grep -Ex 'apps/web/src-tauri/.*|Cargo\.lock|pnpm-lock\.yaml|\.github/workflows/ci\.yml' changed.txt || run=false
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "::notice::desktop release path runs: $run"
+
   # Publishes each push to main as the rolling `vale-main` pre-release on
   # snds/releases, signed with Vale's update key (ADR-0076), through the
   # update kit's reusable workflow (pinned; its README → Releasing). Without
   # the secrets it's a dry run that builds and says which secret is missing;
-  # it never fails a push for one. Pull requests don't run it.
+  # it never fails a push for one. A pull request that touches the release
+  # path (see release-plan) runs it too, always as a dry run: the kit signs
+  # with a throwaway key made in the job, reads no real key, publishes
+  # nothing, and keeps the would-be `latest.json` as the `latest-json` artifact.
   release-main:
-    if: github.event_name == 'push'
-    needs: [web, shell]
+    if: needs.release-plan.outputs.run == 'true'
+    needs: [web, shell, release-plan]
     permissions:
       contents: read
-    uses: snds/app-updates/.github/workflows/release-main.yml@717320098ab34d67f36f85794ba6fb0b91bd8fd7
+    uses: snds/app-updates/.github/workflows/release-main.yml@2a2a63f0f9a48c2e60e454307df237805fc14b20
     with:
       app: vale
       tauri-dir: apps/web/src-tauri
       platforms: '["macos-universal", "windows-x64"]'
       package-manager: pnpm
-      kit-ref: 717320098ab34d67f36f85794ba6fb0b91bd8fd7
+      kit-ref: 2a2a63f0f9a48c2e60e454307df237805fc14b20
     secrets:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

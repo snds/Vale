@@ -1,4 +1,4 @@
-import { toast } from "sonner"
+import { toast } from "@unicron/ui"
 
 import { useMailAction } from "@/core/queries"
 import type { Address, Category, SenderDecision } from "@/core/types"
@@ -6,10 +6,11 @@ import type { Address, Category, SenderDecision } from "@/core/types"
 import { displayName } from "./format"
 import { CATEGORIES } from "./lanes"
 
-const DONE: Record<SenderDecision, (who: string) => string> = {
-  allowed: (who) => `${who} can reach your inbox`,
-  screened_out: (who) => `Screened out ${who}: their mail skips the inbox`,
-  blocked: (who) => `Blocked ${who}`,
+/** What a decision says once it is made (brief M3): the toast's words and, for screening out, what it leaves behind. */
+const DONE: Record<SenderDecision, (who: string) => { title: string; description?: string }> = {
+  allowed: (who) => ({ title: `${who} can reach your inbox` }),
+  screened_out: (who) => ({ title: `Screened out ${who}`, description: "Mail already archived stays in Archive" }),
+  blocked: (who) => ({ title: `Blocked ${who}` }),
 }
 
 /** Decide about a sender, or move them to a category, with an Undo. */
@@ -23,7 +24,9 @@ export function useSenderActions() {
         { email: from.email, decision },
         {
           onSuccess: () => {
-            toast.success(DONE[decision](displayName(from)), {
+            const done = DONE[decision](displayName(from))
+            toast(done.title, {
+              description: done.description,
               // Undo forgets the decision. Mail already archived stays in Archive.
               action: { label: "Undo", onClick: () => decide.mutate({ email: from.email, decision: null }) },
             })

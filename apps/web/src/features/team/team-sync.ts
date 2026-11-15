@@ -269,11 +269,15 @@ export class TeamSync {
 
 let current: TeamSync | null = null
 
+/** Bumped each time shared conversations start syncing, so a view that asked before they did asks again. */
+export const useTeamSyncStarts = create<{ n: number }>(() => ({ n: 0 }))
+
 export const teamSync = () => current
 
 export function startTeamSync(core: CoreClient, relay: RelayConfig | null, onStopped: (title: string, from: string | null) => void) {
   current?.stop()
   current = new TeamSync(core, relay, onStopped)
+  useTeamSyncStarts.setState((s) => ({ n: s.n + 1 }))
   return () => {
     current?.stop()
     current = null

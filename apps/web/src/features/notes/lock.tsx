@@ -1,13 +1,22 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useState, type FormEvent } from "react"
 
-import { Icon, Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogAction, DialogActions } from "@unicron/ui"
+import { Banner, Button, TextField, useAppFrame } from "@unicron/ui"
+import { FormLayer, FormLayerForm } from "@/components/editor-frame"
 import { getCoreClient } from "@/core/client"
 import { useNotesLock } from "@/core/queries"
 import type { NotesLockInfo } from "@/core/types"
+import { useLeaveGuard } from "@/lib/leave-guard"
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
-const field = "h-9 w-full rounded-lg border bg-transparent px-2.5 text-sm dark:bg-input/30"
+/** The server's words as a sentence: a capital, and a full stop. */
+const sentence = (e: unknown) => {
+  const s = (e instanceof Error ? e.message : String(e)).trim()
+  if (!s) return s
+  const up = s.charAt(0).toUpperCase() + s.slice(1)
+  return /[.!?]$/.test(up) ? up : `${up}.`
+}
+/** The core's word for a wrong passphrase (notes_lock.rs: "that passphrase isn't right"). */
+const wrongPassphrase = (e: unknown) => /isn't right/i.test(e instanceof Error ? e.message : String(e))
 
 /** After a lock change, every view of notes reads again (the key lives in the core). */
 function useRefreshNotes() {
@@ -16,213 +25,198 @@ function useRefreshNotes() {
 }
 
 /**
- * The passphrase step before locking (ADR-0043): set one the first time,
- * or unlock with it when notes are locked. Resolves `onDone` once the key
- * is in memory.
+ * The passphrase step before locking (ADR-0043, brief N5), in the form layer:
+ * "Lock notes" sets one the first time; "Unlock notes" asks for it when a lock
+ * is set and notes are locked now. `onDone` runs once the key is in memory.
  */
-export function PassphraseDialog({ open, onOpenChange, onDone }: { open: boolean; onOpenChange: (o: boolean) => void; onDone: () => void }) {
+export function AskPassphrase({ open, onOpenChange, onDone }: { open: boolean; onOpenChange: (o: boolean) => void; onDone: () => void }) {
   const { data: info } = useNotesLock()
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        {open && info && (info.set ? <UnlockForm info={info} onDone={onDone} onCancel={() => onOpenChange(false)} /> : <SetForm onDone={onDone} onCancel={() => onOpenChange(false)} />)}
-      </DialogContent>
-    </Dialog>
+    <FormLayer open={open && !!info} onClose={() => onOpenChange(false)}>
+      {info && (info.set ? <UnlockForm info={info} onDone={onDone} /> : <SetForm onDone={onDone} />)}
+    </FormLayer>
   )
 }
 
-function SetForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+/** Lock notes, the first time: the passphrase twice and an optional hint. */
+function SetForm({ onDone }: { onDone: () => void }) {
   const [pass, setPass] = useState("")
   const [again, setAgain] = useState("")
   const [hint, setHint] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const refresh = useRefreshNotes()
+  useLeaveGuard(!!(pass || again || hint))
   const mismatch = again.length > 0 && pass !== again
   const submit = async () => {
-    if (pass !== again) return setError("The two passphrases don't match.")
+    if (pass !== again) return
     setBusy(true)
+    setError(null)
     try {
       await (await getCoreClient()).setNotesPassphrase(pass, hint.trim() || null)
       refresh()
       onDone()
     } catch (e) {
-      setError(message(e))
+      setError(sentence(e))
     } finally {
       setBusy(false)
     }
   }
   return (
-    <form className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), void submit())}>
-      <DialogHeader>
-        <DialogTitle>Set a passphrase for locked notes</DialogTitle>
-        <DialogDescription>One passphrase opens every locked note, on all your devices.</DialogDescription>
-      </DialogHeader>
-      <p className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
-        <Icon name="warning" tone="destructive" className="mt-0.5 size-4" />
-        <span>If you forget it, your locked notes can't be opened. Nobody can reset it, Vale included.</span>
-      </p>
-      {/* Labels stay short; help and errors are descriptions, so a field's name is just its name. */}
-      <div className="flex flex-col gap-1 text-sm">
-        <label htmlFor="lock-pass">Passphrase</label>
-        <input
-          id="lock-pass"
-          type="password"
-          autoComplete="new-password"
-          className={field}
-          value={pass}
-          onChange={(e) => (setPass(e.target.value), setError(null))}
-          aria-describedby="lock-pass-help"
-          autoFocus
-        />
-        <span id="lock-pass-help" className="text-xs text-muted-foreground">
-          At least 6 characters. A short sentence is easy to remember and hard to guess.
-        </span>
-      </div>
-      <div className="flex flex-col gap-1 text-sm">
-        <label htmlFor="lock-again">Again</label>
-        <input
-          id="lock-again"
-          type="password"
-          autoComplete="new-password"
-          className={field}
-          value={again}
-          onChange={(e) => (setAgain(e.target.value), setError(null))}
-          aria-invalid={mismatch || undefined}
-          aria-describedby={mismatch ? "lock-again-error" : undefined}
-        />
-        {mismatch && (
-          <span id="lock-again-error" className="text-xs text-destructive">
-            Doesn't match yet.
-          </span>
-        )}
-      </div>
-      <label className="flex flex-col gap-1 text-sm">
-        Hint (optional)
-        <input id="lock-hint" className={field} value={hint} onChange={(e) => setHint(e.target.value)} placeholder="Something only you would know" />
-      </label>
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
-      <DialogActions>
-        <DialogAction kind="cancel" type="button" onClick={onCancel}>
-          Cancel
-        </DialogAction>
-        <DialogAction type="submit" disabled={busy || !pass || !again}>
-          Set passphrase
-        </DialogAction>
-      </DialogActions>
-    </form>
+    <FormLayerForm
+      overline="Locked notes"
+      title="Lock notes"
+      primary={{ label: "Set passphrase", icon: "locked", disabled: !pass || !again || mismatch, loading: busy }}
+      error={error}
+      onSubmit={() => void submit()}
+    >
+      <p className="type-body text-muted-foreground">One passphrase opens every locked note, on all your devices.</p>
+      <Banner tone="warning" size="compact" body="Forget it and locked notes can't be opened. Nobody can reset it." />
+      <TextField
+        label="Passphrase"
+        type="password"
+        autoComplete="new-password"
+        data-form-focus
+        helper="At least 6 characters."
+        value={pass}
+        onChange={(e) => (setPass(e.target.value), setError(null))}
+      />
+      <TextField
+        label="Again"
+        type="password"
+        autoComplete="new-password"
+        value={again}
+        error={mismatch ? "Doesn't match yet." : undefined}
+        onChange={(e) => (setAgain(e.target.value), setError(null))}
+      />
+      <TextField label="Hint (optional)" autoComplete="off" helper="Shown on request, to anyone who opens a locked note." value={hint} onChange={(e) => setHint(e.target.value)} />
+    </FormLayerForm>
   )
 }
 
-function UnlockForm({ info, onDone, onCancel }: { info: NotesLockInfo; onDone: () => void; onCancel: () => void }) {
-  return (
-    <div className="flex flex-col gap-4">
-      <DialogHeader>
-        <DialogTitle>Unlock notes</DialogTitle>
-        <DialogDescription>Enter your passphrase for locked notes.</DialogDescription>
-      </DialogHeader>
-      <UnlockFields info={info} onDone={onDone} onCancel={onCancel} />
-    </div>
-  )
-}
-
-/** The passphrase field, Unlock, and the hint on request. Shared by the dialog and a locked note. */
-function UnlockFields({ info, onDone, onCancel }: { info: NotesLockInfo; onDone?: () => void; onCancel?: () => void }) {
+/** Typing the passphrase, the hint on request, and the identity as a way in: one state for the layer and the note. */
+function useUnlock(onDone?: () => void) {
   const [pass, setPass] = useState("")
   const [error, setError] = useState<string | null>(null)
-  const [hint, setHint] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const [hintShown, setHintShown] = useState(false)
+  const [busy, setBusy] = useState<"pass" | "identity" | null>(null)
   const refresh = useRefreshNotes()
-  const submit = async () => {
-    setBusy(true)
+  const unlock = async () => {
+    if (!pass) return
+    setBusy("pass")
     try {
       await (await getCoreClient()).unlockNotes(pass)
       refresh()
       onDone?.()
     } catch (e) {
-      setError(message(e))
+      setError(wrongPassphrase(e) ? "That isn't the passphrase." : sentence(e))
       setPass("")
     } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
   // The shared identity holds the same key (ADR-0051): a way in without typing.
   const withIdentity = async () => {
-    setBusy(true)
+    setBusy("identity")
     try {
       await (await getCoreClient()).unlockNotesWithIdentity()
       refresh()
       onDone?.()
     } catch (e) {
-      setError(message(e))
+      setError(sentence(e))
     } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
+  const type = (v: string) => (setPass(v), setError(null))
+  return { pass, type, error, hintShown, showHint: () => setHintShown(true), busy, unlock, withIdentity }
+}
+type Unlock = ReturnType<typeof useUnlock>
+
+/** PASSPHRASE, with SHOW HINT beside it when there is a hint; the hint then shows as the field's helper. */
+function PassphraseField({ u, info, focus }: { u: Unlock; info: NotesLockInfo; focus?: boolean }) {
   return (
-    <form className="flex w-full flex-col gap-3" onSubmit={(e) => (e.preventDefault(), void submit())}>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="sr-only">Passphrase</span>
-        <input
-          id="unlock-pass"
-          type="password"
-          autoComplete="current-password"
-          className={field}
-          placeholder="Passphrase"
-          aria-label="Passphrase"
-          value={pass}
-          onChange={(e) => (setPass(e.target.value), setError(null))}
-          aria-invalid={!!error || undefined}
-          autoFocus
-        />
-      </label>
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error.charAt(0).toUpperCase() + error.slice(1)}.
-        </p>
-      )}
-      {hint && info.hint && <p className="text-sm text-muted-foreground">Hint: {info.hint}</p>}
-      <div className="flex flex-wrap items-center gap-2">
-        {info.hint && !hint && (
-          <Button type="button" variant="ghost-muted" size="sm" className="mr-auto" onClick={() => setHint(true)}>
+    <TextField
+      label="Passphrase"
+      type="password"
+      autoComplete="current-password"
+      value={u.pass}
+      onChange={(e) => u.type(e.target.value)}
+      error={u.error ?? undefined}
+      helper={u.hintShown && info.hint ? `Hint: ${info.hint}` : undefined}
+      trailing={
+        info.hint && !u.hintShown ? (
+          <Button type="button" variant="ghost" size="sm" onClick={u.showHint}>
             Show hint
           </Button>
-        )}
-        {onCancel && (
-          <Button type="button" variant="outline" className={info.hint && !hint ? undefined : "ml-auto"} onClick={onCancel}>
-            Cancel
-          </Button>
-        )}
-        <Button type="submit" disabled={busy || !pass} className={!onCancel && (!info.hint || hint) ? "ml-auto" : undefined}>
-          <Icon name="lock_open" data-icon="inline-start" /> Unlock
-        </Button>
-      </div>
-      {info.identity && (
-        <Button type="button" variant="ghost-muted" disabled={busy} onClick={() => void withIdentity()}>
-          <Icon name="verified_user" data-icon="inline-start" /> Unlock with your identity
-        </Button>
-      )}
-    </form>
+        ) : undefined
+      }
+      data-form-focus={focus || undefined}
+    />
   )
 }
 
-/** What a locked note shows while notes are locked: its title and a way in. */
+/** Unlock notes, in the form layer: before locking another note while notes are locked. */
+function UnlockForm({ info, onDone }: { info: NotesLockInfo; onDone: () => void }) {
+  const u = useUnlock(onDone)
+  return (
+    <FormLayerForm
+      overline="Locked notes"
+      title="Unlock notes"
+      primary={{ label: "Unlock", icon: "unlocked", disabled: !u.pass, loading: u.busy === "pass" }}
+      footerStart={
+        info.identity ? (
+          <Button type="button" variant="secondary" loading={u.busy === "identity"} onClick={() => void u.withIdentity()}>
+            Unlock with your identity
+          </Button>
+        ) : undefined
+      }
+      onSubmit={() => void u.unlock()}
+    >
+      <p className="type-body text-muted-foreground">The passphrase that opens every locked note.</p>
+      <PassphraseField u={u} info={info} focus />
+    </FormLayerForm>
+  )
+}
+
+/**
+ * A locked note while notes are locked (brief N5), in the note's own space
+ * under its top line (which ends `// LOCKED`): its title, "This note is
+ * locked.", PASSPHRASE, a primary UNLOCK, and a secondary UNLOCK WITH YOUR
+ * IDENTITY where the device offers it.
+ */
 export function LockedPanel({ title }: { title: string }) {
   const { data: info } = useNotesLock()
+  const u = useUnlock()
+  // The note's own title size: large on a desktop, as its title field (note-editor.tsx).
+  const large = !useAppFrame().phone
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    void u.unlock()
+  }
   return (
-    <section aria-label="Locked note" className="mx-auto flex w-full max-w-sm flex-1 flex-col items-center gap-4 px-6 py-12 text-center">
-      <span className="grid size-14 place-items-center rounded-full bg-muted">
-        <Icon name="lock" tone="muted" className="size-7" />
-      </span>
+    <section aria-labelledby="locked-note-title" data-role="locked-note" className="locked-note">
       <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold text-balance">{title || "Locked note"}</h2>
-        <p className="text-sm text-muted-foreground">This note is locked. Its text is sealed on this device and in sync.</p>
+        <h2 id="locked-note-title" className={`text-foreground ${large ? "type-display-compact" : "type-title"}`}>
+          {title || "Locked note"}
+        </h2>
+        <p className="type-body text-muted-foreground">This note is locked.</p>
       </div>
-      {info && <UnlockFields info={info} />}
+      {info && (
+        <form className="flex flex-col gap-4" onSubmit={submit} aria-label="Unlock">
+          <PassphraseField u={u} info={info} />
+          <div className="flex flex-wrap items-center gap-4">
+            <Button type="submit" disabled={!u.pass} loading={u.busy === "pass"}>
+              Unlock
+            </Button>
+            {info.identity && (
+              <Button type="button" variant="secondary" loading={u.busy === "identity"} onClick={() => void u.withIdentity()}>
+                Unlock with your identity
+              </Button>
+            )}
+          </div>
+        </form>
+      )}
     </section>
   )
 }

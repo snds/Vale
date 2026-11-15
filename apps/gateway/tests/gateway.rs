@@ -106,6 +106,23 @@ async fn gateway_end_to_end() {
     assert_eq!(h["x-content-type-options"], "nosniff");
     assert!(h["content-security-policy"].to_str().unwrap().contains("frame-ancestors 'none'"));
     assert_eq!(anon.get(format!("{base}/assets/app.js")).send().await.unwrap().text().await.unwrap(), "console.log('hi')");
+
+    // The build id an open page asks for (ADR-0091): a plain 404 until the web app has one, then
+    // the file as it is now, never cached, with no sign-in. Never the app page.
+    let none = anon.get(format!("{base}/build.json")).send().await.unwrap();
+    assert_eq!(none.status(), 404);
+    assert_eq!(none.headers()["cache-control"], "no-cache");
+    assert!(!none.text().await.unwrap().contains("<title>"));
+    for id in ["3f9c2a71d0b4e8a15c67", "9a1b2c3d4e5f60718293"] {
+        std::fs::write(web.join("build.json"), format!(r#"{{"build":"{id}"}}"#)).unwrap();
+        let res = anon.get(format!("{base}/build.json")).send().await.unwrap();
+        assert_eq!(res.status(), 200);
+        assert_eq!(res.headers()["cache-control"], "no-cache");
+        assert_eq!(res.headers()["content-type"], "application/json");
+        assert_eq!(res.headers()["x-content-type-options"], "nosniff");
+        assert_eq!(res.json::<Value>().await.unwrap(), json!({ "build": id }), "read on each request");
+    }
+    assert_eq!(anon.get(format!("{base}/")).send().await.unwrap().headers()["cache-control"], "no-cache", "the page itself is never served stale");
     assert_eq!(anon.get(format!("{base}/api/nothing")).send().await.unwrap().status(), 404, "unknown API paths don't fall back to the page");
 
     // Scheduling links (ADR-0026): the owner makes one; anyone with its address can book.

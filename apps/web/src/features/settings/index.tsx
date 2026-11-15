@@ -1,220 +1,117 @@
-import type { ReactNode } from "react"
+import { useEffect, useState } from "react"
 
-import { useUi, type SettingsSection } from "@/app/ui-store"
-import { Button, Icon, type IconName, Item, ItemContent, ItemMedia, ItemTitle } from "@unicron/ui"
-import { MasterDetail, PaneHeader } from "@/components/master-detail"
-import { isMember, isTauri, signOutOfGateway } from "@/core/client"
-import { useAccounts, useCore } from "@/core/queries"
-import { AccountsSection } from "@/features/accounts"
-import { AdvancedMail } from "@/features/advanced-mail"
-import { AiSettingsForm } from "@/features/ai-settings"
-import { GatewayUpdatesSection } from "@/features/gateway-updates"
-import { ShortcutSettings } from "@/features/grammar"
-import { MeetingSettingsSection } from "@/features/meeting-settings"
-import { MenuBarSettingsSection } from "@/features/menu-bar-settings"
-import { PushSettingsSection } from "@/features/push-settings"
-import { ScreenerSettingsSection } from "@/features/screener-settings"
-import { Members } from "@/features/team-members"
-import { AboutSection } from "@/features/updates/about-section"
-import { WritingSettings } from "@/features/writing-settings"
+import { AppFrameInset, SearchField, SectionHeader, SettingsFrame, useAppFrame, type SettingsSection as FrameSection } from "@unicron/ui"
+import { DemoBar } from "@/app/demo-bar"
+import { stepBack } from "@/app/places"
+import { useScreenFact, useScreenPlace } from "@/app/screen"
+import { useUi } from "@/app/ui-store"
+import { useUpdateMark } from "@/app/update-mark"
+import { ScreenHead } from "@/components/page"
+import { isMember } from "@/core/client"
+import { useAccounts } from "@/core/queries"
+import { AccountRows } from "@/features/accounts"
+import { useUpdates } from "@/features/updates/use-updates"
 
-import { SectionHeader } from "./section-header"
-
-interface Section {
-  id: SettingsSection
-  icon: IconName
-  title: string
-  body: () => ReactNode
-}
+import { closeAccountStep, setAccountStep } from "./account-step"
+import { FIND_FROM, findSections, useSettingsSections, type SettingsSection } from "./sections"
 
 /**
- * Settings as a page (ADR-0075): the sections down the left like a mailbox's
- * list, by name alone, and the one you pick beside them under its header. Replaces the accounts dialog and the
- * dialogs it opened. Sections that need an account show once there is one.
+ * Settings (brief T0; ADR-0104, which replaces ADR-0075's page) on
+ * unicron's SettingsFrame, driven by `sections.ts`. Expanded: the page head
+ * and the section list (204) beside the open section, in one column up to
+ * 720, headed by its title and one line. Phone and medium: the drawn
+ * ACCOUNTS rows of Mobile / 16, then ALL SETTINGS and every section; each
+ * section pushes. "Find a setting" from ten sections up.
  */
 export function SettingsView() {
   const settings = useUi((s) => s.settings)
   const openSettings = useUi((s) => s.openSettings)
-  const sections = useSections()
-  const current = sections.find((s) => s.id === settings) ?? null
-  const remote = useCore().data?.remote
+  const frame = useAppFrame()
+  const all = useSettingsSections()
+  const member = isMember()
+  const { data: accounts = [] } = useAccounts()
+  const mark = useUpdateMark()
+  const version = useUpdates()?.version
+
+  // "Find a setting" counts every section this person has, not the ones a search leaves, so it
+  // never goes away while someone types in it.
+  const findable = all.length >= FIND_FROM
+  const [query, setQuery] = useState("")
+  const sections = findable ? findSections(all, query) : all
+
+  // `gateway` was a section until ADR-0104; its update rows are About's now.
+  const asked = settings === "gateway" ? "about" : settings === "index" ? null : settings
+  // A search that leaves out the open section shows its first match beside the list, without making it the place.
+  const value = asked && (sections.some((s) => s.id === asked) || !frame.split) ? asked : frame.split ? (sections[0]?.id ?? null) : null
+  const current = all.find((s) => s.id === (value ?? (frame.split ? sections[0]?.id : null))) ?? null
+
+  // The breadcrumb's last part (ADR-0083): SETTINGS // MAIL. The status is the app's version where the build knows it.
+  useScreenPlace(current?.name ?? null)
+  useScreenFact(version ? `Vale ${version}` : null)
+
+  // Another section, or Settings closed, leaves Accounts at its list.
+  const open = current?.id
+  useEffect(() => {
+    if (open !== "accounts") closeAccountStep()
+  }, [open])
+  useEffect(() => () => void closeAccountStep(), [])
+
+  // Back from a section: a screen pushed inside it first (Manage an account), then the list of
+  // sections, by the browser's Back when the list is the place behind (ADR-0084).
+  const back = () => {
+    if (closeAccountStep()) return
+    stepBack((behind) => behind.settings === "index", () => useUi.setState({ settings: "index" }))
+  }
+  const pick = (id: string | null) => {
+    if (id === null) return back()
+    // Accounts again, from its own pushed screen: back to its list.
+    if (id === "accounts") closeAccountStep()
+    openSettings(id as SettingsSection)
+  }
+
+  const names = member ? [] : accounts.map((a) => a.displayName)
+  const frameSections: FrameSection[] = sections.map((s) => ({ value: s.id, label: s.name, icon: s.icon, group: s.group, description: s.description, mark: s.id === "about" ? mark : undefined }))
 
   return (
-    <MasterDetail
-      emptyIcon="settings"
-      emptyLabel="Choose a section to see its settings."
-      onBack={() => useUi.setState({ settings: "index" })}
-      header={<PaneHeader title="Settings" />}
-      list={
-        <nav aria-label="Settings sections" className="flex flex-col gap-1 px-2 pb-4">
-          {sections.map((s) => (
-            <Item
-              key={s.id}
-              size="sm"
-              className="border-transparent"
-              data-selected={s.id === current?.id}
-              render={<button type="button" aria-current={s.id === current?.id ? "page" : undefined} onClick={() => openSettings(s.id)} />}
-            >
-              <ItemMedia>
-                <Icon name={s.icon} tone="muted" />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>{s.title}</ItemTitle>
-              </ItemContent>
-            </Item>
-          ))}
-          {remote && (
-            <Button variant="ghost" className="mt-4 justify-start" onClick={() => void signOutOfGateway().then(() => location.reload())}>
-              <Icon name="logout" data-icon="inline-start" /> Sign out of this gateway
-            </Button>
+    <SettingsFrame
+      sections={frameSections}
+      value={value}
+      onValueChange={pick}
+      head={
+        <>
+          <DemoBar in="column" />
+          {/* A phone names Settings in its top row (Mobile / 16); the large head is the desktop's and medium's. */}
+          {!frame.phone && <ScreenHead overline={names.length ? `Settings // ${names.join(" + ")}` : "Settings"} title="Settings" />}
+          {findable && (
+            <AppFrameInset>
+              <div className="flex flex-col gap-2 pb-6">
+                <SearchField aria-label="Find a setting" placeholder="Find a setting" value={query} onValueChange={setQuery} />
+                {!sections.length && <p className="type-caption text-text-secondary">No setting matches “{query.trim()}”.</p>}
+              </div>
+            </AppFrameInset>
           )}
-        </nav>
+        </>
       }
-      detail={
-        current && (
-          <section key={current.id} aria-label={current.title} className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 md:px-8">
-            {current.body()}
-          </section>
+      overview={
+        // Mobile / 16's drawn rows that have a real setting behind them: the accounts. Then every section.
+        query.trim() ? undefined : (
+          <AppFrameInset>
+            {!member && <AccountRows onManage={(a) => (setAccountStep({ kind: "manage", id: a.id }), openSettings("accounts"))} />}
+            <div className={member || !accounts.length ? undefined : "pt-8"}>
+              <SectionHeader title="All settings" count={all.length} level={2} />
+            </div>
+          </AppFrameInset>
         )
       }
-    />
+    >
+      {current && (
+        <>
+          <DemoBar in="column" />
+          <AppFrameInset key={current.id}>
+            <current.body />
+          </AppFrameInset>
+        </>
+      )}
+    </SettingsFrame>
   )
-}
-
-/** The sections this person has: a team member only has their own; most need an account. */
-function useSections(): Section[] {
-  const { data: accounts = [] } = useAccounts()
-  const { data: core } = useCore()
-  const hasAccount = accounts.length > 0
-  const remote = !!core?.remote
-  const member = isMember()
-  const all: (Section & { when: boolean })[] = [
-    {
-      id: "accounts",
-      icon: "manage_accounts",
-      title: "Accounts",
-      when: true,
-      body: () => <AccountsSection />,
-    },
-    {
-      id: "writing",
-      icon: "edit_note",
-      title: "Signatures and templates",
-      when: hasAccount && !member,
-      body: () => (
-        <>
-          <SectionHeader title="Signatures and templates" description="Signatures go on new messages and replies. Templates are text you reuse, inserted from the composer." />
-          <WritingSettings />
-        </>
-      ),
-    },
-    {
-      id: "mail",
-      icon: "mail",
-      title: "Mail",
-      when: hasAccount && !member,
-      body: () => (
-        <>
-          <SectionHeader title="Mail" description="The defaults keep your reading private. Change them here if you want more control." />
-          <AdvancedMail />
-          <ScreenerSettingsSection />
-        </>
-      ),
-    },
-    {
-      id: "calendar",
-      icon: "calendar_month",
-      title: "Calendar",
-      when: !member,
-      body: () => (
-        <>
-          <SectionHeader title="Calendar" description={remote ? "How meetings open." : "How meetings open, and what the menu bar shows."} />
-          <MeetingSettingsSection />
-          {/* The menu bar is the desktop's; the demo stands in for it. */}
-          {!remote && <MenuBarSettingsSection />}
-        </>
-      ),
-    },
-    {
-      id: "shortcuts",
-      icon: "keyboard",
-      title: "Shortcuts and gestures",
-      when: true,
-      body: () => (
-        <>
-          <SectionHeader
-            title="Shortcuts and gestures"
-            description="The same actions three ways: a key, a swipe on a phone, or the command menu. Every swipe can also have a key, so nothing is gesture-only."
-          />
-          <ShortcutSettings />
-        </>
-      ),
-    },
-    {
-      id: "ai",
-      icon: "wand_stars",
-      title: "AI summaries and replies",
-      when: hasAccount && !member,
-      body: () => (
-        <>
-          <SectionHeader title="AI summaries and replies" description="Off unless you turn it on. A conversation goes to the model only when you ask for its summary or replies." />
-          <AiSettingsForm />
-        </>
-      ),
-    },
-    {
-      id: "phone",
-      icon: "mobile",
-      title: "New mail on your phone",
-      when: hasAccount && !remote && !member,
-      body: () => (
-        <>
-          <SectionHeader title="New mail on your phone" description="How mail reaches your phone while the app is closed. The desktop app keeps its own connection open while it runs." />
-          <PushSettingsSection />
-        </>
-      ),
-    },
-    {
-      // The gateway's own updates (ADR-0077), for its owner: it says when a newer image is out.
-      id: "gateway",
-      icon: "dns",
-      title: "Gateway updates",
-      when: remote && !member,
-      body: () => (
-        <>
-          <SectionHeader title="Gateway updates" description="This gateway's version, and whether a newer image is out. The gateway never restarts itself: you update it on its server." />
-          <GatewayUpdatesSection />
-        </>
-      ),
-    },
-    {
-      id: "team",
-      icon: "group",
-      title: "Team members",
-      when: remote && !member,
-      body: () => (
-        <>
-          <SectionHeader
-            title="Team members"
-            description="People you add work this gateway's mail with you: they read and reply from its accounts, assign conversations, and leave each other notes. Your accounts, settings, calendars, contacts, and notes stay yours."
-          />
-          <Members />
-        </>
-      ),
-    },
-    {
-      // Updates are the desktop app's (ADR-0076): not on the web, a gateway, or Vale Demo.
-      id: "about",
-      icon: "info",
-      title: "About",
-      when: isTauri(),
-      body: () => (
-        <>
-          <SectionHeader title="About" description="This version of Vale, and its updates. A newer build downloads quietly, and Vale offers to restart for it." />
-          <AboutSection />
-        </>
-      ),
-    },
-  ]
-  return all.filter((s) => s.when)
 }

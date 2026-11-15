@@ -1,249 +1,263 @@
 import { useState } from "react"
-import { toast } from "sonner"
 
-import { Button, Field, FieldDescription, FieldLabel, Icon, type IconName, Input, Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle, NativeSelect, NativeSelectOption, Spinner } from "@unicron/ui"
+import { AdaptiveMenu, AdaptiveMenuRadioGroup, AdaptiveMenuRadioItem, Button, FieldRow, FieldRowAction, RadioGroup, RadioRow, TextField } from "@unicron/ui"
 import { useAiModels, useAiSettings, useCore, useSetAiKey, useSetAiPrefs } from "@/core/queries"
 import type { AiEndpoint, AiPrefs, AiProvider, AiSettings } from "@/core/types"
+import { useRowSize } from "@/features/settings/row-size"
+import { useSettingSave } from "@/features/settings/save"
+import { SaveFailed } from "@/features/settings/save-failed"
+import { SettingBlock } from "@/features/settings/setting-block"
+import { useConfirm } from "@/lib/confirm"
 
-/** What each choice means, in the words the dialog uses. `remote`: the gateway, where "this computer" is the server. */
-function choices(remote: boolean): { value: AiProvider; icon: IconName; title: string; hint: string }[] {
+/** What each choice means (brief T7). `remote`: on a gateway, where "this computer" is the server. */
+function choices(remote: boolean): { value: AiProvider; label: string; hint: string }[] {
   return [
-    { value: "off", icon: "block", title: "Off", hint: "Vale never sends your mail to a model." },
-    remote
-      ? { value: "local", icon: "dns", title: "On your own server", hint: "Ollama or similar, beside your gateway. Mail stays on your machines." }
-      : { value: "local", icon: "computer", title: "On this computer", hint: "Ollama, LM Studio, or similar. Your mail stays on this computer." },
-    { value: "anthropic", icon: "cloud", title: "Claude, with your API key", hint: "Anthropic's models. What you ask about goes to Anthropic." },
-    { value: "compatible", icon: "api", title: "Another service, with your API key", hint: "Any OpenAI-style API. What you ask about goes there." },
+    { value: "off", label: "Off", hint: "Vale never sends your mail to a model." },
+    { value: "local", label: remote ? "On your own server" : "On this computer", hint: "Ollama, LM Studio or similar. Mail stays on your machines." },
+    { value: "anthropic", label: "Claude, with your API key", hint: "What you ask about goes to Anthropic." },
+    { value: "compatible", label: "Another service, with your API key", hint: "What you ask about goes there." },
   ]
 }
 
-/** Opt-in AI's settings (ADR-0059): where the model runs, which model, and its key. */
+type Hosted = "anthropic" | "compatible"
+
+/**
+ * Settings › AI summaries and replies (brief T7; ADR-0059, ADR-0111). The
+ * caption first; MODEL RUNS as four RadioRows; then, by the choice, the
+ * server's address, the model (a menu of what the server lists, or a field
+ * when it lists none), the API key (write-only), and the connection's state.
+ * Every change saves at once and silently.
+ */
 export function AiSettingsForm() {
   const { data: settings } = useAiSettings()
   const { data: core } = useCore()
   const set = useSetAiPrefs()
+  const save = useSettingSave()
   if (!settings) return null
   const prefs = settings.prefs
-  const save = (p: Partial<AiPrefs>, said?: string) => set.mutate({ ...prefs, ...p }, { onSuccess: () => said && toast.success(said, { duration: 2000 }), onError: (e) => toast.error(e.message) })
-  const options = choices(!!core?.remote)
+  const remote = !!core?.remote
+  const change = (row: string, p: Partial<AiPrefs>) => save.run(row, set.mutateAsync({ ...prefs, ...p }))
+  const provider = prefs.provider
 
   return (
-    <div className="flex flex-col gap-6">
-      <section className="flex flex-col gap-2" aria-labelledby="ai-where">
-        <h3 id="ai-where" className="text-sm font-medium">
-          Where the model runs
-        </h3>
-        <div role="radiogroup" aria-labelledby="ai-where" className="flex flex-col gap-2">
-          {options.map((o) => (
-            <Item
-              key={o.value}
-              variant="outline"
-              size="sm"
-              data-selected={prefs.provider === o.value}
-              render={<button type="button" role="radio" aria-checked={prefs.provider === o.value} onClick={() => prefs.provider !== o.value && save({ provider: o.value }, o.value === "off" ? "AI is off" : undefined)} />}
-            >
-              <ItemMedia variant="icon">
-                <Icon name={o.icon} tone="muted" />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>{o.title}</ItemTitle>
-                <ItemDescription>{o.hint}</ItemDescription>
-              </ItemContent>
-              {/* Hover and chosen share a background, so the chosen one also carries a check. */}
-              {prefs.provider === o.value && (
-                <ItemActions>
-                  <Icon name="check_circle" fill />
-                </ItemActions>
-              )}
-            </Item>
+    <div className="flex flex-col gap-8">
+      <p className="type-caption text-text-secondary">Off unless you turn it on. A conversation goes to the model only when you ask for its summary or replies.</p>
+
+      <SettingBlock title="Model runs">
+        <RadioGroup aria-label="Model runs" value={provider} onValueChange={(v) => change("provider", { provider: v as AiProvider })}>
+          {choices(remote).map((o, i) => (
+            <RadioRow key={o.value} value={o.value} label={o.label} description={o.hint} rule={i === 0 ? "none" : "top"} />
           ))}
-        </div>
-      </section>
+        </RadioGroup>
+        <SaveFailed message={save.failed("provider")} />
+      </SettingBlock>
 
-      {prefs.provider === "local" && <LocalServer key="local" settings={settings} onSave={save} remote={!!core?.remote} />}
-      {prefs.provider === "anthropic" && <Hosted key="anthropic" provider="anthropic" settings={settings} onSave={save} />}
-      {prefs.provider === "compatible" && <Hosted key="compatible" provider="compatible" settings={settings} onSave={save} />}
-
-      {prefs.provider !== "off" && (
-        <p className="flex gap-2 text-xs text-muted-foreground [&_svg]:mt-0.5 [&_svg]:size-4 [&_svg]:shrink-0">
-          <Icon name="info" />
-          What's sent: the text of the one conversation you ask about, newest messages first. Never attachments, images, or other mail, and nothing is sent on its own.
-        </p>
-      )}
+      {provider !== "off" && <ModelBlock key={provider} provider={provider} settings={settings} remote={remote} change={change} failed={save.failed} />}
     </div>
   )
 }
 
-/** An address field that saves when you leave it. */
-function AddressField({ id, label, value, hint, onSave }: { id: string; label: string; value: string; hint: string; onSave: (url: string) => void }) {
+/** The rows under the choice: the address, the model, the key and the connection. */
+function ModelBlock({ provider, settings, remote, change, failed }: { provider: Exclude<AiProvider, "off">; settings: AiSettings; remote: boolean; change: (row: string, p: Partial<AiPrefs>) => void; failed: (row: string) => string | null }) {
+  const p = settings.prefs
+  const size = useRowSize()
+  const hosted = provider !== "local"
+  const endpoint: AiEndpoint | null = provider === "local" ? p.local : provider === "compatible" ? p.compatible : null
+  const setEndpoint = (e: Partial<AiEndpoint>) => change(provider === "local" ? "local" : "compatible", provider === "local" ? { local: { ...p.local, ...e } } : { compatible: { ...p.compatible, ...e } })
+  const model = provider === "anthropic" ? p.anthropicModel : endpoint!.model
+  const pick = (m: string) => (provider === "anthropic" ? change("model", { anthropicModel: m }) : setEndpoint({ model: m }))
+  // The server's list of models is also the connection check: an answer means the address (and key) are right.
+  const models = useAiModels(provider, true, endpoint?.url)
+  const listed = models.isSuccess && models.data.length > 0
+
+  return (
+    <SettingBlock title={provider === "local" ? "Model server" : provider === "anthropic" ? "Claude" : "Service"}>
+      {(endpoint || !listed) && (
+      <div className="flex flex-col gap-6 pt-4 pb-2">
+        {endpoint && (
+          <AddressField
+            key={endpoint.url}
+            label={provider === "local" ? "Server address" : "Service address"}
+            value={endpoint.url}
+            helper={
+              provider === "local"
+                ? `Ollama is at http://localhost:11434/v1 and LM Studio at http://localhost:1234/v1${remote ? ", as the gateway sees them" : ""}. Plain http works only on your own network.`
+                : "Its OpenAI-style API, ending in /v1 for most services."
+            }
+            failed={failed(provider === "local" ? "local" : "compatible")}
+            onSave={(url) => setEndpoint({ url })}
+          />
+        )}
+        {!listed && (
+          <ModelField
+            key={model}
+            value={model}
+            helper={models.isSuccess ? (provider === "local" ? "No models on this server yet. With Ollama, run “ollama pull llama3.2”." : "This service lists no models that can chat. Its name exactly as the service knows it.") : "Its name exactly as the server knows it."}
+            onSave={pick}
+          />
+        )}
+      </div>
+      )}
+      {listed && (
+        <FieldRow
+          size={size}
+          label="Model"
+          action={
+            <AdaptiveMenu title="Model" trigger={<FieldRowAction>Change</FieldRowAction>}>
+              <AdaptiveMenuRadioGroup value={model} onValueChange={pick}>
+                {/* A saved model the server no longer lists still shows, so nothing changes behind your back. */}
+                {(model && !models.data.includes(model) ? [model, ...models.data] : models.data).map((m) => (
+                  <AdaptiveMenuRadioItem key={m} value={m}>
+                    {m}
+                  </AdaptiveMenuRadioItem>
+                ))}
+              </AdaptiveMenuRadioGroup>
+            </AdaptiveMenu>
+          }
+        >
+          {model || "None chosen"}
+        </FieldRow>
+      )}
+      <SaveFailed message={failed("model")} />
+      {hosted && <KeyRow provider={provider} saved={settings.keys[provider]} remote={remote} />}
+      <FieldRow
+        size={size}
+        label="Connection"
+        description={models.isError ? <span className="text-critical-text">{models.error.message}</span> : undefined}
+        action={models.isError ? <FieldRowAction onClick={() => void models.refetch()}>Try again</FieldRowAction> : undefined}
+      >
+        <span role="status">{models.isPending || models.isRefetching ? "Checking the connection…" : models.isError ? "Not connected" : "Connected."}</span>
+      </FieldRow>
+      <p className="type-caption pt-4 text-text-secondary">
+        What's sent: the text of the one conversation you ask about, newest messages first. Never attachments, images or other mail, and nothing is sent on its own.
+      </p>
+    </SettingBlock>
+  )
+}
+
+/** An address that saves when you leave it; a refused one goes back to the saved address, with the reason under it. */
+function AddressField({ label, value, helper, failed, onSave }: { label: string; value: string; helper: string; failed: string | null; onSave: (url: string) => void }) {
   const [text, setText] = useState(value)
   return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input id={id} inputMode="url" autoComplete="off" spellCheck={false} value={text} onChange={(e) => setText(e.target.value)} onBlur={() => text.trim() !== value && onSave(text)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
-      <FieldDescription>{hint}</FieldDescription>
-    </Field>
+    <TextField
+      label={label}
+      inputMode="url"
+      autoComplete="off"
+      spellCheck={false}
+      value={text}
+      helper={helper}
+      error={failed ?? undefined}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => (text.trim() && text.trim() !== value ? onSave(text.trim()) : setText(value))}
+      onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+    />
   )
 }
 
-function LocalServer({ settings, onSave, remote }: { settings: AiSettings; onSave: (p: Partial<AiPrefs>, said?: string) => void; remote: boolean }) {
-  const local = settings.prefs.local
-  const setLocal = (e: Partial<AiEndpoint>, said?: string) => onSave({ local: { ...local, ...e } }, said)
+/** The model as typed, for a server that lists none (or can't be asked yet). Saves when you leave it. */
+function ModelField({ value, helper, onSave }: { value: string; helper: string; onSave: (m: string) => void }) {
+  const [text, setText] = useState(value)
   return (
-    <section className="flex flex-col gap-4" aria-label="Model server">
-      <AddressField
-        id="ai-local-url"
-        label="Server address"
-        value={local.url}
-        hint={`Ollama is at http://localhost:11434/v1 and LM Studio at http://localhost:1234/v1${remote ? ", as seen from the gateway" : ""}. Plain http works only on your own network.`}
-        onSave={(url) => setLocal({ url })}
-      />
-      <ModelPicker provider="local" url={local.url} model={local.model} onPick={(model) => setLocal({ model }, `Using ${model}`)} empty="No models on this server yet. With Ollama, run “ollama pull llama3.2”, then try again." />
-    </section>
+    <TextField
+      label="Model"
+      autoComplete="off"
+      spellCheck={false}
+      value={text}
+      helper={helper}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => text.trim() !== value && onSave(text.trim())}
+      onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+    />
   )
 }
 
-function Hosted({ provider, settings, onSave }: { provider: "anthropic" | "compatible"; settings: AiSettings; onSave: (p: Partial<AiPrefs>, said?: string) => void }) {
-  const p = settings.prefs
-  const hasKey = settings.keys[provider]
-  const model = provider === "anthropic" ? p.anthropicModel : p.compatible.model
-  const pick = (m: string) => onSave(provider === "anthropic" ? { anthropicModel: m } : { compatible: { ...p.compatible, model: m } }, `Using ${m}`)
-  return (
-    <section className="flex flex-col gap-4" aria-label={provider === "anthropic" ? "Claude" : "Service"}>
-      {provider === "compatible" && (
-        <AddressField id="ai-service-url" label="Service address" value={p.compatible.url} hint="Its OpenAI-style API, ending in /v1 for most services." onSave={(url) => onSave({ compatible: { ...p.compatible, url } })} />
-      )}
-      <KeyField provider={provider} saved={hasKey} />
-      {hasKey && <ModelPicker provider={provider} url={provider === "compatible" ? p.compatible.url : undefined} model={model} onPick={pick} empty="This service lists no models that can chat." />}
-    </section>
-  )
-}
-
-/** A key goes in once and stays in the keychain: the dialog only ever knows that one is saved. */
-function KeyField({ provider, saved }: { provider: "anthropic" | "compatible"; saved: boolean }) {
+/**
+ * API KEY (brief T7): a key goes in once and stays in the keychain (or the
+ * gateway's sealed store). Vale never reads it back: with one saved, the row
+ * says where it is, with REPLACE and REMOVE; REMOVE asks, since the key can't
+ * come back.
+ */
+function KeyRow({ provider, saved, remote }: { provider: Hosted; saved: boolean; remote: boolean }) {
   const setKey = useSetAiKey()
+  const size = useRowSize()
+  const confirm = useConfirm()
   const [replacing, setReplacing] = useState(false)
   const [text, setText] = useState("")
-  const { data: core } = useCore()
-  const where = core?.remote ? "the gateway's sealed store" : "your system keychain"
-  const id = `ai-key-${provider}`
-  const submit = () =>
+  const [error, setError] = useState<string | null>(null)
+  const where = remote ? "the gateway's sealed store" : "your system keychain"
+  const submit = () => {
+    setError(null)
     setKey.mutate(
-      { provider, key: text },
+      { provider, key: text.trim() },
       {
         onSuccess: () => {
           setText("")
           setReplacing(false)
-          toast.success("Key saved", { duration: 2000 })
         },
-        onError: (e) => toast.error(e.message),
+        onError: (e) => setError(e.message),
       },
     )
+  }
+  const remove = () =>
+    void confirm.ask({
+      title: "Remove the API key?",
+      description: `Vale can't ask ${provider === "anthropic" ? "Claude" : "the service"} until you add a key again.`,
+      confirmLabel: "Remove",
+      run: () => setKey.mutateAsync({ provider, key: null }),
+    })
 
   if (saved && !replacing) {
     return (
-      <Field>
-        <FieldLabel>API key</FieldLabel>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm [&_svg]:size-4 [&_svg]:text-vertical-mail-text">
-            <Icon name="key" /> Saved in {where}
-          </span>
-          <Button variant="outline" size="sm" onClick={() => setReplacing(true)}>
-            Replace
-          </Button>
-          <Button variant="ghost-destructive" size="sm" onClick={() => setKey.mutate({ provider, key: null }, { onSuccess: () => toast.success("Key removed", { duration: 2000 }) })}>
-            Remove
-          </Button>
-        </div>
-      </Field>
+      <>
+        <FieldRow
+          size={size}
+          label="API key"
+          action={
+            <>
+              <FieldRowAction onClick={() => setReplacing(true)}>Replace</FieldRowAction>
+              <FieldRowAction variant="ghost-destructive" onClick={remove}>
+                Remove
+              </FieldRowAction>
+            </>
+          }
+        >
+          {`Saved in ${where}`}
+        </FieldRow>
+        {confirm.question()}
+      </>
     )
   }
   return (
     <form
-      className="flex flex-col gap-2"
+      aria-label="API key"
+      className="flex flex-col gap-3 pt-4 pb-6"
       onSubmit={(e) => {
         e.preventDefault()
         if (text.trim()) submit()
       }}
     >
-      <Field>
-        <FieldLabel htmlFor={id}>API key</FieldLabel>
-        <div className="flex gap-2">
-          <Input id={id} type="password" autoComplete="off" spellCheck={false} placeholder={provider === "anthropic" ? "sk-ant-…" : "sk-…"} value={text} onChange={(e) => setText(e.target.value)} autoFocus={replacing} />
-          <Button type="submit" disabled={!text.trim() || setKey.isPending}>
-            Save
-          </Button>
-        </div>
-        <FieldDescription>
-          {provider === "anthropic" ? "Make one in the Claude Console, under API keys. " : ""}It's kept in {where}, never in Vale's database, and it isn't shown again.
-        </FieldDescription>
-      </Field>
-      {replacing && (
-        <div>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setReplacing(false)}>
+      <TextField
+        label="API key"
+        type="password"
+        autoComplete="off"
+        spellCheck={false}
+        placeholder={provider === "anthropic" ? "sk-ant-…" : "sk-…"}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        autoFocus={replacing}
+        error={error ?? undefined}
+        helper={`${provider === "anthropic" ? "Make one in the Claude Console, under API keys. " : ""}Kept in ${where}, never in Vale's database, and never shown again.`}
+      />
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" disabled={!text.trim()} loading={setKey.isPending}>
+          Save
+        </Button>
+        {replacing && (
+          <Button type="button" variant="ghost" onClick={() => setReplacing(false)}>
             Keep the saved key
           </Button>
-        </div>
-      )}
-    </form>
-  )
-}
-
-/**
- * The models the server offers, asked of the server itself. It's also the
- * connection check: an answer means the address (and key) are right.
- */
-function ModelPicker({ provider, url, model, onPick, empty }: { provider: AiProvider; url?: string; model: string; onPick: (m: string) => void; empty: string }) {
-  const models = useAiModels(provider, true, url)
-  const [typed, setTyped] = useState(model)
-  const id = `ai-model-${provider}`
-
-  if (models.isPending) {
-    return (
-      <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner /> Checking the connection…
-      </p>
-    )
-  }
-  if (models.isError) {
-    // Still let a model be typed: some servers don't list theirs.
-    return (
-      <div className="flex flex-col gap-3">
-        <p role="alert" className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm [&_svg]:mt-0.5 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-destructive">
-          <Icon name="error" />
-          <span className="min-w-0 flex-1">{models.error.message}</span>
-          <Button variant="outline" size="xs" onClick={() => void models.refetch()}>
-            Try again
-          </Button>
-        </p>
-        <Field>
-          <FieldLabel htmlFor={id}>Model</FieldLabel>
-          <Input id={id} autoComplete="off" spellCheck={false} value={typed} onChange={(e) => setTyped(e.target.value)} onBlur={() => typed.trim() && typed.trim() !== model && onPick(typed.trim())} />
-          <FieldDescription>Its name exactly as the server knows it.</FieldDescription>
-        </Field>
-      </div>
-    )
-  }
-  const list = models.data
-  if (!list.length) return <p className="text-sm text-muted-foreground">{empty}</p>
-  // A saved model the server no longer has still shows, so nothing changes behind your back.
-  const shown = model && !list.includes(model) ? [model, ...list] : list
-  return (
-    <Field>
-      <FieldLabel htmlFor={id}>Model</FieldLabel>
-      <NativeSelect id={id} value={model} onChange={(e) => onPick(e.target.value)}>
-        {!model && (
-          <NativeSelectOption value="" disabled>
-            Choose a model
-          </NativeSelectOption>
         )}
-        {shown.map((m) => (
-          <NativeSelectOption key={m} value={m}>
-            {m}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
-      <FieldDescription>Connected. {provider === "anthropic" ? "Opus is the most capable; Haiku is the fastest and costs least." : "Bigger models write better summaries; smaller ones answer sooner."}</FieldDescription>
-    </Field>
+      </div>
+    </form>
   )
 }

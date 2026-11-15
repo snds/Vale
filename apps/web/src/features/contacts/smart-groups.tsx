@@ -1,60 +1,70 @@
 import { useState } from "react"
-import { toast } from "sonner"
 
-import { Icon, Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Switch, DialogAction, DialogActions } from "@unicron/ui"
-import { useContactLabels, usePimAction, useSmartGroups } from "@/core/queries"
+import { useUi } from "@/app/ui-store"
+import { FormLayer, FormLayerForm } from "@/components/editor-frame"
+import { Button, ChipField, TextField, ToggleRow, toast } from "@unicron/ui"
+import { useContactLabels, usePimAction } from "@/core/queries"
 import type { SmartGroup, SmartGroupInput } from "@/core/types"
+import { getCoreClient } from "@/core/client"
+import { useLeaveGuard } from "@/lib/leave-guard"
+
+import { useSmartGroupEditor } from "./open-smart-group"
 
 const fail = (e: unknown) => toast.error(e instanceof Error ? e.message : String(e))
 
-/** Smart groups as chips: each keeps its own members by rule (ADR-0023). */
-export function SmartGroupChips({ active, onPick }: { active: string | null; onPick: (id: string | null) => void }) {
-  const { data: groups = [] } = useSmartGroups()
-  const [editing, setEditing] = useState<{ group?: SmartGroup } | null>(null)
-  const current = groups.find((g) => g.id === active)
+/** A list of names as a sentence: "Clay club, Family and Work". */
+const listed = (names: string[]) => (names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`)
+
+/**
+ * Smart groups keep their own members by rule (ADR-0023). Contacts mounts
+ * this; a saved group becomes the place, a deleted one gives way to everyone.
+ */
+export function SmartGroupEditor() {
+  const editing = useSmartGroupEditor((s) => s.editing)
+  const close = () => useSmartGroupEditor.setState({ editing: null })
   return (
-    <div role="group" aria-label="Smart groups" className="-mx-4 no-scrollbar mt-2 flex items-center gap-1.5 overflow-x-auto px-4">
-      {groups.map((g) => (
-        <Button
-          key={g.id}
-          size="xs"
-          variant={active === g.id ? "secondary" : "ghost"}
-          aria-pressed={active === g.id}
-          shape="pill"
-          onClick={() => onPick(active === g.id ? null : g.id)}
-        >
-          <Icon name="filter_alt" data-icon="inline-start" className="text-vertical-contacts-text" />
-          {g.name}
-          <span className="text-muted-foreground tabular-nums">{g.count}</span>
-        </Button>
-      ))}
-      {current ? (
-        <Button size="icon-xs" variant="ghost" shape="pill" aria-label="Edit smart group" onClick={() => setEditing({ group: current })}>
-          <Icon name="tune" />
-        </Button>
-      ) : (
-        <Button size="xs" variant="ghost-muted" shape="pill" onClick={() => setEditing({})}>
-          <Icon name="add" data-icon="inline-start" /> Smart group
-        </Button>
+    <FormLayer open={editing !== null} onClose={close}>
+      {editing && (
+        <SmartGroupForm
+          key={editing.group?.id ?? "new"}
+          group={editing.group}
+          onDone={(id) => {
+            close()
+            if (id !== undefined) useUi.getState().setContactsPlace(id ? { kind: "group", id } : { kind: "all" })
+          }}
+        />
       )}
-      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent size="md">
-          {editing && (
-            <SmartGroupForm
-              key={editing.group?.id ?? "new"}
-              group={editing.group}
-              onDone={(id) => {
-                setEditing(null)
-                if (id !== undefined) onPick(id)
-              }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
+    </FormLayer>
   )
 }
 
+/**
+ * Deleting a group changes no card, and the code can make it again from its
+ * rule, so it does not ask (decisions §10): the toast's UNDO saves the same
+ * rule as a new group and opens it.
+ */
+async function deleteGroup(group: SmartGroup) {
+  const core = await getCoreClient()
+  await core.deleteSmartGroup(group.id)
+  const { id: _id, count: _count, ...rule } = group
+  toast(`Deleted ${group.name}`, {
+    description: "Nobody in it was changed",
+    action: {
+      label: "Undo",
+      onClick: () =>
+        void core
+          .saveSmartGroup(null, rule)
+          .then((back) => useUi.getState().setContactsPlace({ kind: "group", id: back.id }))
+          .catch(fail),
+    },
+  })
+}
+
+/**
+ * The smart group form (ADR-0102; brief P1), in the form layer: a name, then
+ * what a card must match. Every field filled in must match; an empty one is
+ * left out.
+ */
 function SmartGroupForm({ group, onDone }: { group?: SmartGroup; onDone: (picked?: string | null) => void }) {
   const { data: labels = [] } = useContactLabels()
   const [name, setName] = useState(group?.name ?? "")
@@ -63,109 +73,73 @@ function SmartGroupForm({ group, onDone }: { group?: SmartGroup; onDone: (picked
   const [domain, setDomain] = useState(group?.domain ?? "")
   const [hasPhone, setHasPhone] = useState(group?.hasPhone ?? false)
   const [hasBirthday, setHasBirthday] = useState(group?.hasBirthday ?? false)
-  const [inTouch, setInTouch] = useState(group?.inTouchDays != null)
-  const [days, setDays] = useState(String(group?.inTouchDays ?? 90))
+  const [days, setDays] = useState<number | null>(group?.inTouchDays ?? null)
   const save = usePimAction((c, input: SmartGroupInput) => c.saveSmartGroup(group?.id ?? null, input))
-  const remove = usePimAction((c) => c.deleteSmartGroup(group!.id))
-  // Labels on cards plus any this group names that no card carries right now.
-  const choices = [...new Set([...labels.map((l) => l.name), ...picked])]
-  const toggle = (l: string) => setPicked((p) => (p.includes(l) ? p.filter((x) => x !== l) : [...p, l]))
+  const remove = usePimAction((_c, g: SmartGroup) => deleteGroup(g))
+  // Closing asks first once a value differs from when the form opened (ADR-0087).
+  const values = JSON.stringify([name, picked, company, domain, hasPhone, hasBirthday, days])
+  const [opened] = useState(values)
+  useLeaveGuard(values !== opened)
+  const inUse = labels.map((l) => l.name)
 
+  const [error, setError] = useState<string | null>(null)
   const submit = async () => {
+    setError(null)
     try {
       const g = await save.mutateAsync({
         name,
         labels: picked,
-        company: company || null,
-        domain: domain || null,
+        company: company.trim() || null,
+        domain: domain.trim() || null,
         hasPhone,
         hasBirthday,
-        inTouchDays: inTouch ? Number(days) || null : null,
+        inTouchDays: days && days > 0 ? days : null,
       })
-      toast.success(group ? `Updated “${g.name}”` : `Added “${g.name}”: ${g.count} ${g.count === 1 ? "person" : "people"} so far`, { duration: 2500 })
+      // Saved, the group opens: its head says what it holds, so no toast.
       onDone(g.id)
     } catch (e) {
-      fail(e)
+      // The form stays open with the server's words above its actions.
+      setError(e instanceof Error ? e.message : String(e))
     }
   }
   const del = async () => {
     try {
-      await remove.mutateAsync(undefined)
-      toast.success(`Deleted “${group!.name}”. Nobody in it was changed.`, { duration: 2500 })
+      await remove.mutateAsync(group!)
       onDone(null)
     } catch (e) {
       fail(e)
     }
   }
-  const field = "h-9 w-full rounded-lg border bg-transparent px-2.5 text-sm dark:bg-input/30"
   return (
-    <form className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), void submit())}>
-      <DialogHeader>
-        <DialogTitle>{group ? "Edit smart group" : "New smart group"}</DialogTitle>
-        <DialogDescription>People join and leave by themselves as their cards change. Fill in what applies: they must match all of it.</DialogDescription>
-      </DialogHeader>
-      <label className="flex flex-col gap-1 text-sm">
-        Name
-        <input className={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="Studio team, Keep in touch…" autoFocus />
-      </label>
-      {choices.length > 0 && (
-        <div role="group" aria-label="Has any of these labels" className="flex flex-col gap-1.5 text-sm">
-          Has any of these labels
-          <div className="flex flex-wrap gap-1.5">
-            {choices.map((l) => (
-              <Button key={l} type="button" size="xs" variant={picked.includes(l) ? "secondary" : "outline"} aria-pressed={picked.includes(l)} shape="pill" onClick={() => toggle(l)}>
-                {l}
-              </Button>
-            ))}
-          </div>
-        </div>
-      )}
-      <label className="flex flex-col gap-1 text-sm">
-        Company contains
-        <input className={field} value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Studio" />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        Email at
-        <input className={field} value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="studio.example" />
-        <span className="text-xs text-muted-foreground">A domain. Its subdomains count too.</span>
-      </label>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        Has a phone number
-        <Switch checked={hasPhone} onCheckedChange={setHasPhone} aria-label="Has a phone number" />
-      </label>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        Has a birthday
-        <Switch checked={hasBirthday} onCheckedChange={setHasBirthday} aria-label="Has a birthday" />
-      </label>
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <span className="flex flex-wrap items-center gap-1.5">
-          In touch in the last
-          <input
-            aria-label="Days"
-            type="number"
-            min={1}
-            className="h-8 w-16 rounded-lg border bg-transparent px-2 text-sm tabular-nums disabled:opacity-50 dark:bg-input/30"
-            value={days}
-            disabled={!inTouch}
-            onChange={(e) => setDays(e.target.value)}
-          />
-          days
-        </span>
-        <Switch checked={inTouch} onCheckedChange={setInTouch} aria-label="In touch recently" />
+    <FormLayerForm
+      overline={group ? "Smart group" : "New smart group"}
+      title={name.trim() || (group ? "Smart group" : "New smart group")}
+      primary={{ label: group ? "Save" : "Create group", loading: save.isPending }}
+      error={error}
+      onSubmit={() => void submit()}
+      footerStart={
+        group && (
+          <Button type="button" variant="ghost" onClick={() => void del()} loading={remove.isPending}>
+            Delete
+          </Button>
+        )
+      }
+    >
+      <p className="type-body text-text-secondary">People join and leave as their cards change. They must match everything you fill in.</p>
+      <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} data-form-focus="" autoComplete="off" />
+      <ChipField
+        label="Has any of these labels"
+        value={picked}
+        onValueChange={setPicked}
+        helper={inUse.length ? `In use: ${listed(inUse)}.` : "No card has a label yet."}
+      />
+      <TextField label="Company" value={company} onChange={(e) => setCompany(e.target.value)} autoComplete="off" />
+      <TextField label="Email domain" value={domain} onChange={(e) => setDomain(e.target.value)} helper="Subdomains count too." autoComplete="off" spellCheck={false} />
+      <div className="flex flex-col">
+        <ToggleRow label="Has a phone number" checked={hasPhone} onCheckedChange={setHasPhone} />
+        <ToggleRow label="Has a birthday" checked={hasBirthday} onCheckedChange={setHasBirthday} rule="both" />
       </div>
-      <DialogActions>
-        {group && (
-          <DialogAction kind="destructive" type="button" onClick={() => void del()}>
-            Delete group
-          </DialogAction>
-        )}
-        <DialogAction kind="cancel" type="button" onClick={() => onDone()}>
-          Cancel
-        </DialogAction>
-        <DialogAction type="submit" disabled={save.isPending}>
-          {group ? "Save" : "Add group"}
-        </DialogAction>
-      </DialogActions>
-    </form>
+      <TextField type="number" label="In touch within" value={days} onValueChange={setDays} min={1} max={3650} helper="Days with mail either way. Leave it empty for any time." />
+    </FormLayerForm>
   )
 }

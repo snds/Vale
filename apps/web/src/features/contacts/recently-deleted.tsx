@@ -1,10 +1,13 @@
-import { toast } from "sonner"
-
-import { Icon, Button, Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@unicron/ui"
+import { AppFrameInset, Button, EmptyState, ListRow, Skeleton, toast } from "@unicron/ui"
 import { useCollections, useDeletedContacts, usePimAction } from "@/core/queries"
-import { shortTime } from "@/lib/time"
 
-/** Contacts deleted in the last 30 days, each one tap from coming back. */
+import { folio } from "../calendar/dates"
+
+/**
+ * Recently deleted (brief P5): contacts deleted, and cards merged into
+ * another, in the last 30 days. Each row is the name, the day it went, and
+ * RESTORE. One column up to 720.
+ */
 export function RecentlyDeletedPane({ onRestored }: { onRestored: (id: string) => void }) {
   const { data: gone = [], isPending } = useDeletedContacts()
   const { data: books = [] } = useCollections("contacts")
@@ -12,47 +15,43 @@ export function RecentlyDeletedPane({ onRestored }: { onRestored: (id: string) =
   const run = async (id: string) => {
     try {
       const back = await restore.mutateAsync(id)
-      toast.success(`Restored ${back.fullName}`, { duration: 2500 })
+      toast.success(`Restored ${back.fullName || "contact"}`)
       onRestored(back.id)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
     }
   }
-  if (isPending) return null
+  if (isPending)
+    return (
+      <div className="flex max-w-180 flex-col" aria-hidden data-slot="deleted-loading">
+        <Skeleton variant="row" />
+        <Skeleton variant="row" />
+        <Skeleton variant="row" />
+      </div>
+    )
   return (
-    <section className="mx-auto flex max-w-2xl flex-col gap-4 px-4 pb-10 md:px-8 md:pt-8" aria-label="Recently deleted">
-      <header>
-        <h2 className="text-2xl font-semibold tracking-tight">Recently deleted</h2>
-        <p className="text-sm text-muted-foreground">Deleted contacts and cards merged into another stay here for 30 days.</p>
-      </header>
+    <section className="flex max-w-180 flex-col pb-10" aria-label="Recently deleted">
       {gone.length === 0 ? (
-        <Empty className="py-12">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Icon name="restore_from_trash" />
-            </EmptyMedia>
-            <EmptyTitle>Nothing deleted</EmptyTitle>
-            <EmptyDescription>Contacts you delete show up here.</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
+        <AppFrameInset>
+          <EmptyState overline="Recently deleted // 00" title="Nothing deleted." body="Deleted contacts stay here for 30 days." />
+        </AppFrameInset>
       ) : (
-        <ul className="divide-y rounded-xl border">
-          {gone.map((g) => {
-            const book = books.find((b) => b.id === g.bookId)
-            return (
-              <li key={g.id} className="flex items-center gap-3 px-4 py-3">
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium">{g.fullName || "(no name)"}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {[g.emails[0]?.value, `deleted ${shortTime(g.deletedAt)}`, book ? null : "its address book is gone, so it returns to this device"].filter(Boolean).join(" · ")}
-                  </span>
-                </span>
-                <Button variant="outline" size="sm" disabled={restore.isPending} onClick={() => void run(g.id)} aria-label={`Restore ${g.fullName}`}>
-                  <Icon name="settings_backup_restore" data-icon="inline-start" /> Restore
+        <ul>
+          {gone.map((g) => (
+            <ListRow
+              key={g.id}
+              render={<li />}
+              title={g.fullName || "No name"}
+              meta={`Deleted ${folio(new Date(g.deletedAt * 1000))}`}
+              metaStyle="plain"
+              detail={books.some((b) => b.id === g.bookId) ? undefined : "Its address book is gone, so it comes back on this device."}
+              action={
+                <Button variant="secondary" size="sm" loading={restore.isPending && restore.variables === g.id} onClick={() => void run(g.id)} aria-label={`Restore ${g.fullName}`}>
+                  Restore
                 </Button>
-              </li>
-            )
-          })}
+              }
+            />
+          ))}
         </ul>
       )}
     </section>
