@@ -1,29 +1,68 @@
-import { useState } from "react"
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react"
 
 import { useUi, type ContactEditorState } from "@/app/ui-store"
 import { FormLayer, FormLayerForm } from "@/components/editor-frame"
-import { Icon, Button, NativeSelect, NativeSelectOption, Chip, ChipRemove, toast } from "@unicron/ui"
+import {
+  AdaptiveMenu,
+  AdaptiveMenuRadioGroup,
+  AdaptiveMenuRadioItem,
+  AdaptivePopover,
+  AppFrameInset,
+  AppFramePageHead,
+  Banner,
+  Button,
+  ChipField,
+  FieldRow,
+  FieldRowAction,
+  Icon,
+  InitialTile,
+  TextField,
+  toast,
+  useAppFrame,
+} from "@unicron/ui"
 import { getCoreClient } from "@/core/client"
 import { useAccounts, useCollections, useContactLabels, usePimAction } from "@/core/queries"
-import type { ContactField, ContactInput } from "@/core/types"
-import { useLeaveGuard } from "@/lib/leave-guard"
+import type { Account, Collection, ContactField, ContactInput } from "@/core/types"
+import { leaveThen, useLeaveGuard } from "@/lib/leave-guard"
 
-import { PersonAvatar } from "./person"
+import { birthdayLabel, contactInitials, fieldLabel } from "./contact-format"
+import { useContactPane } from "./contact-pane"
 
 const EMAIL_LABELS = ["home", "work", "other"]
 const PHONE_LABELS = ["cell", "home", "work", "other"]
 
+/** A number is written with digits, and may carry spaces, a leading +, the usual - ( ) . / between them, and an extension. */
+const PHONE_OK = /^[\d\s+\-()./]*\d[\d\s+\-()./]*(\s*(x|ext\.?)\s*\d+)?$/i
+const PHONE_RULE = "Use digits, spaces and +."
+
+/**
+ * The contact form in the form layer (ADR-0087, ADR-0103): mounted once at
+ * the root, so every section can open it. It stays empty while the form
+ * stands in Contacts' detail column instead (`ContactPaneEditor`).
+ */
 export function ContactEditor() {
   const state = useUi((s) => s.contactEditor)
+  const inPane = useContactPane((s) => s.inPane)
   const close = useUi((s) => s.closeContactEditor)
+  const open = state !== null && !inPane
   return (
-    <FormLayer open={state !== null} onClose={close}>
-      {state && <ContactForm key={JSON.stringify(state)} state={state} onDone={close} />}
+    <FormLayer open={open} onClose={close}>
+      {open && <LayerForm key={JSON.stringify(state)} state={state} onDone={close} />}
     </FormLayer>
   )
 }
 
-const bare = "h-11 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+/**
+ * The form in the detail column (brief P3, Desktop / 10): EDIT CONTACT or
+ * NEW CONTACT over the name as typed, PASTE A SIGNATURE at the head's right,
+ * the fields, then CANCEL and SAVE. Every move away with changes asks first
+ * (`lib/leave-guard`); Esc and CANCEL too. `onSaved` gets the card's id.
+ */
+export function ContactPaneEditor({ onSaved }: { onSaved: (id: string) => void }) {
+  const state = useUi((s) => s.contactEditor)
+  if (!state) return null
+  return <PaneForm key={JSON.stringify(state)} state={state} onSaved={onSaved} />
+}
 
 /**
  * A picked image as a square JPEG photo: centered crop, 256 px, quality 0.85.
@@ -41,116 +80,17 @@ async function toPhoto(file: File): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.85)
 }
 
-/** The card's photo: add, change, or remove. `undefined` means untouched. */
-function PhotoField({ name, value, onChange }: { name: string; value: string | null; onChange: (v: string | null) => void }) {
-  const pick = (files: FileList | null) => {
-    const f = files?.[0]
-    if (f) void toPhoto(f).then(onChange, (e: Error) => toast.error(e.message))
-  }
-  return (
-    <div className="flex items-center gap-4 border-b py-3" role="group" aria-label="Photo">
-      <PersonAvatar contact={{ fullName: name || "?", photo: value }} className="size-16 text-lg" />
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" render={<label />}>
-          <Icon name="camera" data-icon="inline-start" /> {value ? "Change photo" : "Add photo"}
-          <input type="file" accept="image/*" aria-label={value ? "Change photo" : "Add photo"} className="sr-only" onChange={(e) => (pick(e.target.files), (e.target.value = ""))} />
-        </Button>
-        {value && (
-          <Button type="button" variant="ghost" size="sm" onClick={() => onChange(null)}>
-            Remove photo
-          </Button>
-        )}
-      </div>
-    </div>
-  )
+/** A book's name as SAVED IN says it: the account's, with the book's own when it says more; "On this device" without an account. */
+function bookName(books: Collection[], accounts: Account[], id: string) {
+  const b = books.find((x) => x.id === id)
+  const a = accounts.find((x) => x.id === b?.accountId)
+  if (!b) return ""
+  if (!a) return b.accountId ? b.name : "On this device"
+  return b.name !== a.displayName && b.name !== "Contacts" ? `${a.displayName} // ${b.name}` : a.displayName
 }
 
-/** Labels as removable chips, plus a field that suggests labels already in use. */
-function LabelField({ values, onChange }: { values: string[]; onChange: (v: string[]) => void }) {
-  const { data: known = [] } = useContactLabels()
-  const [draft, setDraft] = useState("")
-  const add = (raw: string) => {
-    const l = raw.trim().replace(/,/g, " ")
-    // Reuse an existing label's spelling, so "clay club" joins "Clay club".
-    const name = known.find((k) => k.name.toLowerCase() === l.toLowerCase())?.name ?? l
-    if (name && !values.some((v) => v.toLowerCase() === name.toLowerCase())) onChange([...values, name])
-    setDraft("")
-  }
-  return (
-    <div className="flex min-h-12 flex-wrap items-center gap-1.5 border-b py-2" role="group" aria-label="Labels">
-      <span className="w-24 shrink-0 text-sm text-muted-foreground">Labels</span>
-      {values.map((l) => (
-        <Chip key={l}>
-          {l}
-          <ChipRemove label={`Remove label ${l}`} onClick={() => onChange(values.filter((v) => v !== l))} />
-        </Chip>
-      ))}
-      <input
-        className="h-8 min-w-24 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-        placeholder={values.length ? "Add" : "Add a label"}
-        aria-label="Add a label"
-        list="contact-label-options"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => draft.trim() && add(draft)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === ",") {
-            e.preventDefault()
-            // Enter adds a label here; it doesn't submit the form.
-            e.stopPropagation()
-            if (draft.trim()) add(draft)
-          } else if (e.key === "Backspace" && !draft && values.length) onChange(values.slice(0, -1))
-        }}
-      />
-      <datalist id="contact-label-options">
-        {known.filter((k) => !values.some((v) => v.toLowerCase() === k.name.toLowerCase())).map((k) => (
-          <option key={k.name} value={k.name} />
-        ))}
-      </datalist>
-    </div>
-  )
-}
-
-/** A repeatable label + value list (emails, phone numbers). */
-function FieldList({ kind, values, onChange, labels }: { kind: "email" | "phone"; values: ContactField[]; onChange: (v: ContactField[]) => void; labels: string[] }) {
-  const noun = kind === "email" ? "email" : "phone"
-  const rows = values.length ? values : [{ label: labels[0]!, value: "" }]
-  const set = (i: number, patch: Partial<ContactField>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
-  return (
-    <div className="border-b" role="group" aria-label={kind === "email" ? "Emails" : "Phone numbers"}>
-      {rows.map((f, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <NativeSelect size="sm" value={f.label ?? ""} onChange={(e) => set(i, { label: e.target.value || null })} aria-label={`${noun} ${i + 1} label`} className="w-24 shrink-0">
-            {[...new Set([...labels, ...(f.label ? [f.label] : [])])].map((l) => (
-              <NativeSelectOption key={l} value={l}>
-                {l}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <input
-            className={bare}
-            type={kind === "email" ? "email" : "tel"}
-            inputMode={kind === "email" ? "email" : "tel"}
-            placeholder={kind === "email" ? "Email" : "Phone"}
-            aria-label={`${noun} ${i + 1}`}
-            value={f.value}
-            onChange={(e) => set(i, { value: e.target.value })}
-          />
-          {rows.length > 1 && (
-            <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove ${noun} ${i + 1}`} onClick={() => onChange(rows.filter((_, j) => j !== i))}>
-              <Icon name="subtract--alt" />
-            </Button>
-          )}
-        </div>
-      ))}
-      <button type="button" className="flex h-10 w-full items-center gap-2 px-2 text-sm text-foreground hover:bg-state-hover" onClick={() => onChange([...rows, { label: labels[0]!, value: "" }])}>
-        <Icon name="add--alt" size="sm" /> Add {noun}
-      </button>
-    </div>
-  )
-}
-
-function ContactForm({ state, onDone }: { state: ContactEditorState; onDone: () => void }) {
+/** Everything the form holds and does, the same in the layer and in the pane. */
+function useContactForm(state: ContactEditorState, onSaved: (id: string) => void) {
   const { initial, contactId } = state
   const { data: books = [] } = useCollections("contacts")
   const { data: accounts = [] } = useAccounts()
@@ -159,17 +99,40 @@ function ContactForm({ state, onDone }: { state: ContactEditorState; onDone: () 
   const [fullName, setFullName] = useState(initial.fullName ?? "")
   const [org, setOrg] = useState(initial.org ?? "")
   const [title, setTitle] = useState(initial.title ?? "")
-  const [emails, setEmails] = useState<ContactField[]>(initial.emails ?? [])
-  const [phones, setPhones] = useState<ContactField[]>(initial.phones ?? [])
-  const [birthday, setBirthday] = useState(initial.birthday?.startsWith("--") ? "" : (initial.birthday ?? ""))
+  const [emails, setEmails] = useState<ContactField[]>(initial.emails?.length ? initial.emails : [{ label: EMAIL_LABELS[0]!, value: "" }])
+  const [phones, setPhones] = useState<ContactField[]>(initial.phones?.length ? initial.phones : [{ label: PHONE_LABELS[0]!, value: "" }])
+  // A yearless birthday from another app ("--03-04") has no date to show here: it stays unless replaced.
+  const yearless = initial.birthday?.startsWith("--") ? initial.birthday : null
+  const [birthday, setBirthday] = useState(yearless ? "" : (initial.birthday ?? ""))
   const [note, setNote] = useState(initial.note ?? "")
   const [labels, setLabels] = useState<string[]>(initial.labels ?? [])
   const [photo, setPhoto] = useState<string | null>(initial.photo ?? null)
   const photoChanged = photo !== (initial.photo ?? null)
-  const [pasting, setPasting] = useState(false)
   const [pasted, setPasted] = useState("")
+  const [chosen, setBook] = useState(initial.bookId ?? "")
+  const bookId = chosen || writable[0]?.id || ""
+  const [error, setError] = useState<string | null>(null)
+  // Phone numbers are checked once their field is left, or on SAVE; a number the card already had is never questioned.
+  const [checked, setChecked] = useState<Set<number>>(() => new Set())
+  const [tried, setTried] = useState(false)
+  const known = new Set((initial.phones ?? []).map((p) => p.value))
+  const phoneError = (i: number) => {
+    const v = phones[i]?.value.trim() ?? ""
+    if (!v || known.has(phones[i]!.value) || !(tried || checked.has(i))) return undefined
+    return PHONE_OK.test(v) ? undefined : PHONE_RULE
+  }
+  const wrongPhone = phones.some((p) => {
+    const v = p.value.trim()
+    return v && !known.has(p.value) && !PHONE_OK.test(v)
+  })
+
+  // Asks before dropping changes once a value differs from when it opened (ADR-0087). Text pasted to fill it in counts.
+  const values = JSON.stringify([fullName, org, title, emails.filter((e) => e.value.trim()), phones.filter((p) => p.value.trim()), birthday, note, labels, photo, chosen, pasted])
+  const [opened] = useState(values)
+  const dirty = values !== opened
+
   // Fills the form from a pasted signature; what you've typed stays unless the signature has it.
-  const fillFrom = async () => {
+  const fillFrom = async (): Promise<string | null> => {
     const card = await (await getCoreClient()).parseSignature(pasted)
     if (card.fullName) setFullName(card.fullName)
     if (card.org) setOrg(card.org)
@@ -178,22 +141,16 @@ function ContactForm({ state, onDone }: { state: ContactEditorState; onDone: () 
     if (card.emails.length) setEmails((e) => kept(e, card.emails))
     if (card.phones.length) setPhones((p) => kept(p, card.phones))
     const found = [card.fullName && "name", card.title && "title", card.org && "company", card.phones.length && "phone", card.emails.length && "email"].filter(Boolean)
-    if (found.length) {
-      toast.success(`Filled in ${found.join(", ")}`, { duration: 2500 })
-      setPasting(false)
-      setPasted("")
-    } else toast.error("Couldn't find a name, phone, or email in that text")
+    if (!found.length) return "Couldn't find a name, phone or email in that text"
+    toast.success(`Filled in ${found.join(", ")}`)
+    setPasted("")
+    return null
   }
-  const [chosen, setBook] = useState(initial.bookId ?? "")
-  const bookId = chosen || writable[0]?.id || ""
-  const [error, setError] = useState<string | null>(null)
-  // Closing asks first once a value differs from when the form opened (ADR-0087). Text pasted to fill it in counts.
-  const values = JSON.stringify([fullName, org, title, emails, phones, birthday, note, labels, photo, chosen, pasted])
-  const [opened] = useState(values)
-  useLeaveGuard(values !== opened)
 
   const submit = async () => {
     setError(null)
+    setTried(true)
+    if (wrongPhone) return
     if (!bookId) return setError("There's no address book you can write to.")
     const input: ContactInput = {
       bookId,
@@ -202,8 +159,7 @@ function ContactForm({ state, onDone }: { state: ContactEditorState; onDone: () 
       title: title.trim() || null,
       emails: emails.filter((e) => e.value.trim()),
       phones: phones.filter((p) => p.value.trim()),
-      // A yearless birthday from another app stays as it was unless replaced.
-      birthday: birthday || (initial.birthday?.startsWith("--") ? initial.birthday : null),
+      birthday: birthday || yearless,
       note: note.trim() || null,
       // An editor opened without the card's labels leaves them alone.
       labels: initial.labels !== undefined || labels.length ? labels : null,
@@ -211,76 +167,323 @@ function ContactForm({ state, onDone }: { state: ContactEditorState; onDone: () 
       ...(photoChanged ? { photo: photo ?? "" } : {}),
     }
     try {
-      await save.mutateAsync(input)
-      toast.success(contactId ? "Contact updated" : "Contact added", { duration: 2000 })
-      onDone()
+      const saved = await save.mutateAsync(input)
+      const name = saved.fullName || "contact"
+      toast.success(contactId ? `Saved ${name}` : `Added ${name}`)
+      onSaved(saved.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
   }
 
-  const name = (id: string | null) => (id ? accounts.find((a) => a.id === id)?.displayName ?? "Account" : "On this device")
+  return {
+    contactId,
+    isNew: !contactId,
+    fullName,
+    setFullName,
+    org,
+    setOrg,
+    title,
+    setTitle,
+    emails,
+    setEmails,
+    phones,
+    setPhones,
+    phoneError,
+    checkPhone: (i: number) => setChecked((s) => new Set(s).add(i)),
+    wrongPhone,
+    birthday,
+    setBirthday,
+    yearless,
+    note,
+    setNote,
+    labels,
+    setLabels,
+    photo,
+    setPhoto,
+    pasted,
+    setPasted,
+    fillFrom,
+    writable,
+    bookId,
+    setBook,
+    bookLabel: (id: string) => bookName(books, accounts, id),
+    error,
+    dirty,
+    saving: save.isPending,
+    submit,
+  }
+}
+type Form = ReturnType<typeof useContactForm>
+
+/** In the form layer: a phone's whole screen (Mobile / 13), or a 640 dialog. */
+function LayerForm({ state, onDone }: { state: ContactEditorState; onDone: () => void }) {
+  const phone = useAppFrame().phone
+  const form = useContactForm(state, onDone)
+  useLeaveGuard(form.dirty)
+  const what = form.isNew ? "New contact" : "Edit contact"
   return (
     <FormLayerForm
-      overline={contactId ? "Edit contact" : "New contact"}
-      title={fullName.trim() || (contactId ? "Edit contact" : "New contact")}
-      primary={{ label: contactId ? "Save" : "Add", loading: save.isPending }}
-      error={error}
-      onSubmit={() => void submit()}
+      overline={what}
+      // A phone's top row says what the form is (Mobile / 13); a dialog's header shows the name as typed.
+      title={phone ? what : form.fullName.trim() || what}
+      primary={{ label: "Save", loading: form.saving }}
+      error={form.error}
+      onSubmit={() => void form.submit()}
     >
-      <div>
-        {!contactId &&
-          (pasting ? (
-            <div className="flex flex-col gap-2 border-b bg-muted/40 px-3 py-3">
-              <textarea
-                aria-label="Signature"
-                placeholder={"Paste an email signature, like:\nPriya Raman\nDesign systems lead | Studio\nm: +1 555 010 4410"}
-                className="min-h-28 w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-                value={pasted}
-                onChange={(e) => setPasted(e.target.value)}
-                autoFocus
-              />
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="ghost" size="sm" onClick={() => setPasting(false)}>
-                  Cancel
-                </Button>
-                <Button type="button" size="sm" disabled={!pasted.trim()} onClick={() => void fillFrom().catch((e) => toast.error(String(e)))}>
-                  Fill in
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <button type="button" className="flex h-11 w-full items-center gap-2 border-b px-2 text-sm text-foreground hover:bg-state-hover" onClick={() => setPasting(true)}>
-              <Icon name="paste" size="sm" /> Paste a signature to fill this in
-            </button>
-          ))}
-        <PhotoField name={fullName} value={photo} onChange={setPhoto} />
-        <div className="border-b py-2">
-          <input aria-label="Name" placeholder="Name" autoComplete="name" className="h-11 w-full bg-transparent text-lg font-medium outline-none placeholder:text-muted-foreground" value={fullName} onChange={(e) => setFullName(e.target.value)} data-form-focus="" />
-          <input aria-label="Company" placeholder="Company" autoComplete="organization" className={`${bare} w-full`} value={org} onChange={(e) => setOrg(e.target.value)} />
-          <input aria-label="Job title" placeholder="Job title" className={`${bare} w-full`} value={title} onChange={(e) => setTitle(e.target.value)} />
-        </div>
-        <FieldList kind="email" values={emails} onChange={setEmails} labels={EMAIL_LABELS} />
-        <FieldList kind="phone" values={phones} onChange={setPhones} labels={PHONE_LABELS} />
-        <LabelField values={labels} onChange={setLabels} />
-        <label className="flex min-h-12 items-center gap-3 border-b">
-          <span className="w-24 shrink-0 text-sm text-muted-foreground">Birthday</span>
-          <input type="date" aria-label="Birthday" className="ml-auto h-9 rounded-lg border bg-transparent px-2 text-sm dark:bg-input/30" value={birthday} onChange={(e) => setBirthday(e.target.value)} />
-        </label>
-        <div className="flex min-h-12 items-center gap-3 border-b">
-          <label htmlFor="contact-book" className="w-24 shrink-0 text-sm text-muted-foreground">
-            Save to
-          </label>
-          <NativeSelect id="contact-book" value={bookId} onChange={(e) => setBook(e.target.value)} className="ml-auto max-w-[60%]">
-            {writable.map((b) => (
-              <NativeSelectOption key={b.id} value={b.id}>
-                {b.accountId && name(b.accountId) !== b.name ? `${name(b.accountId)} · ${b.name}` : b.name}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </div>
-        <textarea aria-label="Note" placeholder="Note" className="min-h-28 w-full resize-none bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground" value={note} onChange={(e) => setNote(e.target.value)} />
+      <div className="flex justify-end">
+        <PasteSignature form={form} />
       </div>
+      <Fields form={form} />
     </FormLayerForm>
+  )
+}
+
+/** In the detail column beside the list (Desktop / 10). */
+function PaneForm({ state, onSaved }: { state: ContactEditorState; onSaved: (id: string) => void }) {
+  const close = useUi((s) => s.closeContactEditor)
+  const form = useContactForm(state, (id) => {
+    close()
+    onSaved(id)
+  })
+  useLeaveGuard(form.dirty, close)
+  useEffect(() => {
+    useContactPane.setState({ dirty: form.dirty })
+  }, [form.dirty])
+  const name = useRef<HTMLInputElement>(null)
+  useEffect(() => name.current?.focus(), [])
+  const what = form.isNew ? "New contact" : "Edit contact"
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    void form.submit()
+  }
+  const keys = (e: KeyboardEvent<HTMLFormElement>) => {
+    // React's events cross portals: a key in a menu or a popover the form opened is not the form's.
+    if (!e.currentTarget.contains(e.target as Node)) return
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      void form.submit()
+    } else if (e.key === "Escape" && !e.defaultPrevented) {
+      e.preventDefault()
+      // After this key is done: asked at once, the question would open in time to take the same Escape and close.
+      setTimeout(() => leaveThen(close))
+    }
+  }
+  return (
+    <AppFrameInset>
+      <AppFramePageHead overline={what} title={form.fullName.trim() || what} size="sm" actions={<PasteSignature form={form} />} />
+      <form className="flex flex-col gap-8" aria-label={what} onSubmit={submit} onKeyDown={keys} data-slot="contact-form">
+        <Fields form={form} nameRef={name} />
+        {form.error && <Banner size="compact" tone="critical" body={form.error} />}
+        <div className="flex flex-wrap items-center gap-4" role="group" aria-label="Form actions">
+          <Button type="button" variant="secondary" onClick={() => leaveThen(close)}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={form.saving} aria-keyshortcuts="Control+Enter Meta+Enter">
+            <Icon name="checkmark" data-icon="inline-start" /> Save
+          </Button>
+        </div>
+      </form>
+    </AppFrameInset>
+  )
+}
+
+/** PASTE A SIGNATURE: a popover (a sheet on a phone) with the text and FILL IN. What it can't read stays as the field's error. */
+function PasteSignature({ form }: { form: Form }) {
+  const [open, setOpen] = useState(false)
+  const [miss, setMiss] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const fill = async () => {
+    setBusy(true)
+    try {
+      const failed = await form.fillFrom()
+      setMiss(failed)
+      if (!failed) setOpen(false)
+    } catch (e) {
+      setMiss(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <AdaptivePopover
+      open={open}
+      onOpenChange={(o) => (setOpen(o), setMiss(null))}
+      title="Paste a signature"
+      align="end"
+      trigger={
+        <Button type="button" variant="ghost" size="sm">
+          <Icon name="paste" data-icon="inline-start" /> Paste a signature
+        </Button>
+      }
+    >
+      <div
+        className="flex flex-col gap-4"
+        // A key here is the popover's: Enter makes a new line, Esc closes the popover and not the form.
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault()
+            if (form.pasted.trim()) void fill()
+          }
+          e.stopPropagation()
+        }}
+      >
+        <TextField
+          multiline
+          minRows={4}
+          label="Signature"
+          placeholder={"Priya Raman\nDesign systems lead | Studio\nm: +1 555 010 4410"}
+          helper="Fills in the name, company, title, phones and emails it finds."
+          error={miss ?? undefined}
+          value={form.pasted}
+          onChange={(e) => (form.setPasted(e.target.value), setMiss(null))}
+          autoFocus
+        />
+        <Button type="button" block disabled={!form.pasted.trim()} loading={busy} onClick={() => void fill()}>
+          Fill in
+        </Button>
+      </div>
+    </AdaptivePopover>
+  )
+}
+
+/** The fields of brief P3, in its order. */
+function Fields({ form, nameRef }: { form: Form; nameRef?: Ref<HTMLInputElement> }) {
+  const phone = useAppFrame().phone
+  const { data: known = [] } = useContactLabels()
+  const pick = (files: FileList | null) => {
+    const f = files?.[0]
+    if (f) void toPhoto(f).then(form.setPhoto, (e: Error) => toast.error(e.message))
+  }
+  const suggestions = known.map((k) => k.name).filter((n) => !form.labels.some((l) => l.toLowerCase() === n.toLowerCase()))
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex items-center gap-4" role="group" aria-label="Photo">
+        <InitialTile size="l" initials={contactInitials(form.fullName || "?")} src={form.photo ?? undefined} />
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="ghost" size="sm" render={<label />} nativeButton={false}>
+            <Icon name="camera" data-icon="inline-start" /> {form.photo ? "Change photo" : "Add photo"}
+            <input type="file" accept="image/*" aria-label={form.photo ? "Change photo" : "Add photo"} className="sr-only" onChange={(e) => (pick(e.target.files), (e.target.value = ""))} />
+          </Button>
+          {form.photo && (
+            <Button type="button" variant="ghost" size="sm" onClick={() => form.setPhoto(null)}>
+              Remove photo
+            </Button>
+          )}
+        </div>
+      </div>
+      <TextField ref={nameRef} label="Name" autoComplete="name" value={form.fullName} onChange={(e) => form.setFullName(e.target.value)} data-form-focus="" />
+      <div className={phone ? "flex flex-col gap-6" : "grid grid-cols-2 gap-4"}>
+        <TextField label="Company" autoComplete="organization" value={form.org} onChange={(e) => form.setOrg(e.target.value)} />
+        <TextField label="Job title" autoComplete="organization-title" value={form.title} onChange={(e) => form.setTitle(e.target.value)} />
+      </div>
+      <FieldList kind="email" form={form} />
+      <FieldList kind="phone" form={form} />
+      <TextField
+        label="Birthday"
+        type="date"
+        value={form.birthday}
+        onChange={(e) => form.setBirthday(e.target.value)}
+        helper={form.yearless && !form.birthday ? `Saved without a year: ${birthdayLabel(form.yearless)}. Pick a date to replace it.` : undefined}
+      />
+      <ChipField
+        label="Labels"
+        value={form.labels}
+        onValueChange={form.setLabels}
+        // Reuse a label's spelling, so "clay club" joins "Clay club".
+        parse={(text) => {
+          const l = text.trim().replace(/,/g, " ")
+          return l ? (known.find((k) => k.name.toLowerCase() === l.toLowerCase())?.name ?? l) : null
+        }}
+        helper={suggestions.length ? `In use: ${suggestions.slice(0, 6).join(", ")}` : undefined}
+        list="contact-label-options"
+      />
+      <datalist id="contact-label-options">
+        {suggestions.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+      <TextField label="Note" multiline minRows={4} value={form.note} onChange={(e) => form.setNote(e.target.value)} />
+      {form.isNew && form.writable.length > 0 && (
+        <FieldRow
+          size={phone ? "stacked" : "default"}
+          label="Saved in"
+          action={
+            form.writable.length > 1 ? (
+              <AdaptiveMenu title="Save in" align="end" trigger={<FieldRowAction type="button">Change</FieldRowAction>}>
+                <AdaptiveMenuRadioGroup value={form.bookId} onValueChange={form.setBook}>
+                  {form.writable.map((b) => (
+                    <AdaptiveMenuRadioItem key={b.id} value={b.id}>
+                      {form.bookLabel(b.id)}
+                    </AdaptiveMenuRadioItem>
+                  ))}
+                </AdaptiveMenuRadioGroup>
+              </AdaptiveMenu>
+            ) : undefined
+          }
+        >
+          {form.bookLabel(form.bookId)}
+        </FieldRow>
+      )}
+    </div>
+  )
+}
+
+/** EMAILS or PHONE NUMBERS: a row per value (the field, its label in a menu inside the box, remove), then ADD EMAIL or ADD PHONE. */
+function FieldList({ kind, form }: { kind: "email" | "phone"; form: Form }) {
+  const email = kind === "email"
+  const rows = email ? form.emails : form.phones
+  const onChange = email ? form.setEmails : form.setPhones
+  const labels = email ? EMAIL_LABELS : PHONE_LABELS
+  const noun = email ? "Email" : "Phone"
+  const set = (i: number, patch: Partial<ContactField>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  return (
+    <div className="flex flex-col gap-4" role="group" aria-label={email ? "Emails" : "Phone numbers"}>
+      {rows.map((f, i) => (
+        <TextField
+          key={i}
+          label={i === 0 ? (email ? "Emails" : "Phone numbers") : undefined}
+          aria-label={`${noun} ${i + 1}`}
+          type={email ? "email" : "tel"}
+          inputMode={email ? "email" : "tel"}
+          autoComplete={email ? "email" : "tel"}
+          value={f.value}
+          onChange={(e) => set(i, { value: e.target.value })}
+          onBlur={() => !email && form.checkPhone(i)}
+          error={email ? undefined : form.phoneError(i)}
+          trailing={
+            <>
+              <AdaptiveMenu
+                title={`${noun} ${i + 1} label`}
+                align="end"
+                trigger={
+                  <Button type="button" variant="ghost" size="sm" aria-label={`${noun} ${i + 1} label, ${fieldLabel(f.label, "None")}`}>
+                    {fieldLabel(f.label, noun)} <Icon name="chevron--down" data-icon="inline-end" />
+                  </Button>
+                }
+              >
+                <AdaptiveMenuRadioGroup value={f.label ?? ""} onValueChange={(v) => set(i, { label: v || null })}>
+                  {[...new Set([...labels, ...(f.label ? [f.label] : [])])].map((l) => (
+                    <AdaptiveMenuRadioItem key={l} value={l}>
+                      {fieldLabel(l, noun)}
+                    </AdaptiveMenuRadioItem>
+                  ))}
+                </AdaptiveMenuRadioGroup>
+              </AdaptiveMenu>
+              {rows.length > 1 && (
+                <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove ${noun.toLowerCase()} ${i + 1}`} onClick={() => onChange(rows.filter((_, j) => j !== i))}>
+                  <Icon name="subtract--alt" />
+                </Button>
+              )}
+            </>
+          }
+        />
+      ))}
+      <div>
+        <Button type="button" variant="ghost" size="sm" onClick={() => onChange([...rows, { label: labels[0]!, value: "" }])}>
+          <Icon name="add" data-icon="inline-start" /> {email ? "Add email" : "Add phone"}
+        </Button>
+      </div>
+    </div>
   )
 }

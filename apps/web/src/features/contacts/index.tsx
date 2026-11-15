@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { useRefresh, useScreenFact, useScreenPlace } from "@/app/screen"
 import { useSectionBanner, type SectionBanner } from "@/app/section-banner"
@@ -12,14 +12,17 @@ import { MasterDetail } from "@/components/master-detail"
 import { ScreenHead } from "@/components/page"
 import { useAccounts, useCollections, useContacts, useDuplicates } from "@/core/queries"
 import type { ContactSummary } from "@/core/types"
+import { leaveThen } from "@/lib/leave-guard"
 
 import { ContactDetailPane } from "./contact-detail"
+import { ContactPaneEditor } from "./contact-editor"
+import { closePaneEditor, useContactPane, useContactPaneHost } from "./contact-pane"
 import { ContactsNav } from "./contacts-nav"
 import { DuplicatesPane } from "./duplicates"
 import { PersonRow } from "./person-row"
 import { RecentlyDeletedPane } from "./recently-deleted"
 import { closeRestoreContacts, useRestoreContacts } from "./open-restore"
-import { RestoreContactsDialog } from "./restore"
+import { RestoreContactsLayer } from "./restore"
 import { SmartGroupEditor } from "./smart-groups"
 import { contactsPlaceName, useContactsPlace } from "./use-contacts-place"
 
@@ -68,8 +71,20 @@ export function ContactsView() {
     const id = pendingJump("contact")?.id
     return id ? { id } : null
   })
-  const selected = open?.id ?? null
+  // The contact form stands in the detail column beside the list (ADR-0103; Desktop / 10).
+  const frame = useAppFrame()
+  useContactPaneHost(frame.split)
+  const editor = useUi((s) => s.contactEditor)
+  const inPane = useContactPane((s) => s.inPane) && !!editor && frame.split
+  const unsaved = useContactPane((s) => s.dirty)
+  const selected = inPane ? (editor.contactId ?? null) : (open?.id ?? null)
   const setSelected = (id: string | null) => setOpen(id ? { id } : null)
+  // A move inside Contacts that the places store doesn't see (another row, Back) asks first when the form holds changes.
+  const moveTo = (id: string | null) =>
+    leaveThen(() => {
+      closePaneEditor()
+      setSelected(id)
+    })
   useEffect(() => void useUi.getState().takeJump("contact"), [])
   // A jump while Contacts is already open (a birthday, an Undo) selects that card.
   useEffect(
@@ -98,9 +113,23 @@ export function ContactsView() {
     setOpen(open?.keep ? { id: open.id } : null)
     setChip(null)
   }
+  // Another place closes a form in the pane (with changes, the store asked first). A new contact from a
+  // clean-up tool (NEW CONTACT, quick create) stands beside everyone instead.
+  const placeBefore = useRef(placeKey)
+  const keepForm = useRef(false)
+  useEffect(() => {
+    if (placeKey !== placeBefore.current && !keepForm.current) closePaneEditor()
+    placeBefore.current = placeKey
+    keepForm.current = false
+  }, [placeKey])
+  useEffect(() => {
+    if (!inPane || !tool) return
+    keepForm.current = true
+    setPlace({ kind: "all" })
+  }, [inPane, tool, setPlace])
   const restoring = useRestoreContacts((s) => s.openedAt)
   // A phone's list runs edge to edge: its letter headers take the rows' 16 px.
-  const phone = useAppFrame().phone
+  const phone = frame.phone
   const { data: contacts = [], isPending, error, refetch, isRefetching } = useContacts("", active, activeGroup?.id ?? null)
   const { data: dupes = [] } = useDuplicates()
   // Source names (ADR-0027): with more than one address book showing, each
@@ -138,8 +167,9 @@ export function ContactsView() {
 
   // What the shell says about this screen (ADR-0083): the group as the place, and how many people it lists.
   const placeName = contactsPlaceName(at)
-  useScreenPlace(placeName)
-  useScreenFact(isPending || tool ? null : `${formatNavCount(contacts.length)} people`)
+  // Editing in the pane: CONTACTS // {NAME} // EDIT, or CONTACTS // NEW, and UNSAVED CHANGES once something changed (Desktop / 10).
+  useScreenPlace(inPane ? (editor.contactId ? `${editor.initial.fullName || "Contact"} // Edit` : "New") : placeName)
+  useScreenFact(inPane ? (unsaved ? "Unsaved changes" : null) : isPending || tool ? null : `${formatNavCount(contacts.length)} people`)
   useRefresh(refetch)
   // The page head opens the groups wherever the sidebar does not list them (brief X1).
   const switching = useSectionSwitcher("Change group.")
@@ -206,7 +236,7 @@ export function ContactsView() {
             <SectionHeader title={s.letter} count={s.items.length} variant="index" level={3} inset={phone} />
             <ul>
               {s.items.map((c) => (
-                <PersonRow key={c.id} render={<li />} list contact={c} book={sourceOf(c.bookId)} selected={selected === c.id} onOpen={() => setSelected(c.id)} />
+                <PersonRow key={c.id} render={<li />} list contact={c} book={sourceOf(c.bookId)} selected={selected === c.id} onOpen={() => moveTo(c.id)} />
               ))}
             </ul>
           </section>
@@ -218,7 +248,7 @@ export function ContactsView() {
     <MasterDetail
       section="Contacts"
       pick={PICK}
-      onBack={() => setSelected(null)}
+      onBack={() => moveTo(null)}
       header={
         <>
           <ScreenHead
@@ -251,7 +281,13 @@ export function ContactsView() {
           {body}
         </LoadState>
       }
-      detail={selected ? <ContactDetailPane key={selected} id={selected} onDeleted={() => setSelected(null)} /> : null}
+      detail={
+        inPane ? (
+          <ContactPaneEditor onSaved={(id) => setSelected(id)} />
+        ) : selected ? (
+          <ContactDetailPane key={selected} id={selected} onDeleted={() => setSelected(null)} />
+        ) : null
+      }
     />
   )
 }
@@ -260,7 +296,7 @@ export function ContactsView() {
 function Layers({ restoring }: { restoring: number | null }) {
   return (
     <>
-      <RestoreContactsDialog openedAt={restoring} onClose={closeRestoreContacts} />
+      <RestoreContactsLayer openedAt={restoring} onClose={closeRestoreContacts} />
       <SmartGroupEditor />
     </>
   )

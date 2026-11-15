@@ -41,7 +41,15 @@ function changeCard(demo: Parameters<DemoScenarios[string]>[0], name: string, ch
     })
 }
 
-/** Contacts (ADR-0081, ADR-0102): address books and people in states the sample data doesn't reach. */
+/** Deletes the first card with each of these names, one after another, as the person would. */
+async function deleteCards(client: Parameters<DemoScenarios[string]>[0]["client"], names: string[]) {
+  for (const name of names) {
+    const found = (await client.listContacts(name, null, null)).find((c) => c.fullName === name)
+    if (found) await client.deleteContact(found.id)
+  }
+}
+
+/** Contacts (ADR-0081, ADR-0102, ADR-0103): address books and people in states the sample data doesn't reach. */
 export const contacts: DemoScenarios = {
   /**
    * A card with every row of brief P2: a photo, two emails, two phones, two
@@ -72,5 +80,31 @@ export const contacts: DemoScenarios = {
   /** The contacts list never arrives: its loading state. */
   "contacts-loading": ({ wrap }) => {
     wrap("listContacts", () => () => new Promise(() => {}))
+  },
+  /** Two cards deleted today: Recently deleted has rows (brief P5). */
+  "contacts-deleted": ({ client }) => {
+    void deleteCards(client, ["Sam Okafor", "Diego Alvarez"])
+  },
+  /**
+   * A morning of changes to undo (brief P5): two cards deleted, one edited,
+   * four added, so Restore contacts names cards in each of its rows.
+   */
+  "contacts-changed": (demo) => {
+    const { client } = demo
+    void (async () => {
+      await deleteCards(client, ["Sam Okafor", "Diego Alvarez"])
+      const lena = (await client.listContacts("Lena Fischer", null, null)).find((c) => c.fullName === "Lena Fischer")
+      if (lena) {
+        const c = await client.getContact(lena.id)
+        await client.updateContact(c.id, { bookId: c.bookId, fullName: c.fullName, emails: c.emails, phones: [], org: c.org, title: c.title, note: c.note, birthday: c.birthday, labels: c.labels })
+      }
+      for (const [fullName, email] of [
+        ["Noor Haddad", "noor@example.org"],
+        ["Tomás Ibarra", "tomas@example.es"],
+        ["Wren Adeyemi", "wren@example.co.uk"],
+        ["Jonah Brandt", "jonah@example.de"],
+      ] as const)
+        await client.createContact({ bookId: "book-personal", fullName, emails: [{ label: "home", value: email }], phones: [] })
+    })()
   },
 }
