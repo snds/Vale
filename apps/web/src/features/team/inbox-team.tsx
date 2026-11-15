@@ -1,31 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { useEffect } from "react"
-import { toast } from "@unicron/ui"
+import { useEffect, useState } from "react"
 
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarGroup,
-  Button,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-  Icon,
-} from "@unicron/ui"
+import { AdaptiveMenu, AdaptiveMenuRadioGroup, AdaptiveMenuRadioItem, FieldRow, FieldRowAction } from "@unicron/ui"
 import { getCoreClient, isMember, sayHere } from "@/core/client"
-import { useInboxHere, useMe, useTeamMembers, useThreadTeam } from "@/core/queries"
+import { useMe, useTeamMembers, useThreadTeam } from "@/core/queries"
 import type { ThreadTeam } from "@/core/types"
 
-import { initials } from "../mail/format"
-import { peopleLine } from "../notes/presence"
-import { CommentList } from "./team-panel"
-
-const NOBODY: { id: string; name: string }[] = []
+import { useRowSize } from "../mail/invite-words"
+import { CommentThread } from "./comment"
 
 /** While a conversation is open, the gateway hears so, and tells the team (ADR-0063). */
 function useHere(threadId: string) {
@@ -41,29 +23,15 @@ function useHere(threadId: string) {
   }, [threadId])
 }
 
-/** Who else has this conversation open. */
-export function InboxHere({ threadId }: { threadId: string }) {
-  const people = useInboxHere((s) => s[threadId] ?? NOBODY)
-  const names = [...new Set(people.map((p) => p.name))]
-  if (names.length === 0) return null
-  return (
-    <span role="status" className="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground" data-role="people-here">
-      <AvatarGroup aria-hidden>
-        {names.slice(0, 3).map((n) => (
-          <Avatar key={n} size="sm">
-            <AvatarFallback>{initials({ name: n, email: n })}</AvatarFallback>
-          </Avatar>
-        ))}
-      </AvatarGroup>
-      {peopleLine(names.map((name, id) => ({ id, name })))}
-    </span>
-  )
-}
+/** "Me" and "Nobody" have values of their own; a member is chosen by id. */
+const ME = "me"
+const NOBODY = "nobody"
 
 /**
- * A shared inbox's side of a conversation (ADR-0063): who it's assigned to,
- * notes the team leaves each other (never sent to anyone on it), and who
- * else has it open. Only on a gateway with a team.
+ * A shared inbox's side of a conversation (ADR-0063; brief M9 B), under TEAM // NOT SENT: ASSIGNED TO with
+ * a name or Nobody and ASSIGN (a menu of the members, Me, Nobody); then the team's notes, never sent to anyone
+ * on the conversation. The gateway's owner can delete anyone's note; everyone else, their own. A failed
+ * change says so beside its control, in the server's words (cross-app decisions §9).
  */
 export function InboxTeamPanel({ threadId }: { threadId: string }) {
   useHere(threadId)
@@ -71,68 +39,75 @@ export function InboxTeamPanel({ threadId }: { threadId: string }) {
   const { data: members = [] } = useTeamMembers()
   const me = useMe()
   const qc = useQueryClient()
-  const joined = members.filter((m) => !m.pending)
+  const size = useRowSize()
+  const [assignError, setAssignError] = useState<string | null>(null)
+  const [noteError, setNoteError] = useState<string | null>(null)
+  const others = members.filter((m) => !m.pending && m.id !== me.id)
   const put = (t: ThreadTeam) => qc.setQueryData(["inbox-team", "thread", threadId], t)
-  const act = async (work: () => Promise<ThreadTeam | void>) => {
+  const act = async (work: () => Promise<ThreadTeam | void>, fail: (message: string | null) => void) => {
+    fail(null)
     try {
       const t = await work()
       if (t) put(t)
       else void qc.invalidateQueries({ queryKey: ["inbox-team", "thread", threadId] })
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
+      fail(e instanceof Error ? e.message : String(e))
     }
   }
   const assignee = team?.assignee ?? null
-  const assign = (id: string) => {
-    const to = joined.find((m) => m.id === id) ?? null
-    void act(async () => (await getCoreClient()).assignThread(threadId, to && { id: to.id, name: to.name }, me))
+  const value = !assignee ? NOBODY : assignee.id === me.id ? ME : assignee.id
+  const assign = (v: string) => {
+    const to = v === ME ? me : (others.find((m) => m.id === v) ?? null)
+    void act(async () => (await getCoreClient()).assignThread(threadId, to && { id: to.id, name: to.name }, me), setAssignError)
   }
+  const who = !assignee ? "Nobody" : assignee.id === me.id ? `${assignee.name} (you)` : assignee.name
+  const by = assignee && assignee.by !== assignee.name ? `${assignee.by} assigned it.` : undefined
   return (
-    <section aria-label="Team" className="flex flex-col gap-4 rounded-2xl border px-4 py-4" data-role="inbox-team">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="flex items-center gap-1.5 text-sm font-medium [&_svg]:size-4 [&_svg]:text-muted-foreground">
-          <Icon name="user--multiple" /> Team
-        </h3>
-        <div className="flex flex-wrap items-center gap-3">
-          <InboxHere threadId={threadId} />
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
-              <Icon name={assignee ? "task--user" : "user--follow"} data-icon="inline-start" />
-              {assignee ? (assignee.id === me.id ? "Assigned to you" : `Assigned to ${assignee.name}`) : "Assign"}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" width="fit">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>Who handles this</DropdownMenuLabel>
-                <DropdownMenuRadioGroup value={assignee?.id ?? ""} onValueChange={(v) => assign(String(v))}>
-                  {joined.map((m) => (
-                    <DropdownMenuRadioItem key={m.id} value={m.id} closeOnClick>
-                      {m.id === me.id ? `${m.name} (you)` : m.name}
-                    </DropdownMenuRadioItem>
-                  ))}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuRadioItem value="" closeOnClick>
-                    Nobody
-                  </DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+    <div className="flex flex-col gap-4" data-role="inbox-team">
+      <div className="flex flex-col gap-2">
+        <FieldRow
+          size={size}
+          label="Assigned to"
+          rule="none"
+          description={by}
+          action={
+            <AdaptiveMenu title="Assign" align="end" trigger={<FieldRowAction>Assign</FieldRowAction>}>
+              <AdaptiveMenuRadioGroup label="Who handles this" value={value} onValueChange={(v) => assign(String(v))}>
+                {others.map((m) => (
+                  <AdaptiveMenuRadioItem key={m.id} value={m.id}>
+                    {m.name}
+                  </AdaptiveMenuRadioItem>
+                ))}
+                <AdaptiveMenuRadioItem value={ME}>Me</AdaptiveMenuRadioItem>
+                <AdaptiveMenuRadioItem value={NOBODY}>Nobody</AdaptiveMenuRadioItem>
+              </AdaptiveMenuRadioGroup>
+            </AdaptiveMenu>
+          }
+        >
+          {who}
+        </FieldRow>
+        {assignError && (
+          <p role="alert" className="type-caption text-destructive">
+            {assignError}
+          </p>
+        )}
       </div>
-      {assignee && (
-        <p className="text-xs text-muted-foreground">
-          {assignee.by === assignee.name ? `${assignee.name} took it.` : `${assignee.by} assigned it to ${assignee.id === me.id ? "you" : assignee.name}.`}
-        </p>
-      )}
-      <CommentList
+      <CommentThread
         label="Note"
         placeholder="Note for the team…"
-        empty="Notes stay with the team: they never go to anyone on the conversation."
+        addLabel="Add note"
+        caption="Notes stay with the team. They never go to anyone on the conversation."
+        empty="No notes yet."
         // The owner can tidy anyone's; everyone else, their own.
-        comments={(team?.comments ?? []).map((c) => ({ ...c, mine: c.authorId === me.id || !isMember() }))}
-        onAdd={(text) => act(async () => (await getCoreClient()).addThreadComment(threadId, text, me))}
-        onRemove={(id) => void act(async () => (await getCoreClient()).removeThreadComment(id, me, !isMember()))}
+        comments={(team?.comments ?? []).map((c) => ({ ...c, deletable: c.authorId === me.id || !isMember() }))}
+        onAdd={(text) => act(async () => (await getCoreClient()).addThreadComment(threadId, text, me), setNoteError)}
+        onDelete={(id) => void act(async () => (await getCoreClient()).removeThreadComment(id, me, !isMember()), setNoteError)}
       />
-    </section>
+      {noteError && (
+        <p role="alert" className="type-caption text-destructive">
+          {noteError}
+        </p>
+      )}
+    </div>
   )
 }

@@ -1,3 +1,7 @@
+import * as Y from "yjs"
+
+import { toBase64 } from "@/lib/base64"
+
 import type { DemoMessage, DemoScenarios, DemoState } from "../demo-scenarios"
 import type { Address, Draft, Invite, OutboxItem } from "../types"
 
@@ -37,6 +41,27 @@ function received(state: DemoState, id: string, accountId: string, from: Address
 }
 
 const jo = { name: "Jo Tanaka", email: "jo@joinery.example" }
+
+/** A shared conversation's saved document (ADR-0060's shape: meta, messages, comments, the reply), as the core keeps it. */
+function teamDocState(subject: string, from: string, messages: { from: string; email: string; ago: number; text: string; byOwner?: boolean }[], comments: { author: string; ago: number; text: string }[], reply: string[]) {
+  const doc = new Y.Doc()
+  const t = nowSecs()
+  doc.transact(() => {
+    doc.getMap<string>("meta").set("subject", subject)
+    doc.getMap<string>("meta").set("from", from)
+    doc.getArray("messages").push(messages.map((m, i) => ({ id: `${subject}-${i}`, from: m.from, email: m.email, date: t - m.ago, text: m.text, byOwner: !!m.byOwner })))
+    doc.getArray("comments").push(comments.map((c, i) => ({ id: `${subject}-c${i}`, author: c.author, at: t - c.ago, text: c.text })))
+    const draft = doc.getXmlFragment("draft")
+    draft.push(
+      reply.map((line) => {
+        const p = new Y.XmlElement("paragraph")
+        p.push([new Y.XmlText(line)])
+        return p
+      }),
+    )
+  })
+  return toBase64(Y.encodeStateAsUpdate(doc))
+}
 
 /** Mail (ADR-0081, ADR-0090): the inbox and its lanes, such as swipe slots or an inbox worked to zero. Names and words are the demo's own. */
 export const mail: DemoScenarios = {
@@ -274,6 +299,114 @@ export const mail: DemoScenarios = {
       },
     ]
     for (const item of items) state.outbox.set(item.id, item)
+  },
+  /**
+   * Shared conversations (ADR-0060; brief M9), as the Team lane would hold them after a week of use: Token audit,
+   * shared by you through your notes relay, with its two attachments; one a teammate shared with you; one whose
+   * owner stopped sharing. Nothing here can reach a relay, so what is live shows as CONNECTING.
+   */
+  "team-shared": ({ client, state, wrap }) => {
+    const audit = state.messages.filter((m) => m.threadId === "t-audit").sort((a, b) => a.date - b.date)
+    const last = audit.at(-1)
+    if (last) {
+      const sheet = btoa("token,light,dark\nsurface/raised,#f4f2ee,#24262b\nsurface/sunken,#ebe8e2,#24262b\nsurface/base,#faf9f6,#24262b\n")
+      last.attachments = [
+        { id: "att-audit-sheet", filename: "semantic-tier-audit.csv", mimeType: "text/csv", size: Math.floor((sheet.length * 3) / 4), inline: false },
+        // A screen recording too big for the team: its chip shows why it can't go.
+        { id: "att-audit-walk", filename: "dark-mode-walkthrough.mov", mimeType: "video/quicktime", size: 48 * 1024 * 1024, inline: false },
+      ]
+      last.files = { "att-audit-sheet": sheet, "att-audit-walk": btoa("demo") }
+      last.hasAttachments = true
+    }
+    const ready = (async () => {
+      await client.setNotesRelay({ url: "wss://relay.studio.example", token: "demo-relay-token" })
+      const mine = await client.shareThread("t-audit")
+      await client.saveTeamDoc(
+        mine.id,
+        teamDocState(
+          "Re: Token audit",
+          "Work",
+          [
+            { from: "Priya Raman", email: "priya@studio.example", ago: 48 * HOUR, text: audit[0]?.bodyText ?? "" },
+            { from: "Work", email: "me@studio.example", ago: 26 * HOUR, text: audit[1]?.bodyText ?? "", byOwner: true },
+            { from: "Priya Raman", email: "priya@studio.example", ago: 0.3 * HOUR, text: last?.bodyText ?? "" },
+          ],
+          [
+            { author: "Sam Okafor", ago: 0.25 * HOUR, text: "Thursday works for me. The flat list pane is the raised and sunken surfaces resolving to one value." },
+            { author: "Noor Haddad", ago: 0.2 * HOUR, text: "Can we ask her to keep the sheet's old column, so the diff shows what moved?" },
+            { author: "Personal", ago: 0.1 * HOUR, text: "Good idea. I'll put it in the reply." },
+          ],
+          ["Thanks Priya, Thursday at 10 works.", "Could you keep the old values in their own column, so we can see what moved?"],
+        ),
+        "Re: Token audit",
+      )
+      const theirs = await client.joinTeamThread({ id: "suppliercontract2026", relay: "wss://relay.northshore.example", token: "demo-guest-token", title: "Supplier contract renewal", from: "Noor Haddad", key: null })
+      await client.saveTeamDoc(
+        theirs.id,
+        teamDocState(
+          "Supplier contract renewal",
+          "Noor Haddad",
+          [
+            { from: "Halvorsen Print", email: "orders@halvorsen.example", ago: 30 * HOUR, text: "Our prices for next year are attached. Paper is up 6%, so the catalogue run moves from 4,200 to 4,450 per thousand. We can hold this year's price if you sign for two years." },
+            { from: "Noor Haddad", email: "noor@studio.example", ago: 6 * HOUR, text: "Thanks. Can you tell us what a two-year term would mean for the minimum order?", byOwner: true },
+          ],
+          [{ author: "Noor Haddad", ago: 5 * HOUR, text: "I'd rather not commit to two years before the spring numbers are in." }],
+          ["Thanks for the prices. Before we decide on a term, could you send the minimum order for each option?"],
+        ),
+        "Supplier contract renewal",
+      )
+      const stopped = await client.joinTeamThread({ id: "venueshortlist2026x", relay: "wss://relay.northshore.example", token: "demo-guest-token", title: "Venue shortlist", from: "Oskar Lind", key: null })
+      await client.saveTeamDoc(
+        stopped.id,
+        teamDocState(
+          "Venue shortlist",
+          "Oskar Lind",
+          [{ from: "Oskar Lind", email: "oskar@studio.example", ago: 4 * 24 * HOUR, text: "Three venues left for the offsite. The boathouse holds 40 and has a projector.", byOwner: true }],
+          [{ author: "Personal", ago: 3 * 24 * HOUR, text: "The boathouse, if the date is free." }],
+          [],
+        ),
+        "Venue shortlist",
+      )
+      await client.stopTeamThread(stopped.id)
+    })()
+    const after =
+      <A extends unknown[], R>(f: (...a: A) => Promise<R>) =>
+      async (...a: A) => {
+        await ready
+        return f(...a)
+      }
+    wrap("teamThreads", (original) => after(original))
+    wrap("teamDoc", (original) => after(original))
+    wrap("threadShare", (original) => after(original))
+    wrap("getNotesRelay", (original) => after(original))
+  },
+  /** A shared copy whose owner deleted it from their mail (brief M9, States): THAT CONVERSATION ISN'T IN YOUR MAIL ANY MORE. */
+  "team-removed": ({ wrap }) => {
+    // With team-shared, after it: the conversation it shared is gone from the mail, and its share stays in Team.
+    wrap("getThread", (original) => async (threadId) => (threadId === "t-audit" ? [] : original(threadId)))
+    wrap("listMessages", (original) => async (q) => (await original(q)).filter((m) => m.threadId !== "t-audit"))
+  },
+  /**
+   * A shared inbox (ADR-0063; brief M9 B), for a team member: Token audit is assigned to them by the gateway's
+   * owner, with two notes. The demo client keeps no assignee per row, so "Assigned to me" is filtered here, as the
+   * gateway filters it.
+   */
+  "shared-inbox": ({ client, wrap }) => {
+    const owner = { id: "owner", name: "Alex Rivera" }
+    const noor = { id: "member-noor", name: "Noor Haddad" }
+    const ready = (async () => {
+      await client.assignThread("t-audit", noor, owner)
+      await client.addThreadComment("t-audit", "Priya needs an answer before Thursday's review.", owner)
+      await client.addThreadComment("t-audit", "I'll take it. Drafting the reply now.", noor)
+    })()
+    wrap("threadTeam", (original) => async (threadId) => (await ready, original(threadId)))
+    wrap("listMessages", (original) => async (q) => {
+      await ready
+      const rows = await original({ ...q, assignedTo: null })
+      if (!q.assignedTo) return rows
+      const mine = await client.threadAssignments()
+      return rows.filter((r) => mine[r.threadId]?.id === q.assignedTo)
+    })
   },
   /** The mail server refuses the next message sent, once, in its own words (brief M6: the composer's critical notice). */
   "send-refused": ({ wrap }) => {

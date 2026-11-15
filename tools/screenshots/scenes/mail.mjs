@@ -1,5 +1,5 @@
 // Mail: the lanes, a conversation, reading and writing. Search is in search.mjs.
-import { area, button, closeForm, tabBar, discardQuestion, ensure, formatBar, formLayer, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, switcher, switcherLayer, toastGone } from "./helpers.mjs"
+import { area, button, closeForm, tabBar, discardQuestion, ensure, formatBar, formLayer, formPrimary, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, switcher, switcherLayer, toastGone } from "./helpers.mjs"
 import { settings } from "./settings.mjs"
 
 /** Opens a conversation in the Inbox list by its subject. */
@@ -57,6 +57,23 @@ const reader = (page) => page.getByRole("region", { name: "Mail: what is open" }
 const needsYou = (page) => page.locator('[data-slot="needs-you"]:visible')
 /** A toast by its words. */
 const toastSaying = (page, words) => page.locator("[data-sonner-toast]").filter({ hasText: words })
+/** The share form (brief M9), in the form layer. */
+const shareForm = (page) => page.getByRole("dialog", { name: /Share with teammates/ })
+/** The open shared conversation in the Team lane. */
+const teamView = (page) => page.locator("article").filter({ has: page.getByRole("tablist", { name: "Team" }) }).first()
+/** Scrolls a part of the open conversation to the top of its column, with no focus ring and no hover left in the picture. */
+const toTop = async (app, locator) => {
+  await locator.evaluate((el) => el.scrollIntoView({ block: "start" }))
+  await app.page.evaluate(() => document.activeElement?.blur())
+  await app.page.mouse.move(0, 0)
+  await app.settle()
+}
+/** Opens a shared conversation from the Team lane by its title. */
+const openTeam = async (app, title) => {
+  await lane(app, "Team")
+  await press(app, app.page.getByRole("list", { name: "Team" }).getByRole("button", { name: title }))
+  await app.page.mouse.move(0, 0)
+}
 /** A Field Row by its label, in the open conversation. */
 const fieldRow = (page, label) => reader(page).getByRole("group", { name: label, exact: true })
 /** The reply field pinned at the conversation's foot (a phone's bottom row). */
@@ -828,10 +845,49 @@ export const scenes = [
     },
   },
   {
+    // Share with teammates with no notes relay (brief M9): the form says sharing goes through it, with OPEN SYNC.
     name: "mail-share",
     run: async (app) => {
       await conversation(app, /Token audit/)
       await moreItem(app, "Share with teammates…")
+      const form = shareForm(app.page)
+      ensure(/Sharing goes through your notes relay, the same one that syncs your notes\./.test(await form.innerText()), "the form does not say sharing needs a notes relay")
+      ensure(await form.getByRole("button", { name: "Open sync", exact: true }).isVisible(), "the form has no Open sync")
+    },
+  },
+  {
+    // With a relay and not shared yet: what a link gives, the two captions, and CREATE LINK as the one primary.
+    name: "mail-share-create",
+    scenario: "team-shared",
+    run: async (app) => {
+      await conversation(app, /Cabin weekend/)
+      await moreItem(app, "Share with teammates…")
+      const form = shareForm(app.page)
+      const words = await form.innerText()
+      ensure(/People with the link read it, comment, and help write the reply\. Only you send it\./.test(words), "the form does not say what the link gives")
+      ensure(/Teammates get the text, not attachments or images\./.test(words) && /Your relay can read it, as it can read your notes\./.test(words), "the form is missing a caption")
+      ensure(await form.getByRole("button", { name: "Create link", exact: true }).isVisible(), "the form has no Create link")
+    },
+  },
+  {
+    // Shared (brief M9): LINK cut in the middle with COPY LINK, EMAIL IT, and STOP SHARING, which asks first with focus on Cancel.
+    name: "mail-share-link",
+    scenario: "team-shared",
+    sean: { kind: "undrawn", area: "mail", screen: "share-form" },
+    run: async (app) => {
+      const { page } = app
+      await conversation(app, /Token audit/)
+      await moreItem(app, "Shared with teammates…")
+      const form = shareForm(page)
+      ensure(await form.getByRole("group", { name: "Link", exact: true }).isVisible(), "the shared form has no LINK row")
+      ensure(await form.getByRole("button", { name: "Email it", exact: true }).isVisible(), "the shared form has no Email it")
+      await press(app, form.getByRole("button", { name: "Stop sharing", exact: true }))
+      const ask = page.getByRole("alertdialog", { name: "Stop sharing?" }).or(page.getByRole("dialog", { name: "Stop sharing?" }))
+      ensure(await ask.isVisible(), "Stop sharing did not ask")
+      ensure(/The link stops working\./.test(await ask.innerText()), "the question does not say the link stops working")
+      ensure((await page.evaluate(() => document.activeElement?.textContent?.trim())) === "Cancel", "the question's focus is not on Cancel")
+      await press(app, ask.getByRole("button", { name: "Cancel", exact: true }))
+      await page.evaluate(() => document.activeElement?.blur())
     },
   },
   {
@@ -2045,12 +2101,153 @@ export const scenes = [
       await page.mouse.move(0, 0)
     },
   },
-  { name: "mail-team", run: (app) => lane(app, "Team") },
   {
+    // The Team lane (brief M9): TEAM // 03, the head's OPEN A LINK…, and inline rows: the title, who shared it, STOPPED, the time.
+    name: "mail-team",
+    scenario: "team-shared",
+    sean: { kind: "undrawn", area: "mail", screen: "team-lane" },
+    run: (app) => lane(app, "Team"),
+    assert: async (app) => {
+      const { page } = app
+      const rows = page.getByRole("list", { name: "Team" }).getByRole("listitem")
+      ensure((await rows.count()) === 3, `the Team lane lists ${await rows.count()} conversations, not 3`)
+      ensure(/You shared/.test(await rows.filter({ hasText: "Token audit" }).innerText()), "your own share does not say You shared")
+      ensure(/From Noor Haddad/.test(await rows.filter({ hasText: "Supplier contract" }).innerText()), "a teammate's share does not say who it is from")
+      ensure(/stopped/i.test(await rows.filter({ hasText: "Venue shortlist" }).innerText()), "the stopped share has no STOPPED")
+      ensure(/TEAM \/\/ 03/.test((await page.locator('[data-slot="page-head"]:visible').first().innerText()).toUpperCase()), "the overline is not TEAM // 03")
+    },
+  },
+  {
+    // Nothing shared yet (brief 5.2): TEAM // 00 with OPEN A LINK….
+    name: "team-empty",
+    run: (app) => lane(app, "Team"),
+    assert: async (app) => {
+      const empty = app.page.locator('[data-slot="empty"]:visible').first()
+      ensure(/Nothing shared\./.test(await empty.innerText()), "the empty lane does not say Nothing shared.")
+      ensure(await empty.getByRole("button", { name: "Open a link…", exact: true }).isVisible(), "the empty lane has no Open a link…")
+    },
+  },
+  {
+    // OPEN A LINK… is a form: LINK and the primary OPEN. A note's link says where it opens instead.
     name: "mail-team-open-link",
     run: async (app) => {
+      const { page } = app
       await lane(app, "Team")
-      await press(app, app.page.getByRole("button", { name: "Open a link…" }).first())
+      await press(app, page.getByRole("button", { name: "Open a link…" }).first())
+      const form = page.getByRole("dialog", { name: /Open a shared conversation/ })
+      ensure(await form.getByRole("textbox", { name: "Link" }).isVisible(), "the form has no LINK field")
+      ensure(await formPrimary(form, "Open").isDisabled(), "OPEN is on with no link")
+    },
+  },
+  {
+    // A teammate's shared conversation (brief M9): SHARED BY · STATE, the title, LEAVE, and the four line tabs. MESSAGES is
+    // read-only; COMMENTS adds one through a plain field and its secondary button. No Composer anywhere on the screen.
+    name: "team-shared",
+    scenario: "team-shared",
+    sean: { kind: "undrawn", area: "mail", screen: "team-shared" },
+    run: async (app) => {
+      const { page } = app
+      await openTeam(app, "Supplier contract renewal")
+      const view = teamView(page)
+      for (const label of ["Shared by", "State"]) ensure(await view.getByText(label, { exact: true }).first().isVisible(), `the MetaList has no ${label}`)
+      ensure(/Noor Haddad/.test(await view.innerText()), "SHARED BY does not name Noor Haddad")
+      const tabs = view.getByRole("tablist", { name: "Team" })
+      const names = (await tabs.getByRole("tab").allInnerTexts()).map((t) => t.trim().toUpperCase())
+      ensure(names.join(" ") === "MESSAGES COMMENTS 01 REPLY FILES", `the tabs read ${names.join(", ")}`)
+      ensure((await view.locator('[data-role="team-message"]').count()) === 2, "MESSAGES does not show the two shared messages")
+      ensure(!(await page.locator('[data-slot="composer"]:visible').count()), "a shared conversation has a Composer")
+      await press(app, tabs.getByRole("tab", { name: /^Comments/ }))
+      await view.getByRole("textbox", { name: "Comment" }).fill("Asked for the minimum order. I'll share their answer here.")
+      await press(app, view.getByRole("button", { name: "Add comment", exact: true }))
+      ensure((await view.locator('[data-role="team-comment"]').count()) === 2, "ADD COMMENT did not add the comment")
+      ensure(/Comments stay with the team\./.test(await view.innerText()), "COMMENTS has no caption")
+      // Your own comment can be taken back; the others' cannot.
+      ensure((await view.getByRole("button", { name: "Delete comment" }).count()) === 1, "a comment that is not yours can be deleted")
+      await press(app, tabs.getByRole("tab", { name: "Reply", exact: true }))
+      ensure(await view.getByRole("textbox", { name: "Reply together" }).isVisible(), "REPLY has no shared field")
+      ensure(!(await view.getByRole("button", { name: "Use as reply" }).count()), "a teammate is offered Use as reply")
+      await press(app, tabs.getByRole("tab", { name: /^Comments/ }))
+      await page.evaluate(() => document.activeElement?.blur())
+      await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // Your own copy in the Inbox (brief M9): COMMENTS, REPLY and FILES under TEAM // NOT SENT, after the messages; the
+    // pinned reply field stays the only Composer. FILES: the sheet to share, and the recording over 10 MB in the critical state.
+    name: "team-owner-copy",
+    scenario: "team-shared",
+    sean: { kind: "undrawn", area: "mail", screen: "team-owner-copy" },
+    run: async (app) => {
+      const { page } = app
+      await conversation(app, /Token audit/)
+      const team = reader(page).getByRole("region", { name: "Team, not sent" })
+      await team.scrollIntoViewIfNeeded()
+      ensure(/TEAM \/\/ NOT SENT/.test((await team.innerText()).toUpperCase()), "the team block has no TEAM // NOT SENT")
+      const tabs = team.getByRole("tablist", { name: "Team" })
+      const names = (await tabs.getByRole("tab").allInnerTexts()).map((t) => t.trim().toUpperCase())
+      ensure(names.join(" ") === "COMMENTS 03 REPLY FILES", `the owner's tabs read ${names.join(", ")}`)
+      ensure((await page.locator('[data-slot="composer"]:visible').count()) === 1, "the owner's copy has more or fewer than one Composer")
+      await press(app, tabs.getByRole("tab", { name: "Files", exact: true }))
+      ensure((await team.locator('[data-role="team-file"]').count()) === 2, "FILES does not list the two attachments")
+      ensure(/too big to share/i.test(await team.innerText()), "the recording over 10 MB is not in the critical state")
+      await press(app, tabs.getByRole("tab", { name: "Reply", exact: true }))
+      ensure(await team.getByRole("button", { name: "Use as reply" }).isVisible(), "the owner has no Use as reply")
+      await press(app, team.getByRole("button", { name: "Use as reply" }))
+      const composer = page.getByRole("dialog", { name: /Re: Token audit/ })
+      ensure(/Thursday at 10 works/.test(await composer.innerText()), "USE AS REPLY did not bring the team's reply into the composer")
+      await closeForm(app)
+      await press(app, tabs.getByRole("tab", { name: /^Comments/ }))
+      await toTop(app, team)
+    },
+  },
+  {
+    // Stopped for a guest (brief M9, States): the compact info Banner, STOPPED, REMOVE, and nothing to type into.
+    name: "team-stopped",
+    scenario: "team-shared",
+    run: async (app) => {
+      const { page } = app
+      await openTeam(app, "Venue shortlist")
+      const view = teamView(page)
+      ensure(/The owner stopped sharing\./.test(await view.locator('[data-slot="banner"]').first().innerText()), "the stopped copy has no banner")
+      await press(app, view.getByRole("tab", { name: /^Comments/ }))
+      ensure(!(await view.getByRole("textbox").count()), "a stopped copy still takes comments")
+      ensure(app.phone || (await page.getByRole("toolbar", { name: "Shared conversation" }).getByRole("button", { name: "Remove", exact: true }).isVisible()), "a stopped copy has no Remove")
+    },
+  },
+  {
+    // The owner deleted the conversation from their mail (brief M9, States): the line and REMOVE.
+    name: "team-removed",
+    scenario: ["team-shared", "team-removed"],
+    run: async (app) => {
+      await openTeam(app, "Token audit")
+      ensure(/That conversation isn't in your mail any more\./.test(await teamView(app.page).locator('[data-slot="banner"]').first().innerText()), "the removed copy has no banner")
+    },
+  },
+  {
+    // A shared inbox for a team member (brief M9 B): Assigned to me, and under TEAM // NOT SENT ASSIGNED TO with ASSIGN, the
+    // team's notes and a plain field with ADD NOTE. The reply field stays the only Composer.
+    name: "team-assigned",
+    scenario: ["member", "shared-inbox"],
+    run: async (app) => {
+      const { page } = app
+      await lane(app, "Assigned to me")
+      const rows = page.getByRole("list", { name: "Assigned to me" }).getByRole("button", { name: /Token audit/ })
+      ensure((await rows.count()) >= 1, "Token audit is not in Assigned to me")
+      await press(app, rows.first())
+      await page.mouse.move(0, 0)
+      const team = reader(page).getByRole("region", { name: "Team, not sent" })
+      await team.scrollIntoViewIfNeeded()
+      ensure(/Noor Haddad/.test(await team.getByRole("group", { name: "Assigned to", exact: true }).innerText()), "ASSIGNED TO does not name Noor")
+      ensure((await team.locator('[data-role="team-comment"]').count()) === 2, "the two team notes are not shown")
+      ensure(/Notes stay with the team\. They never go to anyone on the conversation\./.test(await team.innerText()), "the notes have no caption")
+      ensure((await team.getByRole("button", { name: "Delete note" }).count()) === 1, "a member can delete a note that is not theirs")
+      ensure((await page.locator('[data-slot="composer"]:visible').count()) === 1, "the conversation has more or fewer than one Composer")
+      await press(app, team.getByRole("button", { name: "Assign", exact: true }))
+      const menu = page.getByRole(app.phone ? "dialog" : "menu", { name: "Assign" })
+      for (const n of ["Me", "Nobody"]) ensure(await menu.getByText(n, { exact: true }).isVisible(), `ASSIGN has no ${n}`)
+      await page.keyboard.press("Escape")
+      await app.settle()
+      await toTop(app, team)
     },
   },
   { name: "mail-archive", sean: { kind: "undrawn", area: "mail", screen: "lane-archive" }, run: (app) => lane(app, "Archive") },

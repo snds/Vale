@@ -68,6 +68,8 @@ import { useQuickContext } from "../notes/use-quick-context"
 import { ShareThreadDialog } from "../team/share-thread-dialog"
 import { InboxTeamPanel } from "../team/inbox-team"
 import { OwnerTeamPanel } from "../team/owner-team-panel"
+import { useInboxHereNames, useShareHere } from "../team/here"
+import { HereTiles } from "../team/here-tiles"
 
 /** Mailbox providers' domains: a split for one of them would catch everyone who uses it, so it is for the sender alone. */
 const SHARED_DOMAINS = /^(gmail|googlemail|outlook|hotmail|live|icloud|me|yahoo|proton|protonmail|fastmail)\./
@@ -177,6 +179,9 @@ function Conversation({
   // Shared with teammates (ADR-0060), and a shared inbox on the gateway (ADR-0063): the team block's slot.
   const { data: teamShare } = useThreadShare(row.threadId)
   const sharedInbox = useSharedInbox()
+  const inboxHere = useInboxHereNames(sharedInbox ? row.threadId : null)
+  const shareHere = useShareHere(teamShare?.id ?? null)
+  const here = [...new Set([...inboxHere, ...shareHere])]
   // Opt-in AI (ADR-0059): asked for here, per conversation, and forgotten on leaving it.
   const aiReady = useAiReady()
   const { summary, replies } = useAiAssist(row.threadId)
@@ -453,6 +458,12 @@ function Conversation({
               </>
             )}
             {files.length > 0 && <MetaItem label="Attached">{formatListCount(files.length)}</MetaItem>}
+            {/* Who else has it open (brief M9): the shared inbox's team, and teammates on a shared copy. */}
+            {here.length > 0 && (
+              <MetaItem label="Here">
+                <HereTiles names={here} />
+              </MetaItem>
+            )}
           </MetaList>
           {!phone && (
             <Toolbar aria-label="Conversation">
@@ -519,9 +530,16 @@ function Conversation({
         )}
         <SuggestedRepliesRow replies={replies} onPick={(text) => setReply(text)} />
 
-        {/* The team block's slot (brief M9). */}
-        {sharedInbox && <InboxTeamPanel threadId={row.threadId} />}
-        {teamShare && <OwnerTeamPanel share={teamShare} onUseReply={(html) => openComposer({ ...replyDraft(target, { ...replyStyle, openingHtml: html }), to: replyTo })} />}
+        {/* The team block's slot (brief M9): after the messages, under TEAM // NOT SENT. A shared inbox's assignee
+            and notes, then, while it is shared by link, COMMENTS, REPLY and FILES. The reply field below stays the
+            screen's only Composer. */}
+        {(sharedInbox || teamShare) && (
+          <section aria-label="Team, not sent" className="flex flex-col gap-4">
+            <SectionHeader title="Team // Not sent" level={3} />
+            {sharedInbox && <InboxTeamPanel threadId={row.threadId} />}
+            {teamShare && <OwnerTeamPanel share={teamShare} onUseReply={(html) => openComposer({ ...replyDraft(target, { ...replyStyle, openingHtml: html }), to: replyTo })} />}
+          </section>
+        )}
 
         {/* Notes are the gateway owner's; a team member sees nothing about them (brief 4.0). */}
         {!member && <LinkedNotes target={{ kind: "thread", id: row.threadId }} title={subject} />}

@@ -30,7 +30,8 @@ import { useSenderActions } from "./sender-actions"
 import { editFailed, markFailedSeen, useFailedSends, useOutboxItems } from "./outbox"
 import { OutboxList, OutboxMessage } from "./scheduled-list"
 import { SenderPanelSlot } from "./sender-profile"
-import { TeamList, TeamThreadView } from "../team/team-view"
+import { useTeamCount } from "../team/link-form"
+import { TeamHeadAction, TeamList, TeamThreadView } from "../team/team-view"
 import { InboxChips, NewsletterBundle, ScreenerPointer } from "./splits"
 import { LaneConversation, LoadingRows, SnoozedBeside } from "./lane-list"
 import { rowTime } from "./row-time"
@@ -116,6 +117,7 @@ export function MailView() {
   // An empty Inbox says when snoozed mail comes back (Mobile / 06), and a desktop lists it beside (Desktop / 04).
   const snoozed = useSnoozed(accountId)
   const inboxZero = tab === "inbox" && !category && !split
+  const teamCount = useTeamCount()
 
   // What the shell says about this screen (ADR-0083): the place, the newest
   // conversation for the phone's scrolled strip, and when mail last arrived.
@@ -125,7 +127,10 @@ export function MailView() {
     tab === "screener" ? `${formatListCount(waiting)} waiting` : null,
     // `OUTBOX // 03`: what waits to go (brief M7).
     tab === "scheduled" && outbox.items.length > 0 ? formatListCount(outbox.items.length) : null,
-    account ? account.displayName : multiAccount && tab !== "screener" ? "All accounts" : null,
+    // `TEAM // 04`: the conversations shared, both ways (brief M9).
+    tab === "team" && teamCount !== null ? formatListCount(teamCount) : null,
+    // Team is not per account: what is shared is listed whichever account it came to.
+    tab === "team" ? null : account ? account.displayName : multiAccount && tab !== "screener" ? "All accounts" : null,
   ]
     .filter(Boolean)
     .join(" // ")
@@ -215,7 +220,9 @@ export function MailView() {
           meta={tab === "inbox" ? folioDate(new Date(now * 1000)) : undefined}
           switcher={switching.switcher}
           actions={
-            core?.kind === "native" && (
+            tab === "team" ? (
+              <TeamHeadAction />
+            ) : core?.kind === "native" && (
               <Button variant="ghost" size="icon" aria-label="Check for new mail" onClick={() => void checkMail()} disabled={checking}>
                 <Icon name="renew" className={checking ? "animate-spin" : undefined} />
               </Button>

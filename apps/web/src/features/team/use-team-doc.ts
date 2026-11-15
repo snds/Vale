@@ -5,13 +5,15 @@ import { useMyName } from "@/core/queries"
 
 
 import { type TeamSnapshot, snapshot } from "./team-doc"
-import { teamSync, useTeamVersions } from "./team-sync"
+import { teamSync, useTeamSyncStarts, useTeamVersions } from "./team-sync"
 
 /** A shared conversation's document and what's in it, redrawn as it changes. */
 export function useTeamDoc(id: string | null): { doc: Y.Doc | null; data: TeamSnapshot | null } {
   const [doc, setDoc] = useState<{ id: string; doc: Y.Doc } | null>(null)
   // Subscribed for its ticks: every change to the document redraws.
   useTeamVersions((s) => (id ? (s[id] ?? 0) : 0))
+  // Opened before shared conversations started syncing (at start-up, or as the relay changed): asked again once they have.
+  const starts = useTeamSyncStarts((s) => s.n)
   useEffect(() => {
     if (!id) return
     let gone = false
@@ -21,7 +23,7 @@ export function useTeamDoc(id: string | null): { doc: Y.Doc | null; data: TeamSn
     return () => {
       gone = true
     }
-  }, [id])
+  }, [id, starts])
   const current = doc && doc.id === id ? doc.doc : null
   const data = current ? snapshot(current) : null
   return { doc: current, data }
