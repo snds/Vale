@@ -55,6 +55,12 @@
   --c-viewer-stage: var(--surface-ground);
   --c-note-image-max-height: 70vh;
   --c-note-image-wait-width: calc(var(--spacing) * 72);
+
+  /* Locked notes (brief N5): the way in stands in the note's own column, at
+     the focus frame's width (432), so the field is not stretched across it. */
+  --c-locked-note-width: calc(var(--spacing) * 108);
+  /* Quick Note (brief N7): free text with no box, tall enough for a few lines. */
+  --c-quick-note-min-height: calc(var(--spacing) * 40);
 }
 
 @layer components {
@@ -476,5 +482,39 @@
     display: flex;
     justify-content: flex-end;
     gap: calc(var(--spacing) * 2);
+  }
+
+  /* A locked note's way in (brief N5): title and line, then the field and its buttons. */
+  .locked-note {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing) * 6);
+    width: 100%;
+    max-width: var(--c-locked-note-width);
+    padding-block-end: calc(var(--spacing) * 6);
+  }
+  /* QUICK NOTE // {WHAT IS OPEN} and UNLINK beside it, on the overline's line. */
+  .quick-note-overline {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+  }
+  /* The quick note's words: no box, the body role, the note's placeholder ink. */
+  .quick-note-text {
+    width: 100%;
+    min-height: var(--c-quick-note-min-height);
+    resize: none;
+    background: transparent;
+    color: var(--foreground);
+    font-family: var(--type-body-family);
+    font-weight: var(--type-body-weight);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-leading);
+    letter-spacing: var(--type-body-tracking);
+    outline: none;
+    &::placeholder {
+      color: var(--c-note-placeholder);
+    }
   }
 }

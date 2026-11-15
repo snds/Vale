@@ -47,7 +47,7 @@ import { NotesNav } from "./notes-nav"
 import { closeSharedNote, useOpenSharedNote } from "./open-shared-note"
 import { closeSyncSetup, openSyncSetup, useSyncSetup } from "./open-sync-setup"
 import { RelayDialog } from "./relay-dialog"
-import { OpenSharedDialog } from "./share-dialog"
+import { OpenSharedLink } from "./share-dialog"
 import { type SyncStatus, useSyncStatus } from "./sync"
 import { useNotesPlace } from "./use-notes-place"
 
@@ -230,7 +230,7 @@ export function NotesView() {
       />
       <ImportDialog open={importing} onOpenChange={setImporting} />
       <RelayDialog open={relayOpen} onOpenChange={(o) => !o && closeSyncSetup()} />
-      <OpenSharedDialog open={openingShared} onOpenChange={(o) => !o && closeSharedNote()} />
+      <OpenSharedLink open={openingShared} onOpenChange={(o) => !o && closeSharedNote()} />
       <NoteFolderEditor />
     </>
   )

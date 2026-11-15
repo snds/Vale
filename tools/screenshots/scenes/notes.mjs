@@ -1,5 +1,6 @@
 // Notes: the list, cards and map, a note and its menu, folders, import, sync and the quick note.
 import { area, button, ensure, formatBar, formLayer, formPrimary, goBack, groups, headTitle, leaveLayer, oneCurrent, pick, press, switcherLayer, toastGone } from "./helpers.mjs"
+import { conversation } from "./mail.mjs"
 
 /** The notes list: its sections of rows, or of cards (ADR-0105). */
 const notesList = (page) => page.locator('[data-role="notes-list"]:visible')
@@ -57,6 +58,36 @@ const writeIn = async (app, words = "Coffee + grinder") => {
   await noteText(app.page).getByText(words, { exact: true }).click()
   await app.settle()
 }
+/** The lock's form layer, "Lock notes" (brief N5). */
+const lockForm = (page) => page.getByRole("dialog", { name: /Lock notes/ })
+/** A locked note's way in, in its own space (brief N5). */
+const lockedNote = (page) => page.locator('[data-role="locked-note"]')
+/** The demo's passphrase and hint in the notes-locked scenario (core/demo-scenarios/notes.ts). */
+const PASSPHRASE = "lake house in october"
+const HINT = "Where we go every fall, and when"
+/** Share "{title}" (brief N6). */
+const shareForm = (page) => page.getByRole("dialog", { name: /^Share “/ })
+/** The share form's captions: images stay with you, and without a key the relay can read it. */
+const privacy = async (form, { sealed }) => {
+  const words = await form.locator('[data-role="share-privacy"]').innerText()
+  ensure(words.includes("Images in the note stay with you."), "the share form does not say images stay with you")
+  ensure(words.includes("Your relay can read shared notes, as it can read the rest.") === !sealed, sealed ? "a sealed share says the relay can read it" : "the share form does not say the relay can read it")
+}
+/** Quick Note (brief N7). */
+const quickNote = (page) => page.getByRole("dialog", { name: "Quick note" })
+/** Open a shared note (brief N6), in the form layer. */
+const openSharedLayer = (page) => page.getByRole("dialog", { name: /Open a shared note/ })
+const openSharedForm = async (app) => {
+  await area(app, "Notes")
+  await pick(app, "Open a shared note…")
+  const form = openSharedLayer(app.page)
+  await form.waitFor()
+  return form
+}
+/** A share link as a person would paste it (share-link.ts): someone's note, and a conversation shared with a team. */
+const linkOf = (body) => `https://notes.example.com/share#${Buffer.from(JSON.stringify({ v: 1, relay: "wss://notes.example.com", ...body })).toString("base64url")}`
+const SHARED_LINK = linkOf({ id: "k3Jd9QpL2xVr8TfA", mode: "edit", token: "s1.demo-token", title: "Lake trip budget", from: "Priya Raman" })
+const THREAD_LINK = linkOf({ id: "w7Hn2BcQ5zYe1UgM", mode: "edit", token: "s1.demo-token", title: "Venue options", from: "Priya Raman", kind: "thread" })
 /** Is the note open: its pane on a desktop, its pushed screen on a phone. */
 const noteOpen = async (page) => (await page.getByRole("article", { name: "Note" }).count()) > 0
 /** An item from the Notes area's More menu. */
@@ -627,8 +658,215 @@ export const scenes = [
     },
   },
   { name: "notes-note-actions", run: (app) => noteAction(app) },
-  { name: "notes-share", run: (app) => noteAction(app, "Share…") },
-  { name: "notes-lock", run: (app) => noteAction(app, "Lock note") },
+  {
+    // Lock notes, the first time (brief N5): the form layer, its line, the warning, three fields, SET PASSPHRASE.
+    name: "notes-lock",
+    sean: { kind: "undrawn", area: "notes", screen: "lock-form" },
+    run: async (app) => {
+      await noteAction(app, "Lock note")
+      await lockForm(app.page).waitFor()
+    },
+    assert: async (app) => {
+      const form = lockForm(app.page)
+      ensure((await form.innerText()).includes("One passphrase opens every locked note, on all your devices."), "the form does not say what the passphrase does")
+      ensure(await form.getByText("Forget it and locked notes can't be opened. Nobody can reset it.").isVisible(), "the warning is not shown")
+      for (const f of ["Passphrase", "Again", "Hint (optional)"]) ensure(await form.getByLabel(f, { exact: true }).count(), `the form has no ${f} field`)
+      ensure(await formPrimary(form, "Set passphrase").isDisabled(), "SET PASSPHRASE works before anything is typed")
+      const box = await form.boundingBox()
+      if (!app.phone) ensure(Math.abs(box.width - 640) < 2, `the lock form is ${Math.round(box.width)} wide, not 640`)
+    },
+  },
+  {
+    // Lock a note (brief N5): the two passphrases must match; SET PASSPHRASE locks it; Lock now closes every locked note.
+    name: "notes-lock-form",
+    run: async (app) => {
+      const { page } = app
+      await noteAction(app, "Lock note")
+      const form = lockForm(page)
+      await form.getByLabel("Passphrase", { exact: true }).fill(PASSPHRASE)
+      await form.getByLabel("Again", { exact: true }).fill("lake house")
+      await app.settle()
+      ensure(await form.getByText("Doesn't match yet.").isVisible(), "two passphrases that differ do not say so")
+      ensure(await formPrimary(form, "Set passphrase").isDisabled(), "SET PASSPHRASE works while the two differ")
+      await form.getByLabel("Again", { exact: true }).fill(PASSPHRASE)
+      await form.getByLabel("Hint (optional)", { exact: true }).fill(HINT)
+      await press(app, formPrimary(form, "Set passphrase"))
+      await toastSaying(page, "Locked Cabin packing list").waitFor()
+      ensure(!(await form.count()), "the lock form stayed open")
+      ensure(/Locked/i.test(await page.locator('[data-role="note-overline"]').textContent()), "the overline does not say the note is locked")
+      // Lock now: the toolbar's on a desktop, the More sheet's on a phone. The note closes behind its lock.
+      if (app.phone) await noteAction(app, "Lock now")
+      else await press(app, noteToolbar(page).getByRole("button", { name: "Lock now" }))
+      await lockedNote(page).waitFor()
+      ensure(!(await noteText(page).count()), "the note's text still shows after Lock now")
+    },
+  },
+  {
+    // A locked note while notes are locked (brief N5): LOCKED, "This note is locked.", PASSPHRASE with SHOW HINT, UNLOCK.
+    name: "notes-unlock",
+    scenario: "notes-locked",
+    sean: { kind: "undrawn", area: "notes", screen: "locked" },
+    run: async (app) => {
+      await note(app, /Cabin packing list/)
+      await lockedNote(app.page).waitFor()
+      await app.page.evaluate(() => document.activeElement?.blur())
+    },
+    assert: async (app) => {
+      const panel = lockedNote(app.page)
+      ensure((await panel.innerText()).includes("This note is locked."), "the locked note does not say so")
+      ensure(await panel.getByRole("button", { name: "Show hint", exact: true }).isVisible(), "SHOW HINT is not beside the field")
+      ensure(!(await panel.getByText(HINT).count()), "the hint shows before it is asked for")
+      ensure(await panel.getByRole("button", { name: "Unlock", exact: true }).isDisabled(), "UNLOCK works with no passphrase")
+      ensure(await panel.getByRole("button", { name: "Unlock with your identity", exact: true }).isVisible(), "UNLOCK WITH YOUR IDENTITY is not offered on a device that holds the identity")
+      ensure(/Locked/i.test(await app.page.locator('[data-role="note-overline"]').textContent()), "the overline does not end LOCKED")
+    },
+  },
+  {
+    // Unlock (brief N5): the hint only on request, as the field's helper; a wrong passphrase says so; the right one opens it.
+    name: "notes-unlock-hint",
+    scenario: "notes-locked",
+    run: async (app) => {
+      const { page } = app
+      await note(app, /Cabin packing list/)
+      const panel = lockedNote(page)
+      await press(app, panel.getByRole("button", { name: "Show hint", exact: true }))
+      ensure(await panel.getByText(`Hint: ${HINT}`).isVisible(), "the hint does not show under the field")
+      ensure(!(await panel.getByRole("button", { name: "Show hint", exact: true }).count()), "SHOW HINT stays once the hint shows")
+      await panel.getByLabel("Passphrase", { exact: true }).fill("lake house")
+      await press(app, panel.getByRole("button", { name: "Unlock", exact: true }))
+      await panel.getByText("That isn't the passphrase.").waitFor()
+      await panel.getByLabel("Passphrase", { exact: true }).fill(PASSPHRASE)
+      await page.keyboard.press("Enter")
+      await noteText(page).waitFor()
+      ensure((await noteText(page).innerText()).includes("Coffee + grinder"), "the unlocked note does not show its text")
+    },
+  },
+  {
+    // Remove the lock (brief N5, X6): it asks, with focus on Cancel; Cancel keeps it; REMOVE removes it, with a toast.
+    name: "notes-lock-remove",
+    scenario: "notes-locked",
+    run: async (app) => {
+      const { page } = app
+      await note(app, /Cabin packing list/)
+      await lockedNote(page).getByLabel("Passphrase", { exact: true }).fill(PASSPHRASE)
+      await page.keyboard.press("Enter")
+      await noteText(page).waitFor()
+      await noteAction(app, "Remove lock")
+      const ask = page.getByRole("dialog", { name: "Remove the lock?" })
+      await ask.waitFor()
+      ensure((await ask.innerText()).includes("The note's text is no longer sealed."), "the question does not say what removing the lock does")
+      ensure((await page.evaluate(() => document.activeElement?.textContent?.trim())) === "Cancel", "focus does not start on Cancel")
+      await press(app, ask.getByRole("button", { name: "Cancel", exact: true }))
+      ensure(/Locked/i.test(await page.locator('[data-role="note-overline"]').textContent()), "Cancel removed the lock")
+      await noteAction(app, "Remove lock")
+      await press(app, page.getByRole("dialog", { name: "Remove the lock?" }).getByRole("button", { name: "Remove", exact: true }))
+      await toastSaying(page, "Removed the lock from Cabin packing list").waitFor()
+      ensure(!/Locked/i.test(await page.locator('[data-role="note-overline"]').textContent()), "the note still says it is locked")
+    },
+  },
+  {
+    // Share "{title}" (brief N6) with a relay: CAN EDIT and CAN VIEW, each with its sentence; CREATE LINK; what stays private.
+    name: "notes-share",
+    scenario: "notes-relay",
+    sean: { kind: "undrawn", area: "notes", screen: "share" },
+    run: async (app) => {
+      await noteAction(app, "Share…")
+      await shareForm(app.page).waitFor()
+    },
+    assert: async (app) => {
+      const form = shareForm(app.page)
+      const modes = form.getByRole("radiogroup", { name: "People with the link" })
+      ensure(await modes.getByRole("radio", { name: "Can edit" }).isChecked(), "CAN EDIT is not the choice to start with")
+      ensure(await modes.getByRole("radio", { name: "Can view" }).count(), "CAN VIEW is missing")
+      await privacy(form, { sealed: false })
+      ensure(await form.getByRole("button", { name: "Create link", exact: true }).count(), "there is no CREATE LINK")
+      const box = await form.boundingBox()
+      if (!app.phone) ensure(Math.abs(box.width - 640) < 2, `the share form is ${Math.round(box.width)} wide, not 640`)
+    },
+  },
+  {
+    // Shared by link (brief N6): LINK with COPY LINK ("Copied" for 2 s, no toast), PEOPLE WITH THE LINK with CHANGE,
+    // EMAIL IT, and STOP SHARING, which asks first, with focus on Cancel.
+    name: "notes-share-link",
+    scenario: "notes-relay",
+    run: async (app) => {
+      const { page } = app
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
+      await noteAction(app, "Share…")
+      const form = shareForm(page)
+      await press(app, form.getByRole("radiogroup", { name: "People with the link" }).getByRole("radio", { name: "Can view" }))
+      await press(app, form.getByRole("button", { name: "Create link", exact: true }))
+      await form.locator('[data-role="share-link"]').filter({ hasText: "/share#" }).waitFor()
+      ensure((await form.getByRole("group", { name: "People with the link" }).textContent()).includes("Can view"), "the link is not for reading, as chosen")
+      await privacy(form, { sealed: false })
+      await press(app, form.getByRole("button", { name: "Copy link" }))
+      ensure(await form.getByRole("button", { name: "Copied" }).count(), "COPY LINK does not say Copied")
+      ensure(!(await page.locator("[data-sonner-toast]").count()), "COPY LINK raised a toast")
+      // CHANGE: a menu on a desktop, a sheet on a phone.
+      await press(app, form.getByRole("button", { name: /^Change/ }))
+      await press(app, page.getByRole(app.phone ? "radio" : "menuitemradio", { name: "Can edit" }).last())
+      await app.settle()
+      ensure((await form.getByRole("group", { name: "People with the link" }).textContent()).includes("Can edit"), "CHANGE did not make the link editable")
+      ensure(await form.getByRole("button", { name: "Email it" }).isEnabled(), "EMAIL IT is not offered")
+      await press(app, form.getByRole("button", { name: "Stop sharing", exact: true }))
+      const ask = page.getByRole("dialog", { name: "Stop sharing?" })
+      await ask.waitFor()
+      ensure((await ask.innerText()).includes("The link stops working."), "the question does not say what stopping does")
+      ensure((await page.evaluate(() => document.activeElement?.textContent?.trim())) === "Cancel", "focus does not start on Cancel")
+      await press(app, ask.getByRole("button", { name: "Stop sharing", exact: true }))
+      await toastSaying(page, "Stopped sharing Cabin packing list").waitFor()
+      ensure(!(await shareForm(page).count()), "the share form stayed open")
+    },
+  },
+  {
+    // Shared (brief N6): LINK with COPY LINK, PEOPLE WITH THE LINK with CHANGE, EMAIL IT, and STOP SHARING.
+    name: "notes-share-shared",
+    scenario: "notes-relay",
+    sean: { kind: "undrawn", area: "notes", screen: "share-link" },
+    run: async (app) => {
+      await noteAction(app, "Share…")
+      const form = shareForm(app.page)
+      await press(app, form.getByRole("button", { name: "Create link", exact: true }))
+      await form.locator('[data-role="share-link"]').filter({ hasText: "/share#" }).waitFor()
+      await app.page.evaluate(() => document.activeElement?.blur())
+    },
+    assert: async (app) => {
+      const form = shareForm(app.page)
+      for (const b of ["Copy link", "Email it", "Stop sharing"]) ensure(await form.getByRole("button", { name: b, exact: true }).count(), `the shared form has no ${b}`)
+      ensure((await form.getByRole("group", { name: "People with the link" }).textContent()).includes("Can edit"), "the link is not for editing, the choice to start with")
+      ensure(!(await form.getByRole("button", { name: "Create link", exact: true }).count()), "CREATE LINK stays once the note is shared")
+    },
+  },
+  {
+    // No notes relay (brief N6): sharing works through it; OPEN SYNC opens the sync set-up.
+    name: "notes-share-no-relay",
+    run: async (app) => {
+      const { page } = app
+      await noteAction(app, "Share…")
+      const form = shareForm(page)
+      ensure((await form.innerText()).includes("Sharing works through your notes relay, the same one that syncs your devices."), "the form does not say sharing needs the relay")
+      await press(app, form.getByRole("button", { name: "Open sync", exact: true }))
+      ensure(!(await shareForm(page).count()), "the share form stayed open under the sync set-up")
+      ensure(await page.getByRole("dialog").count(), "OPEN SYNC opened nothing")
+    },
+  },
+  {
+    // A guest's note (brief N6): the overline ends // SHARED // YOU CAN EDIT; the menu has Keep as my own note, not Share or Lock.
+    name: "notes-guest",
+    scenario: "notes-guest",
+    run: async (app) => {
+      await note(app, /Design review agenda/)
+      await app.page.evaluate(() => document.activeElement?.blur())
+    },
+    assert: async (app) => {
+      const overline = (await app.page.locator('[data-role="note-overline"]').textContent()) ?? ""
+      ensure(/\/\/ Shared \/\/ You can edit$/.test(overline), `the overline reads ${overline}`)
+      await press(app, button(app.page, "Note actions"))
+      ensure(await moreRow(app, "Keep as my own note").count(), "a guest's note has no Keep as my own note")
+      for (const row of ["Share…", "Lock note"]) ensure(!(await moreRow(app, row).count()), `a guest's note offers ${row}`)
+      await leaveLayer(app)
+    },
+  },
   {
     // Link this note (brief N2): a dialog (form 640) on a desktop, the whole screen on a phone. A search
     // field, then EVENTS, PEOPLE and CONVERSATIONS as search draws them; the linked event carries LINKED.
@@ -1084,7 +1322,95 @@ export const scenes = [
   },
   { name: "notes-import", run: (app) => notesMenu(app, "Import notes…") },
   { name: "notes-sync", run: (app) => notesMenu(app, "Sync between devices…") },
-  { name: "notes-quick-note", run: (app) => app.page.keyboard.press("Alt+KeyN") },
+  {
+    // Quick Note from a conversation (brief N7): QUICK NOTE // the conversation with UNLINK; DONE saves it, linked,
+    // with "Saved to Notes" and OPEN; opened again there, the note is under HERE ALREADY.
+    name: "notes-quick-note",
+    sean: { kind: "undrawn", area: "notes", screen: "quick-note" },
+    run: async (app) => {
+      const { page } = app
+      await area(app, "Mail")
+      await conversation(app, /Token audit/)
+      await page.keyboard.press("Alt+KeyN")
+      await app.settle()
+      let layer = quickNote(page)
+      await layer.waitFor()
+      ensure(/^Quick note \/\/ .*Token audit/i.test((await layer.locator('[data-role="quick-note-about"]').innerText()).trim()), "the overline does not name the open conversation")
+      ensure(await layer.getByRole("button", { name: /^Unlink/ }).count(), "there is no UNLINK beside the overline")
+      ensure((await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))) === "Quick note", "the words do not take focus")
+      await page.keyboard.type("Ask Ana for the audit's color pairs\nThe pairs that fail on stone.")
+      await press(app, layer.getByRole("button", { name: "Done", exact: true }))
+      const toast = toastSaying(page, "Saved to Notes")
+      await toast.waitFor()
+      ensure(await toast.getByRole("button", { name: "Open" }).count(), "the toast has no OPEN")
+      ensure(!(await quickNote(page).count()), "DONE did not close the quick note")
+      await toastGone(app)
+      await page.keyboard.press("Alt+KeyN")
+      await app.settle()
+      layer = quickNote(page)
+      const here = layer.getByRole("list", { name: "Notes here already" })
+      await here.waitFor()
+      ensure(await here.getByRole("button", { name: /Ask Ana for the audit's color pairs/ }).count(), "the saved note is not linked to the conversation")
+    },
+  },
+  {
+    // Closing a quick note any other way saves it too (brief N7); UNLINK saves it with no link.
+    name: "notes-quick-note-close",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await area(app, "Mail")
+      await conversation(app, /Token audit/)
+      await page.keyboard.press("Alt+KeyN")
+      await app.settle()
+      const layer = quickNote(page)
+      await press(app, layer.getByRole("button", { name: /^Unlink/ }))
+      ensure((await layer.locator('[data-role="quick-note-about"]').innerText()).trim().toLowerCase() === "quick note", "UNLINK left the conversation in the overline")
+      await page.keyboard.type("Book the ferry for the cabin")
+      await page.keyboard.press("Escape")
+      await toastSaying(page, "Saved to Notes").waitFor()
+      await toastGone(app)
+      await page.keyboard.press("Alt+KeyN")
+      await app.settle()
+      ensure(!(await quickNote(page).getByRole("list", { name: "Notes here already" }).count()), "an unlinked note was linked to the conversation")
+      await page.keyboard.press("Escape")
+      await app.settle()
+      await area(app, "Notes")
+      ensure(await notesList(page).getByRole("button", { name: /Book the ferry for the cabin/ }).count(), "Esc did not save the quick note")
+    },
+  },
+  {
+    // Open a shared note (brief N6), from Notes' folders: LINK, then what the link is, and ADD TO MY NOTES.
+    name: "notes-open-shared",
+    sean: { kind: "undrawn", area: "notes", screen: "open-shared" },
+    run: async (app) => {
+      const form = await openSharedForm(app)
+      await form.getByLabel("Link", { exact: true }).fill(SHARED_LINK)
+      await app.settle()
+      await app.page.evaluate(() => document.activeElement?.blur())
+    },
+    assert: async (app) => {
+      const form = openSharedLayer(app.page)
+      // textContent: a value cut in the middle is two boxes, which innerText would break apart.
+      const facts = await form.locator('[data-role="shared-link-facts"]').textContent()
+      for (const w of ["Lake trip budget", "Priya Raman", "Edit"]) ensure(facts.includes(w), `the link's facts do not say ${w}`)
+      ensure(await formPrimary(form, "Add to my notes").isEnabled(), "ADD TO MY NOTES is not offered for a note's link")
+    },
+  },
+  {
+    // Not a share link (brief N6): the field's error, and no way to add it; a conversation's link opens in Team.
+    name: "notes-open-shared-wrong",
+    run: async (app) => {
+      const form = await openSharedForm(app)
+      await form.getByLabel("Link", { exact: true }).fill("https://example.com/notes/cabin")
+      await app.settle()
+      await form.getByText("That isn't a shared-note link.").waitFor()
+      ensure(await formPrimary(form, "Add to my notes").isDisabled(), "ADD TO MY NOTES works for a link that is not one")
+      await form.getByLabel("Link", { exact: true }).fill(THREAD_LINK)
+      await app.settle()
+      ensure(await formPrimary(form, "Open in Team").count(), "a conversation's link does not offer OPEN IN TEAM")
+    },
+  },
   {
     // Notes' folders and tags (ADR-0084; brief X1): the page head's sheet on a phone, with the view
     // choice as its last group; its popover at medium width; the sidebar's groups on a desktop.

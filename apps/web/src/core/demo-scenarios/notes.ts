@@ -94,6 +94,52 @@ export const notes: DemoScenarios = {
     })
   },
   /**
+   * The design review agenda is a note Priya shared with you to edit (ADR-0056; brief N6): a guest's
+   * note, so its overline ends `// SHARED // YOU CAN EDIT` and its menu offers Keep as my own note.
+   */
+  "notes-guest": ({ wrap }) => {
+    const share: NoteShare = { id: "share-agenda-edit", role: "guest", mode: "edit", from: "Priya Raman", relay: null, token: null }
+    const isAgenda = (title: string) => title.startsWith("Design review agenda")
+    wrap("listNotes", (list) => async (query) => (await list(query)).map((n) => (isAgenda(n.title) ? { ...n, share } : n)))
+    wrap("getNote", (get) => async (id) => {
+      const n = await get(id)
+      if (!isAgenda(n.title)) return n
+      const doc = loadDoc(null)
+      seed(doc, n.markdown, n.id)
+      return { ...n, share, ydoc: stateOf(doc) }
+    })
+  },
+  /**
+   * Locked notes (ADR-0043; brief N5): a passphrase is set, with a hint, and the cabin packing list
+   * is locked. Notes are locked now, as after the 10-minute idle lock, so the note asks for the
+   * passphrase. The scenes type it: "lake house in october".
+   */
+  "notes-locked": ({ client, wrap }) => {
+    const { listNotes } = client
+    const seeded = (async () => {
+      const cabin = (await listNotes({ search: null, tag: null, archived: false, folder: null })).find((n) => n.title.startsWith("Cabin packing list"))
+      await client.setNotesPassphrase("lake house in october", "Where we go every fall, and when")
+      if (cabin) await client.lockNote(cabin.id)
+      await client.lockNotesNow()
+    })()
+    wrap("listNotes", (list) => async (query) => {
+      await seeded
+      return list(query)
+    })
+    wrap("notesLock", (info) => async () => {
+      await seeded
+      return info()
+    })
+  },
+  /**
+   * A notes relay on this device (brief N6), so a note can be shared by link. It has no key, so the
+   * relay can read what syncs, and the share form says so. Nothing listens there in the demo: the
+   * sync's socket is refused on this machine and never leaves it.
+   */
+  "notes-relay": ({ wrap }) => {
+    wrap("getNotesRelay", () => async () => ({ url: "ws://localhost:1", token: "demo-relay-token-0123456789", key: null }))
+  },
+  /**
    * The icon axis note holds three images (ADR-0108): a sketch, a picture of hue ramps and a scanned
    * page whose text was read on this device, for the image toolbar and the viewer.
    */

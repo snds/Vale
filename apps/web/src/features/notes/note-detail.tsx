@@ -34,19 +34,19 @@ import type { NoteColor, NoteLink, NoteMeta, NotesPrefs } from "@/core/types"
 import { useNowSecs } from "@/hooks/use-now"
 import { reminderLabel } from "@/lib/time"
 import { copyText } from "@/lib/copy"
+import { useConfirm } from "@/lib/confirm"
 
 import { titleAndSnippet } from "@/core/demo-notes"
 
 import { PeopleHere } from "./people-here"
 import { LinkPicker } from "./link-picker"
-import { LockedPanel, PassphraseDialog } from "./lock"
+import { LockedPanel, AskPassphrase } from "./lock"
 import { notesSync } from "./sync"
 import { colorLabel } from "./note-color"
 import { NoteColorMenu } from "./note-color-menu"
 import { remindLabel, rowTime } from "./note-meta"
-import { RelayDialog } from "./relay-dialog"
 import { RemindMenu, RemindSheet } from "./remind-menu"
-import { ShareDialog } from "./share-dialog"
+import { ShareNote } from "./share-dialog"
 import { useLiveShareModes } from "./shared-docs"
 import { NoteEditor, type NoteEditorHandle } from "./note-editor"
 import { askRename, renameLinks, useRenameQuestions } from "./rename-links"
@@ -94,7 +94,7 @@ export function NoteDetailPane({ id, fresh, onClosed }: { id: string; fresh: boo
   const [askPassphrase, setAskPassphrase] = useState(false)
   const [sharing, setSharing] = useState(false)
   const liveModes = useLiveShareModes()
-  const [relayOpen, setRelayOpen] = useState(false)
+  const confirm = useConfirm()
   const refresh = () => void qc.invalidateQueries({ queryKey: ["notes"], predicate: (q) => q.queryKey[1] !== "note" })
 
   // Renames (ADR-0035): the title other notes' links use, and a pending
@@ -162,7 +162,8 @@ export function NoteDetailPane({ id, fresh, onClosed }: { id: string; fresh: boo
   const color = note ? (meta?.color ?? note.color) || null : null
   const remindAt = note ? (meta?.remindAt ?? note.remindAt) || null : null
   // A note's name for a toast, read when the toast is raised: the title as typed.
-  const nameNow = () => named(currentTitle() ?? note?.title ?? "")
+  // A locked note's text is not here until it opens: its title is the summary's.
+  const nameNow = () => named(currentTitle() || note?.title || "")
   const guest = note?.share?.role === "guest" ? note.share : null
   const guestMode = (guest && liveModes[id]) ?? guest?.mode
   const shared = !!note?.share && !note.share.revoked
@@ -207,14 +208,19 @@ export function NoteDetailPane({ id, fresh, onClosed }: { id: string; fresh: boo
     }
   }
   const lock = () => (unlocked ? void lockIt() : setAskPassphrase(true))
+  // Removing the lock can't be undone by the code (the text is unsealed), so it asks (brief N5, X6): focus on Cancel.
   const unlockForGood = async () => {
-    try {
-      await (await getCoreClient()).removeNoteLock(id)
-      void qc.invalidateQueries({ queryKey: ["notes"] })
-      toast(`Removed the lock from ${nameNow()}`)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
-    }
+    const name = nameNow()
+    const yes = await confirm.ask({
+      title: "Remove the lock?",
+      description: "The note's text is no longer sealed.",
+      confirmLabel: "Remove",
+      confirmIcon: "unlocked",
+      run: async () => void (await (await getCoreClient()).removeNoteLock(id)),
+    })
+    if (!yes) return
+    void qc.invalidateQueries({ queryKey: ["notes"] })
+    toast(`Removed the lock from ${name}`)
   }
   const lockNow = async () => {
     await (await getCoreClient()).lockNotesNow()
@@ -359,6 +365,8 @@ export function NoteDetailPane({ id, fresh, onClosed }: { id: string; fresh: boo
             <ToolbarToggle icon={current?.pinned ? "pin--filled" : "pin"} label="Pin" pressed={!!current?.pinned} onPressedChange={pin} />
             <RemindMenu value={remindAt} onPick={remind} trigger={<ToolbarButton icon={remindAt ? "notification--filled" : "notification"} label={remindLabel(remindAt)} />} />
             <NoteColorMenu value={color} onChange={paint} open={colorOpen} onOpenChange={setColorOpen} trigger={<ToolbarButton icon="color-palette" label={colorLabel(color)} />} />
+            {/* Lock now (brief N5): every locked note closes. Only while they are open. */}
+            {locked && unlocked && <ToolbarButton icon="locked" label="Lock now" onClick={() => void lockNow()} />}
             <NoteMore actions={moreRef} shows={{ archived, locked, unlocked, guest: isGuest, shared }} trigger={<ToolbarButton icon="overflow-menu--horizontal" label="Note actions" />} />
           </Toolbar>
         )}
@@ -443,7 +451,7 @@ export function NoteDetailPane({ id, fresh, onClosed }: { id: string; fresh: boo
           <NoteColorMenu value={color} onChange={paint} open={phoneLayer === "color"} onOpenChange={(o) => setPhoneLayer(o ? "color" : null)} trigger={hiddenAnchor()} />
         </>
       )}
-      <PassphraseDialog
+      <AskPassphrase
         open={askPassphrase}
         onOpenChange={setAskPassphrase}
         onDone={() => {
@@ -451,8 +459,8 @@ export function NoteDetailPane({ id, fresh, onClosed }: { id: string; fresh: boo
           void lockIt()
         }}
       />
-      <ShareDialog note={note} open={sharing} onOpenChange={setSharing} onSetUpSync={() => setRelayOpen(true)} />
-      <RelayDialog open={relayOpen} onOpenChange={setRelayOpen} />
+      <ShareNote note={note} open={sharing} onOpenChange={setSharing} />
+      {confirm.question()}
     </article>
   )
 }
@@ -467,10 +475,13 @@ const hiddenAnchor = (): ReactElement<Record<string, unknown>> => <Button type="
 function LockedNote({ top, title }: { top: ReactNode; title: string }) {
   return (
     <>
+      {/* The title 4 px under the top line, as an open note has it (ADR-0106). */}
       <AppFrameInset>
-        <div className="flex flex-col gap-4">{top}</div>
+        <div className="flex flex-col gap-1">
+          {top}
+          <LockedPanel title={title} />
+        </div>
       </AppFrameInset>
-      <LockedPanel title={title} />
     </>
   )
 }
@@ -571,9 +582,11 @@ function NoteMore({
       )}
       {a.locked && a.unlocked && (
         <>
-          <AdaptiveMenuItem icon="locked" onSelect={run("lockNow")}>
-            Lock now
-          </AdaptiveMenuItem>
+          {phone && (
+            <AdaptiveMenuItem icon="locked" onSelect={run("lockNow")}>
+              Lock now
+            </AdaptiveMenuItem>
+          )}
           <AdaptiveMenuItem icon="unlocked" onSelect={run("removeLock")}>
             Remove lock
           </AdaptiveMenuItem>
