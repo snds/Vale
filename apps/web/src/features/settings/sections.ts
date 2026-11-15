@@ -1,7 +1,7 @@
 import type { ComponentType } from "react"
 
 import type { IconName } from "@unicron/ui"
-import { isMember, isTauri } from "@/core/client"
+import { isDesktopApp, isMember } from "@/core/client"
 import { useAccounts, useCore } from "@/core/queries"
 
 import { AccountsSection } from "@/features/accounts"
@@ -11,9 +11,10 @@ import { ShortcutSettings } from "@/features/grammar"
 import { NotesSettings } from "@/features/notes/notes-settings"
 import { PushSettingsSection } from "@/features/push-settings"
 import { Members } from "@/features/team-members"
+import { AboutBody } from "@/features/updates/about-section"
 import { WritingSettings } from "@/features/writing-settings"
 
-import { AboutBody, CalendarBody, MailBody } from "./section-bodies"
+import { CalendarBody, MailBody } from "./section-bodies"
 
 /**
  * The settings sections, in one place (ADR-0085; brief T0). The settings
@@ -42,7 +43,7 @@ export interface SettingsContext {
   remote: boolean
   /** A team member on a gateway (ADR-0063): the mail is shared, the rest is the owner's. */
   member: boolean
-  /** The desktop app, which updates itself (ADR-0076). */
+  /** The desktop app, which updates itself (ADR-0076); a demo scenario can play it (`isDesktopApp`). */
   desktopApp: boolean
 }
 
@@ -76,7 +77,7 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   // Everyone has it, a team member too: the theme is this device's, not the gateway's (ADR-0082).
   { id: "appearance", name: "Appearance", group: "Vale", icon: "contrast", description: "How Vale looks on this device.", keywords: ["settings", "theme", "stone", "graphite", "dark mode", "light mode", "system"], when: () => true, body: AppearanceSettings },
   { id: "shortcuts", name: "Shortcuts and gestures", group: "Vale", icon: "keyboard", description: "Every key and swipe, so nothing is gesture-only.", keywords: ["settings", "keyboard", "keys", "swipe", "swipes", "change keys", "change keys and swipes", "reset keys"], when: () => true, body: ShortcutSettings },
-  // The desktop app's own updates (ADR-0076), and a gateway's for its owner (ADR-0077; brief T12, "Server").
+  // The desktop app's own updates (ADR-0076), and a gateway's for its owner (ADR-0077): THIS APP and SERVER (brief T12; ADR-0112).
   { id: "about", name: "About", group: "Vale", icon: "information", description: "This version of Vale, and its updates.", keywords: ["settings", "version", "updates", "server", "gateway", "image"], when: (c) => !c.member && (c.desktopApp || c.remote), body: AboutBody },
 ]
 
@@ -97,6 +98,6 @@ export function findSections(sections: SettingsSectionEntry[], query: string): S
 export function useSettingsSections(): SettingsSectionEntry[] {
   const { data: accounts = [] } = useAccounts()
   const { data: core } = useCore()
-  const ctx: SettingsContext = { hasAccount: accounts.length > 0, remote: !!core?.remote, member: isMember(), desktopApp: isTauri() }
+  const ctx: SettingsContext = { hasAccount: accounts.length > 0, remote: !!core?.remote, member: isMember(), desktopApp: isDesktopApp() }
   return SETTINGS_SECTIONS.filter((s) => s.when(ctx))
 }

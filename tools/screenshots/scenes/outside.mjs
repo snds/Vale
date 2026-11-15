@@ -1,5 +1,6 @@
-// Outside the app: first run (brief X8; ADR-0107), in the focus frame. The gateway's door (brief X9)
-// joins it when that slice builds it.
+// Outside the app, in the focus frame: first run (brief X8; ADR-0107) and the gateway's door, to sign
+// in or join the team (brief X9; ADR-0112). The demo plays a gateway's door through the scenarios
+// gateway-signin, gateway-join and invitation-ended (apps/web/src/core/demo-scenarios/settings.ts).
 import { button, ensure, press } from "./helpers.mjs"
 
 /** The focus frame's column, while first run shows. */
@@ -27,6 +28,33 @@ const fillPassword = async (page) => {
 const still = async (app) => {
   await app.page.mouse.move(0, 0)
   await app.page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
+  await app.settle()
+}
+
+/** The gateway's door, by what it asks: "Sign in" or "Join the team". */
+const door = (page, name) => page.getByRole("main", { name })
+/** The door's one primary (decisions §4). */
+const primaries = (page, name) => door(page, name).locator('[data-slot="button"][data-variant="default"]')
+/** A field's error, as the Text Field shows it: the field is invalid and the line under it says what. */
+const fieldError = async (page, label) => {
+  const field = page.getByLabel(label, { exact: true })
+  if ((await field.getAttribute("aria-invalid")) !== "true") return null
+  const ids = ((await field.getAttribute("aria-describedby")) ?? "").split(/\s+/).filter(Boolean)
+  const lines = await Promise.all(ids.map((id) => page.locator(`[id="${id}"]`).innerText()))
+  return lines.join(" ").trim()
+}
+/** Types into the password field and presses the door's primary, as a person would. */
+const tryPassword = async (app, label, password, primary) => {
+  await app.page.getByLabel(label, { exact: true }).fill(password)
+  await press(app, button(app.page, primary))
+}
+
+/** The door's primary, when the right password opens the app: the page loads again, then settles. */
+const getIn = async (app, label, password, primary) => {
+  const { page } = app
+  await page.getByLabel(label, { exact: true }).fill(password)
+  await Promise.all([page.waitForEvent("load"), button(page, primary).click()])
+  await page.waitForFunction(() => !!document.getElementById("root")?.innerText.trim())
   await app.settle()
 }
 
@@ -227,6 +255,116 @@ export const scenes = [
     assert: async ({ page }) => {
       ensure(await page.getByRole("link", { name: "Step-by-step guide" }).isVisible(), "the client form has no guide link")
       ensure(await page.getByLabel("Client secret").count(), "Google's client form has no CLIENT SECRET")
+    },
+  },
+  {
+    // The gateway's door (brief X9): EMAIL with its helper, GATEWAY PASSWORD with the owner's helper,
+    // one primary SIGN IN, in the focus frame. Typing an email turns the field into PASSWORD.
+    name: "outside-signin",
+    scenario: "gateway-signin",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "outside", screen: "gateway-sign-in" },
+    run: async (app) => {
+      const { page } = app
+      ensure(await door(page, "Sign in").isVisible(), "the gateway's door does not show")
+      await page.getByLabel("Email", { exact: true }).fill("noor@studio.example")
+      ensure(await page.getByLabel("Password", { exact: true }).isVisible(), "an email does not turn the field into PASSWORD")
+      ensure(!(await page.getByText("The GATEWAY_PASSWORD it was started with.").count()), "a member is shown the owner's helper")
+      await page.getByLabel("Email", { exact: true }).fill("")
+      await still(app)
+    },
+    assert: async ({ page }) => {
+      ensure(await page.getByLabel("Gateway password", { exact: true }).isVisible(), "the owner's field is not GATEWAY PASSWORD")
+      ensure(await page.getByText("Only if you were invited to the team.").isVisible(), "EMAIL has no helper")
+      ensure(await page.getByText("The GATEWAY_PASSWORD it was started with.").isVisible(), "the owner's helper is missing")
+      ensure((await primaries(page, "Sign in").count()) === 1 && (await button(page, "Sign in").isVisible()), "the door's one primary is not SIGN IN")
+      ensure(!(await page.getByRole("navigation", { name: "Vale" }).count()) && !(await page.getByRole("tablist", { name: "Sections" }).count()), "the app shows behind the door")
+    },
+  },
+  {
+    // A wrong password is the field's error, in the shared words (decisions §4): a member's first,
+    // then the owner's, which the picture shows.
+    name: "outside-signin-wrong",
+    scenario: "gateway-signin",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await page.getByLabel("Email", { exact: true }).fill("noor@studio.example")
+      await tryPassword(app, "Password", "not-my-password", "Sign in")
+      const member = await fieldError(page, "Password")
+      ensure(member === "That isn't your password.", `a member's wrong password says ${JSON.stringify(member)}`)
+      await page.getByLabel("Email", { exact: true }).fill("")
+      await tryPassword(app, "Gateway password", "letmein", "Sign in")
+      await still(app)
+    },
+    assert: async ({ page }) => {
+      const owner = await fieldError(page, "Gateway password")
+      ensure(owner === "That isn't the gateway password.", `the owner's wrong password says ${JSON.stringify(owner)}`)
+      ensure(await door(page, "Sign in").isVisible(), "a wrong password left the door")
+    },
+  },
+  {
+    // The right password goes in: the door gives way to the app (the demo's gateway takes its own).
+    name: "outside-signin-done",
+    scenario: "gateway-signin",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await getIn(app, "Gateway password", "demo-gateway-password", "Sign in")
+      ensure(!(await door(page, "Sign in").count()), "the door stays after the right password")
+    },
+    assert: async ({ page }) => {
+      ensure(await page.getByRole("navigation", { name: "Vale" }).isVisible(), "signing in did not open the app")
+    },
+  },
+  {
+    // Joining the team at /join#<code> (brief X9): CHOOSE A PASSWORD, at least 12 characters, and JOIN.
+    name: "outside-join",
+    scenario: "gateway-join",
+    path: "/join#demo-invitation-1-k3v9x2",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "outside", screen: "join" },
+    run: still,
+    assert: async ({ page }) => {
+      ensure(await door(page, "Join the team").isVisible(), "the invitation does not open the door to join")
+      ensure(await page.getByLabel("Choose a password", { exact: true }).isVisible(), "the door has no CHOOSE A PASSWORD")
+      ensure(await page.getByText("At least 12 characters.").isVisible(), "CHOOSE A PASSWORD has no helper")
+      ensure((await primaries(page, "Join the team").count()) === 1 && (await button(page, "Join").isVisible()), "the door's one primary is not JOIN")
+    },
+  },
+  {
+    // A short password is the field's error; one of 12 or more joins, and the app opens off the invitation's address.
+    name: "outside-join-short",
+    scenario: "gateway-join",
+    path: "/join#demo-invitation-1-k3v9x2",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await tryPassword(app, "Choose a password", "short", "Join")
+      const said = await fieldError(page, "Choose a password")
+      ensure(said === "At least 12 characters.", `a short password says ${JSON.stringify(said)}`)
+      await getIn(app, "Choose a password", "a long enough passphrase", "Join")
+      ensure(new URL(page.url()).pathname === "/", "joining did not leave the invitation's address")
+    },
+    assert: async ({ page }) => {
+      ensure(await page.getByRole("navigation", { name: "Vale" }).isVisible(), "joining did not open the app")
+    },
+  },
+  {
+    // A used or expired invitation (brief X9): the critical empty state, with nothing to press.
+    name: "outside-invitation-ended",
+    scenario: "invitation-ended",
+    path: "/join#demo-invitation-used-9q2w7e",
+    sizes: ["desktop", "phone"],
+    sean: { kind: "undrawn", area: "outside", screen: "invitation-ended" },
+    run: async (app) => {
+      await tryPassword(app, "Choose a password", "a long enough passphrase", "Join")
+      await still(app)
+    },
+    assert: async ({ page }) => {
+      ensure(await page.getByText("This invitation has ended.").isVisible(), "a spent invitation does not say it has ended")
+      ensure(await page.getByText("Ask for a new link.").isVisible(), "a spent invitation does not say what to do")
+      ensure(!(await page.getByLabel("Choose a password", { exact: true }).count()), "a spent invitation still asks for a password")
     },
   },
 ]

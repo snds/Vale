@@ -1,11 +1,8 @@
-import { isMember, isTauri } from "@/core/client"
 import { useCore } from "@/core/queries"
 import { AdvancedMail } from "@/features/advanced-mail"
-import { GatewayUpdatesSection } from "@/features/gateway-updates"
 import { MeetingSettingsSection } from "@/features/meeting-settings"
 import { MenuBarSettingsSection } from "@/features/menu-bar-settings"
 import { ScreenerSettingsSection } from "@/features/screener-settings"
-import { AboutSection } from "@/features/updates/about-section"
 
 import { SecondZoneRow, WeekStartsRow } from "./second-zone-row"
 import { SettingBlock } from "./setting-block"
@@ -17,8 +14,8 @@ import { SettingBlock } from "./setting-block"
  * line are the frame's (ADR-0104), so a body starts with its rows. A lane
  * that rebuilds a section changes its body here, or points the registry at
  * its own. Mail, Signatures and templates, Notifications and Calendar are
- * ADR-0110's; Notes, Shortcuts and AI are ADR-0111's, in their own files;
- * Team members and About keep today's rows until their slice.
+ * ADR-0110's; Notes, Shortcuts and AI are ADR-0111's, Team members and
+ * About ADR-0112's, in their own files.
  */
 
 export function MailBody() {
@@ -42,22 +39,6 @@ export function CalendarBody() {
         <SecondZoneRow />
         <WeekStartsRow />
       </SettingBlock>
-    </div>
-  )
-}
-
-/**
- * About (brief T12): this app's updates on the desktop app, and the
- * gateway's for its owner, which were a section of their own ("Gateway
- * updates", ADR-0077) until ADR-0104. The two groups get their headers
- * when About is rebuilt.
- */
-export function AboutBody() {
-  const owner = !!useCore().data?.remote && !isMember()
-  return (
-    <div className="flex flex-col gap-8">
-      {isTauri() && <AboutSection />}
-      {owner && <GatewayUpdatesSection />}
     </div>
   )
 }

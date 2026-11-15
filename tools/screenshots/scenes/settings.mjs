@@ -29,6 +29,12 @@ const reload = async (app) => {
   await app.settle()
 }
 
+/** About, from the list: its item carries the update mark's words when one waits ("About, Update ready"). */
+const about = async (app) => {
+  await press(app, settingsButton(app.page))
+  await press(app, sectionList(app.page).getByRole("button", { name: /^About(, |$)/ }))
+}
+
 /** The Manage screen of the account named `name`, from Settings › Accounts. */
 const manage = async (app, name) => {
   await settings(app, "Accounts")
@@ -908,6 +914,214 @@ export const scenes = [
       await press(app, page.getByRole("radio", { name: "On the phone's schedule" }))
       ensure(!(await region(page, "Accounts on the relay").count()), "the relay's rows stay on the phone's schedule")
       ensure(!(await page.getByRole("form", { name: "Relay" }).count()), "the relay's form stays on the phone's schedule")
+    },
+  },
+  {
+    // Team members (brief T10): a row a person, the email in mono or "Owner (you)", NOT JOINED YET while
+    // an invitation is out, NEW LINK for a member, REMOVE in the row's menu, and ADD MEMBER (secondary).
+    name: "settings-team-members",
+    scenario: "gateway-owner",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "team-members" },
+    run: async (app) => {
+      await settings(app, "Team members")
+      await region(app.page, "People").waitFor()
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      const people = region(page, "People")
+      ensure((await people.getByRole("listitem").count()) === 4, "Team members does not list the four people")
+      const owner = people.getByRole("group", { name: "Me", exact: true })
+      ensure(/Owner \(you\)/.test(await owner.textContent()), "the owner's row does not say Owner (you)")
+      ensure(!(await owner.getByRole("button", { name: "New link", exact: true }).count()), "the owner's row offers NEW LINK")
+      const priya = people.getByRole("group", { name: "Priya Raman", exact: true })
+      ensure(/priya@studio\.example/.test(await priya.textContent()) && /not joined yet/i.test(await priya.textContent()), "a pending member's row has no email or NOT JOINED YET")
+      ensure(await priya.getByRole("button", { name: "New link", exact: true }).isVisible(), "a member's row has no NEW LINK")
+      ensure(!/not joined yet/i.test(await people.getByRole("group", { name: "Sam Okafor", exact: true }).textContent()), "a joined member is tagged NOT JOINED YET")
+      const add = button(page, "Add member")
+      ensure((await add.getAttribute("data-variant")) === "secondary", "ADD MEMBER is not secondary")
+      ensure(!(await region(page, "Team members").locator('[data-slot="button"][data-variant="default"]').count()), "Team members has a primary of its own")
+    },
+  },
+  {
+    // ADD MEMBER: NAME · EMAIL · CREATE INVITATION in the form layer; then the link, once, with COPY LINK.
+    name: "settings-team-invite",
+    scenario: "gateway-owner",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Team members")
+      await press(app, button(page, "Add member"))
+      const form = page.getByRole("dialog", { name: /Add member/ })
+      ensure(await form.isVisible(), "ADD MEMBER did not open the form")
+      await form.getByRole("textbox", { name: "Name" }).fill("Ana Duarte")
+      await form.getByRole("textbox", { name: "Email" }).fill("ana@example.com")
+      await press(app, form.getByRole("button", { name: "Create invitation", exact: true }))
+    },
+    assert: async ({ page }) => {
+      const layer = page.getByRole("dialog", { name: /Ana Duarte/ })
+      ensure(await layer.isVisible(), "the invitation does not show once it is made")
+      const link = layer.getByRole("group", { name: "Invitation link", exact: true })
+      ensure(/\/join#demo-invitation-/.test(await link.textContent()), "INVITATION LINK does not show the link")
+      ensure(await link.getByRole("button", { name: "Copy link", exact: true }).isVisible(), "INVITATION LINK has no COPY LINK")
+      ensure(await layer.getByText("Works once, for 7 days. It won't show again.").isVisible(), "the link's caption is missing")
+    },
+  },
+  {
+    // REMOVE asks first (decisions §10), with focus on Cancel; the yes removes the person.
+    name: "settings-team-remove",
+    scenario: "gateway-owner",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Team members")
+      await press(app, page.getByRole("button", { name: "More actions for Sam Okafor" }))
+      await press(app, page.getByRole("menuitem", { name: "Remove", exact: true }).or(page.getByRole("button", { name: "Remove", exact: true })).first())
+    },
+    assert: async ({ page }) => {
+      const question = page.getByRole("dialog").filter({ hasText: "Remove Sam Okafor?" })
+      ensure(await question.isVisible(), "REMOVE did not ask")
+      ensure(/They're signed out now\. What's assigned to them goes back to nobody\./.test(await question.textContent()), "the question does not say what removing does")
+      ensure((await page.evaluate(() => document.activeElement?.textContent?.trim())) === "Cancel", "focus is not on Cancel")
+      ensure(await question.getByRole("button", { name: "Remove", exact: true }).isVisible(), "the yes does not repeat the verb")
+    },
+  },
+  {
+    // The yes takes them off the team: three people are left, and no toast says so.
+    name: "settings-team-removed",
+    scenario: "gateway-owner",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Team members")
+      await press(app, page.getByRole("button", { name: "More actions for Sam Okafor" }))
+      await press(app, page.getByRole("menuitem", { name: "Remove", exact: true }))
+      await press(app, page.getByRole("dialog").filter({ hasText: "Remove Sam Okafor?" }).getByRole("button", { name: "Remove", exact: true }))
+      await page.getByRole("dialog").waitFor({ state: "detached" })
+      await app.settle()
+    },
+    assert: async ({ page }) => {
+      ensure((await region(page, "People").getByRole("listitem").count()) === 3, "the removed member is still listed")
+      ensure(!(await page.getByRole("group", { name: "Sam Okafor", exact: true }).count()), "Sam Okafor is still on the team")
+    },
+  },
+  {
+    // About › This app (brief T12), on the desktop app with an update downloaded: VERSION, "{version}
+    // is ready.", RESTART TO UPDATE in place of RELOAD APP, and the automatic check.
+    name: "settings-about-app",
+    scenario: "desktop-update-ready",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "about" },
+    run: async (app) => {
+      await about(app)
+      await region(app.page, "This app").waitFor()
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      const group = region(page, "This app")
+      ensure(/Vale 0\.1\.0-main\.20261104171200 · main channel/.test(await group.textContent()), "VERSION does not say Vale {version} and the channel")
+      ensure(/0\.1\.0-main\.20261111090500 is ready\./.test(await group.textContent()), "the state line does not say the update is ready")
+      ensure(await group.getByRole("button", { name: "Restart to update", exact: true }).isVisible(), "a ready update has no RESTART TO UPDATE")
+      ensure(!(await group.getByRole("button", { name: "Reload app", exact: true }).count()), "RELOAD APP shows beside RESTART TO UPDATE")
+      ensure(await group.getByRole("button", { name: "Check for updates", exact: true }).isVisible(), "About has no CHECK FOR UPDATES")
+      ensure(await group.getByRole("switch", { name: "Check for updates automatically" }).isChecked(), "the automatic check is not on")
+      // Nothing else in About competes with it: no other primary (unicron's row draws its actions as text; a gap in ADR-0112).
+      ensure(!(await region(page, "About").locator('[data-slot="button"][data-variant="default"]').count()), "About has a primary beside RESTART TO UPDATE")
+      ensure(!(await page.locator("[data-sonner-toast]").count()), "an update that is ready raised a toast")
+    },
+  },
+  {
+    // RESTART TO UPDATE: the demo opens again on the version that was ready, and the mark goes.
+    name: "settings-about-restart",
+    scenario: "desktop-update-ready",
+    sizes: ["desktop"],
+    run: async (app) => {
+      await about(app)
+      await press(app, region(app.page, "This app").getByRole("button", { name: "Restart to update", exact: true }))
+    },
+    assert: async ({ page }) => {
+      const group = region(page, "This app")
+      ensure(/Up to date\./.test(await group.textContent()), "after the restart the line does not say Up to date.")
+      ensure(await group.getByRole("button", { name: "Reload app", exact: true }).isVisible(), "RELOAD APP does not come back")
+      ensure((await sidebar(page).getByRole("button", { name: /^Settings(, |$)/ }).getAttribute("aria-label")) === "Settings", "the update mark stays after the restart")
+    },
+  },
+  {
+    // About › Server (brief T12), for the gateway's owner with the host helper and a newer image out:
+    // UPDATE TO {version} is the one primary; RELOAD SERVER and CHECK FOR UPDATES are secondary.
+    name: "settings-about-server",
+    scenario: "gateway-owner",
+    sizes: ["desktop", "phone", "medium"],
+    sean: { kind: "undrawn", area: "settings", screen: "about-server" },
+    run: async (app) => {
+      await settings(app, "About")
+      await region(app.page, "Server").waitFor()
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      const server = region(page, "Server")
+      ensure(!(await region(page, "This app").count()), "a gateway's owner in a browser sees THIS APP")
+      const version = server.getByRole("group", { name: "Version", exact: true })
+      ensure(/0\.1\.0-main\.20261111090500 is out\./.test(await version.textContent()), "VERSION does not say the newer version is out")
+      const primary = region(page, "About").locator('[data-slot="button"][data-variant="default"]')
+      const words = await primary.evaluateAll((els) => els.map((el) => el.textContent.trim()))
+      ensure(words.length === 1 && words[0] === "Update to 0.1.0-main.20261111090500", `About's primaries are ${JSON.stringify(words)}, not UPDATE TO {version} alone`)
+      for (const name of ["Reload server", "Check for updates"]) ensure((await server.getByRole("button", { name, exact: true }).getAttribute("data-variant")) === "secondary", `${name} is not secondary`)
+      ensure(await server.getByRole("group", { name: "Last checked", exact: true }).isVisible(), "About has no LAST CHECKED")
+      ensure(await server.getByRole("switch", { name: "Check for updates automatically" }).isVisible(), "About has no automatic check")
+      ensure(await server.getByText("At start and every six hours. It only looks.").isVisible(), "the automatic check does not say it only looks")
+      ensure(!(await server.getByRole("group", { name: "Update command", exact: true }).count()), "UPDATE COMMAND shows with the host helper set up")
+    },
+  },
+  {
+    // With no host helper: no UPDATE TO, and UPDATE COMMAND with the command in mono and COPY.
+    name: "settings-about-server-command",
+    scenario: "gateway-no-helper",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      await settings(app, "About")
+      await region(app.page, "Server").waitFor()
+      await app.page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      const server = region(page, "Server")
+      ensure(!(await server.getByRole("button", { name: /^Update to/ }).count()), "UPDATE TO shows without the host helper")
+      ensure(!(await server.getByRole("button", { name: "Reload server", exact: true }).count()), "RELOAD SERVER shows without the host helper")
+      const command = server.getByRole("group", { name: "Update command", exact: true })
+      ensure(/docker compose pull/.test(await command.textContent()), "UPDATE COMMAND does not show the command")
+      ensure(await command.getByRole("button", { name: "Copy", exact: true }).isVisible(), "UPDATE COMMAND has no COPY")
+      ensure(await server.getByRole("link", { name: "Its install steps" }).isVisible(), "About does not say where the host helper's steps are")
+    },
+  },
+  {
+    // UPDATE TO: the line says the gateway goes away, the status says UPDATING SERVER, and when the
+    // gateway is back it asks everyone to sign in: the door (brief X9).
+    name: "settings-about-server-updating",
+    scenario: "gateway-owner",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "About")
+      await press(app, region(page, "Server").getByRole("button", { name: /^Update to/ }))
+      ensure(await page.getByText("The gateway goes away for a moment. Everyone signs in again.").isVisible(), "UPDATE TO does not say the gateway goes away")
+      ensure(await page.getByText(/^updating server$/i).first().isVisible(), "the status does not say UPDATING SERVER")
+      await page.getByRole("main", { name: "Sign in" }).waitFor({ timeout: 20_000 })
+      await app.settle()
+    },
+    assert: async ({ page }) => {
+      ensure(await page.getByLabel("Gateway password", { exact: true }).isVisible(), "the gateway came back without its door")
+    },
+  },
+  {
+    // The update mark (DC12): on the sidebar's item, the rail's item and the phone's top-right button,
+    // from the desktop app's own updater, and no toast.
+    name: "settings-update-mark",
+    scenario: "desktop-update-ready",
+    sizes: ["desktop", "phone", "medium"],
+    assert: async ({ page }) => {
+      const name = await settingsButton(page).getAttribute("aria-label")
+      ensure(/^Settings, Update ready$/.test(name ?? ""), `the way into Settings is named ${JSON.stringify(name)}, not "Settings, Update ready"`)
+      ensure(!(await page.locator("[data-sonner-toast]").count()), "an update that is ready raised a toast")
     },
   },
 ]

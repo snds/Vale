@@ -1,5 +1,9 @@
+import type { GatewayUpdates, Invitation } from "@/core/client"
+import type { GatewayMember } from "@/core/types"
 import { useSyncStatus } from "@/features/notes/sync"
 import { NOT_NOW_KEY } from "@/features/onboarding/first-run"
+import { standInForGateway, type GatewayClient } from "@/features/updates/gateway-client"
+import { standInForUpdater, type UpdateClient, type UpdateStatus } from "@/features/updates/update-client"
 
 import type { DemoScenarios } from "../demo-scenarios"
 
@@ -179,10 +183,237 @@ export const settings: DemoScenarios = {
   "ai-local": ({ client }) => {
     void client.aiSettings().then((s) => client.setAiPrefs({ ...s.prefs, provider: "local", local: { url: "http://localhost:11434/v1", model: "llama3.2" } }))
   },
-  /** The gateway's owner (ADR-0063): Team members and the gateway's sign-out show; Notifications don't. */
+  /**
+   * The gateway's owner (ADR-0063): Team members and the gateway's sign-out
+   * show; Notifications don't. The demo plays the gateway's team (three
+   * people, one not joined yet) and its update check, with the host helper
+   * set up and a newer image out (briefs T10, T12).
+   */
   "gateway-owner": ({ flags }) => {
     flags.gatewayOwner = true
+    standInForGateway(demoGateway({ helper: true }))
   },
+  /** The same owner's gateway without the host helper: About › Server shows the command to run by hand (brief T12). */
+  "gateway-no-helper": ({ flags }) => {
+    flags.gatewayOwner = true
+    standInForGateway(demoGateway({ helper: false }))
+  },
+  /**
+   * The gateway asks for its password before anything else (brief X9). The
+   * demo's gateway takes "demo-gateway-password" from its owner, and
+   * "demo-member-password" from a team member with their email; any other
+   * password is wrong, in the gateway's own words. Signed in, it stays so
+   * for this tab.
+   */
+  "gateway-signin": () => {
+    standInForGateway(demoGateway({ helper: true, signedIn: false }))
+  },
+  /** An invitation opened at /join#<code> (brief X9): a password of 12 characters or more joins. */
+  "gateway-join": () => {
+    standInForGateway(demoGateway({ helper: true, signedIn: false }))
+  },
+  /** The invitation was used already, or its days ran out (brief X9): the gateway turns it down, in its words. */
+  "invitation-ended": () => {
+    standInForGateway({
+      ...demoGateway({ helper: true, signedIn: false }),
+      join: async () => {
+        await pause()
+        throw new Error("this invitation doesn't work any more. Ask for a new one.")
+      },
+    })
+  },
+  /**
+   * The demo plays the desktop app with a newer version downloaded and
+   * waiting for a restart (brief T12): About › This app shows RESTART TO
+   * UPDATE, and the mark shows on the way into Settings, with no toast.
+   */
+  "desktop-update-ready": ({ flags }) => {
+    flags.desktopApp = true
+    standInForUpdater(demoUpdater())
+  },
+}
+
+/** A moment, as a gateway takes to answer over the network. */
+const pause = (ms = 300) => new Promise((done) => setTimeout(done, ms))
+
+/** Where the demo keeps whether this tab is signed in to its gateway: "in", "out", or nothing yet. */
+const SIGNED_IN_KEY = "vale.demo.gateway.session"
+const session = (state: "in" | "out") => {
+  try {
+    sessionStorage.setItem(SIGNED_IN_KEY, state)
+  } catch {
+    // No storage: the door goes back to how the scenario starts after a reload.
+  }
+}
+const signedIn = (start: boolean) => {
+  try {
+    const kept = sessionStorage.getItem(SIGNED_IN_KEY)
+    return kept ? kept === "in" : start
+  } catch {
+    return start
+  }
+}
+
+/** The running build and the newer one on offer, in the gateway's own version format. */
+const RUNNING = "0.1.0-main.20261104171200"
+const OFFERED = "0.1.0-main.20261111090500"
+const IMAGE = "ghcr.io/snds/vale-gateway"
+
+/**
+ * A gateway for the demo to play (briefs X9, T10, T12): its door, its team
+ * and its update check, answering as `apps/gateway` does, with its words.
+ */
+function demoGateway({ helper, signedIn: start = true }: { helper: boolean; signedIn?: boolean }): Partial<GatewayClient> {
+  const now = () => Math.floor(Date.now() / 1000)
+  const day = 86_400
+  const members: GatewayMember[] = [
+    { id: "owner", name: "Me", role: "owner" },
+    { id: "member-sam", name: "Sam Okafor", role: "member", email: "sam@studio.example", created: now() - 40 * day },
+    { id: "member-noor", name: "Noor Haddad", role: "member", email: "noor@studio.example", created: now() - 12 * day },
+    { id: "member-priya", name: "Priya Raman", role: "member", email: "priya@studio.example", pending: true, created: now() - 2 * day },
+  ]
+  let codes = 0
+  const invite = (member: GatewayMember): Invitation => ({ member, code: `demo-invitation-${++codes}-k3v9x2`, days: 7 })
+  let updates: GatewayUpdates = {
+    version: RUNNING,
+    channel: "main",
+    enabled: true,
+    off: null,
+    autoCheck: true,
+    state: "available",
+    offered: OFFERED,
+    error: null,
+    checkedAt: now() - 3 * 3600,
+    line: `Version ${OFFERED} is out.`,
+    image: IMAGE,
+    page: "https://github.com/snds/vale/releases",
+    command: helper ? undefined : `docker compose pull && docker compose up -d`,
+    helper: { ready: helper, problem: null, install: "https://github.com/snds/vale/blob/main/apps/gateway/README.md#host-helper" },
+    canUpdate: helper,
+    canReload: helper,
+    action: null,
+  }
+  // After an Update or Reload: the gateway is away for two looks, then back asking everyone to sign in.
+  let away = 0
+  const restart = async (kind: "update" | "reload", tag: string | null) => {
+    await pause()
+    updates = { ...updates, action: { kind, tag, state: "working", line: "Asking the host helper…", at: now() } }
+    away = 2
+    return updates
+  }
+  return {
+    session: async () => ({ gateway: true, signedIn: signedIn(start) }),
+    signIn: async (password, email) => {
+      await pause()
+      if (email?.trim()) {
+        if (password !== "demo-member-password") throw new Error("that email and password don't match")
+      } else if (password !== "demo-gateway-password") throw new Error("that's not the gateway password")
+      session("in")
+    },
+    join: async (_code, password) => {
+      await pause()
+      if (password.length < 12) throw new Error("choose a password of at least 12 characters")
+      session("in")
+    },
+    members: async () => {
+      await pause(100)
+      return members.map((m) => ({ ...m }))
+    },
+    addMember: async (name, email) => {
+      await pause()
+      if (members.some((m) => m.email === email.trim().toLowerCase())) throw new Error(`${email} is already on the team`)
+      const member: GatewayMember = { id: `member-${members.length + 1}`, name, role: "member", email: email.trim().toLowerCase(), pending: true, created: now() }
+      members.push(member)
+      return invite(member)
+    },
+    newLink: async (id) => {
+      await pause()
+      const member = members.find((m) => m.id === id)
+      if (!member) throw new Error("no one on the team has that id")
+      return invite(member)
+    },
+    removeMember: async (id) => {
+      await pause()
+      members.splice(
+        members.findIndex((m) => m.id === id),
+        1,
+      )
+    },
+    updates: async () => {
+      await pause(100)
+      return updates
+    },
+    check: async () => {
+      await pause()
+      updates = { ...updates, checkedAt: now() }
+      return updates
+    },
+    setAutoCheck: async (on) => {
+      await pause()
+      updates = { ...updates, autoCheck: on }
+      return updates
+    },
+    update: (tag) => restart("update", tag),
+    reload: () => restart("reload", null),
+    peek: async () => {
+      await pause()
+      if (away > 0) {
+        away--
+        if (away === 0) {
+          // Back, on the new build when it was an Update, and every session is gone.
+          const updated = updates.action?.kind === "update"
+          updates = { ...updates, version: updated ? OFFERED : RUNNING, state: updated ? "up_to_date" : updates.state, offered: updated ? null : updates.offered, line: updated ? "Up to date." : updates.line, canUpdate: updated ? false : updates.canUpdate, action: null }
+          session("out")
+          return { kind: "signed-out" }
+        }
+        return { kind: "away" }
+      }
+      return { kind: "ok", status: updates }
+    },
+  }
+}
+
+/** The desktop's updater, as the demo plays it: a newer version downloaded and ready. */
+function demoUpdater(): UpdateClient {
+  let status: UpdateStatus = {
+    version: RUNNING,
+    channel: "main",
+    enabled: true,
+    off: null,
+    auto_check: true,
+    state: "ready",
+    percent: null,
+    offered: OFFERED,
+    error: null,
+    link: null,
+    link_why: null,
+    asked: false,
+  }
+  const listeners = new Set<(s: UpdateStatus) => void>()
+  const set = (next: Partial<UpdateStatus>) => {
+    status = { ...status, ...next }
+    for (const l of listeners) l(status)
+    return status
+  }
+  return {
+    status: async () => status,
+    check: async () => {
+      set({ state: "checking", asked: true })
+      await pause(600)
+      return set({ state: status.offered ? "ready" : "up_to_date" })
+    },
+    // The demo can't install anything: it opens again on the version that was ready.
+    restart: async () => {
+      set({ version: status.offered ?? status.version, offered: null, state: "up_to_date" })
+    },
+    setAuto: async (on) => set({ auto_check: on }),
+    reload: async () => location.reload(),
+    openPage: async () => undefined,
+    onStatus: (handler) => {
+      listeners.add(handler)
+      return () => listeners.delete(handler)
+    },
+  }
 }
 
 /** Pins the demo's sync to "up to date" each time it starts connecting: no relay answers in the demo. */
