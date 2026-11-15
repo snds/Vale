@@ -1,26 +1,24 @@
-
-import { Switch, toast } from "@unicron/ui"
+import { ToggleRow } from "@unicron/ui"
 import { useMeetingPrefs, usePimAction } from "@/core/queries"
+import { useSettingSave } from "@/features/settings/save"
+import { SaveFailed } from "@/features/settings/save-failed"
+import { SettingBlock } from "@/features/settings/setting-block"
 
-/** How Join opens calls (ADR-0030). Lives in Accounts and settings. */
+/** Settings › Calendar › CALLS (brief T4; ADR-0030): how Join opens a call. Saves at once and silently. */
 export function MeetingSettingsSection() {
   const { data: prefs } = useMeetingPrefs()
   const set = usePimAction((c, openInApps: boolean) => c.setMeetingPrefs({ openInApps }))
+  const save = useSettingSave()
   if (!prefs) return null
   return (
-    <section className="flex items-start gap-3" aria-labelledby="meetings-heading">
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <h3 id="meetings-heading" className="text-sm font-medium">
-          Open video calls in their apps
-        </h3>
-        <p className="text-xs text-muted-foreground">Join opens Zoom and Teams calls in their apps, if you have them. Off: every call opens in your browser. Google Meet, Jitsi, and the rest always do.</p>
-      </div>
-      <Switch
+    <SettingBlock title="Calls">
+      <ToggleRow
+        label="Calls open in their apps"
+        description="Zoom and Teams. Off: every call opens in the browser."
         checked={prefs.openInApps}
-        aria-labelledby="meetings-heading"
-        disabled={set.isPending}
-        onCheckedChange={(on) => set.mutate(on, { onSuccess: () => toast.success(on ? "Calls open in their apps" : "Calls open in your browser", { duration: 2000 }) })}
+        onCheckedChange={(on) => save.run("calls", set.mutateAsync(on))}
       />
-    </section>
+      <SaveFailed message={save.failed("calls")} />
+    </SettingBlock>
   )
 }

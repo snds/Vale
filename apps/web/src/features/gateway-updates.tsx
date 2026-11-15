@@ -1,65 +1,89 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
-import { Button, Icon, InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, Switch, toast } from "@unicron/ui"
+import { AutoCheckSwitch, Button, EmptyState, FieldRow, FieldRowAction, FieldRowValue, Skeleton } from "@unicron/ui"
 import { setServerUpdating } from "@/app/live-status"
-import { type GatewayUpdates, checkGatewayUpdates, gatewayUpdates, peekGatewayUpdates, reloadGateway, setGatewayAutoCheck, updateGateway } from "@/core/client"
+import { type GatewayUpdates, SIGNED_OUT } from "@/core/client"
+import { useCopy } from "@/lib/copy"
+import { SaveFailed } from "@/features/settings/save-failed"
+import { SettingBlock } from "@/features/settings/setting-block"
+import { useRowSize } from "@/features/settings/row-size"
+import { gateway } from "@/features/updates/gateway-client"
+import { SERVER_AUTO_WORDS, channelName } from "@/features/updates/update-model"
 
 const KEY = ["gateway-updates"]
 
-/** How often Settings looks while the gateway restarts, and for how long. */
+/** How often About looks while the gateway restarts, and for how long. */
 const FOLLOW_EVERY_MS = 2_000
 const FOLLOW_TRIES = 450
 
-/** An Update or Reload Settings is waiting on: the version it started from. */
+const said = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+/** An Update or Reload About is waiting on: the version it started from, and where it stands. */
 interface Following {
   from: string
   line: string
-  /** Stopped: the last line stays, with a way on when the gateway asked for a sign-in. */
+  /** Stopped: the last line stays as the row's description. */
   ended: boolean
-  signIn: boolean
+}
+
+/** "Thu 09:16", as the frames write a time; the date once it is a week old. */
+function checkedLine(secs: number, now = new Date()) {
+  const at = new Date(secs * 1000)
+  if (now.getTime() - at.getTime() > 6 * 86_400_000) return at.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+  const day = at.toLocaleDateString(undefined, { weekday: "short" })
+  return `${day} ${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`
 }
 
 /**
- * Settings → Gateway updates (ADR-0077), for the gateway's owner: its
- * version and channel, one status line, Check for updates, and the switch
- * for the automatic check. With the host helper set up (ADR-0078), Update
- * (when a newer image is out) and Reload ask it to restart the gateway,
- * and the section waits for the gateway to come back. Without it, the
- * command that takes a newer image, and where to install the helper.
+ * Settings › About › SERVER (brief T12; ADR-0077, ADR-0078, ADR-0112), for
+ * the gateway's owner: VERSION with "{version} is out." when a newer image
+ * exists; UPDATE TO {version} (the one primary, only with the host helper),
+ * RELOAD SERVER and CHECK FOR UPDATES; LAST CHECKED; the automatic check,
+ * which only looks. With no host helper, the UPDATE COMMAND to run by hand.
+ * While the helper restarts the gateway, the shell's live status says
+ * UPDATING SERVER on every screen (ADR-0086), and when the gateway is back
+ * and asks for a sign-in, the door shows (brief X9). No toasts: the row says
+ * what happened (DC12).
  */
 export function GatewayUpdatesSection() {
   const qc = useQueryClient()
-  const { data: status, error: loadError } = useQuery({ queryKey: KEY, queryFn: gatewayUpdates, staleTime: 60_000 })
-  const [busy, setBusy] = useState(false)
+  const { data: status, error: loadError, refetch, isRefetching } = useQuery({ queryKey: KEY, queryFn: () => gateway().updates(), staleTime: 60_000 })
+  const [busy, setBusy] = useState<"check" | "update" | "reload" | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [autoFailed, setAutoFailed] = useState<string | null>(null)
+  const [savingAuto, setSavingAuto] = useState(false)
   const [following, setFollowing] = useState<Following | null>(null)
+  const size = useRowSize()
   const followFrom = following && !following.ended ? following.from : null
+
   // While the gateway restarts, the shell's live status says so on every screen (ADR-0086).
   useEffect(() => {
     setServerUpdating(followFrom !== null)
     return () => setServerUpdating(false)
   }, [followFrom])
 
-  // While an Update or Reload runs, look every two seconds. The gateway goes
-  // away (a failed request), then comes back asking for a sign-in (sign-ins
-  // live in its memory), or on a new version, or with the helper's refusal.
+  // While an Update or Reload runs, look every two seconds. The gateway goes away (a failed
+  // request), then comes back asking for a sign-in (sign-ins live in its memory), or on a new
+  // version, or with the helper's refusal.
   useEffect(() => {
     if (!followFrom) return
     let tries = 0
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | undefined
-    const say = (line: string, end?: { signIn?: boolean }) => setFollowing({ from: followFrom, line, ended: !!end, signIn: !!end?.signIn })
+    const say = (line: string, ended = false) => setFollowing({ from: followFrom, line, ended })
     const tick = async () => {
       if (stopped) return
       if (++tries > FOLLOW_TRIES) {
-        say("This is taking longer than it should. Look at the host helper's log on the host (docker compose logs, in its folder).", {})
+        say("This is taking longer than it should. Look at the host helper's log on the host (docker compose logs, in its folder).", true)
         return
       }
-      const peek = await peekGatewayUpdates()
+      const peek = await gateway().peek()
       if (stopped) return
       if (peek.kind === "signed-out") {
-        say("The gateway restarted. Sign in again to see the version it runs now.", { signIn: true })
+        // Back, and every session is gone: the gateway's door (brief X9).
+        say("The gateway restarted.", true)
+        window.dispatchEvent(new Event(SIGNED_OUT))
         return
       }
       if (peek.kind === "away") {
@@ -68,12 +92,11 @@ export function GatewayUpdatesSection() {
         const now = peek.status
         qc.setQueryData(KEY, now)
         if (now.version !== followFrom) {
-          say(`Vale gateway ${now.version} is running.`, {})
-          toast.success(`Vale gateway ${now.version} is running`, { duration: 3000 })
+          say(`${now.version} is running.`, true)
           return
         }
         if (now.action && now.action.state !== "working") {
-          say(now.action.line, {})
+          say(now.action.line, true)
           return
         }
         if (now.action) say(now.action.line)
@@ -86,175 +109,164 @@ export function GatewayUpdatesSection() {
       clearTimeout(timer)
     }
   }, [followFrom, qc])
-  if (loadError) {
+
+  if (loadError && !status) {
     return (
-      <p role="alert" className="text-sm text-destructive">
-        {loadError.message}
-      </p>
+      <EmptyState
+        tone="critical"
+        size="sm"
+        overline="Server"
+        title="Can't load the server's updates."
+        body={said(loadError)}
+        action={
+          <Button variant="secondary" loading={isRefetching} onClick={() => void refetch()}>
+            Try again
+          </Button>
+        }
+      />
     )
   }
-  if (!status) return null
+  if (!status) {
+    return (
+      <div className="flex flex-col gap-5" aria-busy="true" aria-label="Loading the server's updates">
+        <Skeleton variant="row" />
+        <Skeleton variant="row" />
+        <Skeleton variant="row" />
+      </div>
+    )
+  }
 
-  const run = async (work: () => Promise<GatewayUpdates>) => {
+  const run = async (kind: "check" | "update" | "reload", work: () => Promise<GatewayUpdates>) => {
     setError(null)
-    setBusy(true)
+    setBusy(kind)
     try {
       qc.setQueryData(KEY, await work())
       return true
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(said(e))
       return false
     } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
 
   /** Asks the host helper, then waits for the gateway to come back. */
-  const restart = async (work: () => Promise<GatewayUpdates>) => {
+  const restart = async (kind: "update" | "reload", work: () => Promise<GatewayUpdates>) => {
     const from = status.version
     setFollowing(null)
-    if (await run(work)) {
+    if (await run(kind, work)) {
       const now = qc.getQueryData<GatewayUpdates>(KEY)
-      setFollowing({ from, line: now?.action?.line ?? "Asking the host helper…", ended: false, signIn: false })
+      setFollowing({ from, line: now?.action?.line ?? "Asking the host helper…", ended: false })
     }
   }
+
   const waiting = !!following && !following.ended
+  const newer = status.state === "available" && status.offered ? status.offered : null
   const lastAction = !following && status.action && status.action.state !== "working" ? status.action : null
+  // The row's one line: what is happening now, else what the last restart did, else the check's state.
+  const line = following ? (
+    following.line
+  ) : lastAction?.state === "failed" ? (
+    <span className="text-critical-text">{lastAction.line}</span>
+  ) : status.state === "failed" ? (
+    <span className="text-critical-text">{status.error ?? status.line}</span>
+  ) : status.state === "checking" ? (
+    "Checking…"
+  ) : newer ? (
+    `${newer} is out.`
+  ) : (
+    (lastAction?.line ?? status.line)
+  )
+  const canUpdate = status.canUpdate && !!status.offered
 
   return (
-    <section className="flex flex-col gap-3" aria-label="Gateway updates">
-      <p className="text-sm">
-        Vale gateway {status.version} · {status.channel === "main" ? "main channel (every merged change)" : "stable channel"}
-      </p>
-      {status.enabled && (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="outline" loading={busy} disabled={status.state === "checking"} onClick={() => void run(checkGatewayUpdates)}>
-            <Icon name="renew" data-icon="inline-start" />
-            Check for updates
-          </Button>
-        </div>
-      )}
-      <p role="status" className={status.state === "failed" ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
-        {status.line}
-      </p>
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
-      {following && (
-        <div className="flex flex-col gap-2 rounded-xl border bg-muted/40 p-3" data-role="gateway-restart">
-          <p role="status" className="text-sm">
-            {following.line}
-          </p>
-          {waiting && <p className="text-xs text-muted-foreground">The gateway goes away while the host helper works and comes back on its own. Everyone signed in signs in again afterwards.</p>}
-          {following.signIn && (
-            <div>
-              <Button size="sm" onClick={() => location.reload()}>
-                <Icon name="login" data-icon="inline-start" />
-                Sign in again
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-      {lastAction && (
-        <p role={lastAction.state === "failed" ? "alert" : "status"} className={lastAction.state === "failed" ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
-          {lastAction.line}
-        </p>
-      )}
-      {(status.canUpdate || status.canReload) && (
-        <div className="flex flex-col gap-2" data-role="gateway-helper-actions">
+    <SettingBlock title="Server">
+      <FieldRow size={size} label="Version" description={<span role="status">{line}</span>}>
+        {`${status.version} · ${channelName(status.channel)}`}
+      </FieldRow>
+      {(status.enabled || status.canReload) && (
+        <div className="flex flex-col gap-2 pt-3 pb-4">
           <div className="flex flex-wrap items-center gap-2">
-            {status.canUpdate && status.offered && (
-              <Button size="sm" disabled={busy || waiting} onClick={() => void restart(() => updateGateway(status.offered as string))}>
-                <Icon name="download" data-icon="inline-start" />
+            {canUpdate && (
+              <Button disabled={busy !== null || waiting} loading={busy === "update"} onClick={() => void restart("update", () => gateway().update(status.offered as string))}>
                 Update to {status.offered}
               </Button>
             )}
             {status.canReload && (
-              <Button size="sm" variant="outline" disabled={busy || waiting} onClick={() => void restart(reloadGateway)}>
-                <Icon name="restart" data-icon="inline-start" />
-                Reload
+              <Button variant="secondary" disabled={busy !== null || waiting} loading={busy === "reload"} onClick={() => void restart("reload", () => gateway().reload())}>
+                Reload server
+              </Button>
+            )}
+            {status.enabled && (
+              <Button variant="secondary" disabled={busy !== null || waiting || status.state === "checking"} loading={busy === "check"} onClick={() => void run("check", () => gateway().check())}>
+                Check for updates
               </Button>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">
-            {status.canUpdate && (
-              <>
-                Update asks the host helper to pull <code>{status.image}:{status.offered}</code>, checked against the build the release names, and start the gateway on it, on the same data and settings. Back up the data volume first.{" "}
-              </>
-            )}
-            Reload restarts the gateway on the build it runs. Either way the gateway is gone for a moment and everyone signs in again.
-          </p>
+          <SaveFailed message={error} />
+          {waiting ? (
+            <p className="type-caption text-text-secondary">The gateway goes away for a moment. Everyone signs in again.</p>
+          ) : (
+            canUpdate && (
+              <p className="type-caption text-text-secondary">
+                It takes {status.image}:{status.offered}, checked against the build its release names, on the same data and settings. Back up the data volume first.
+              </p>
+            )
+          )}
         </div>
       )}
-      {!status.helper.ready && status.state === "available" && status.command && <UpdateCommand status={status} command={status.command} />}
+      {status.checkedAt && (
+        <FieldRow size={size} label="Last checked">
+          {checkedLine(status.checkedAt)}
+        </FieldRow>
+      )}
+      {!status.helper.ready && newer && status.command && <UpdateCommand status={status} command={status.command} size={size} />}
+      <AutoCheckSwitch
+        status={{ enabled: status.enabled, auto_check: status.autoCheck, channel: status.channel }}
+        words={SERVER_AUTO_WORDS}
+        disabled={savingAuto}
+        onCheckedChange={(on) => {
+          setSavingAuto(true)
+          setAutoFailed(null)
+          gateway()
+            .setAutoCheck(on)
+            .then((s) => qc.setQueryData(KEY, s))
+            .catch((e: unknown) => setAutoFailed(said(e)))
+            .finally(() => setSavingAuto(false))
+        }}
+      />
+      <SaveFailed message={autoFailed} />
       {!status.helper.ready && (
-        <p className="text-xs text-muted-foreground">
-          {status.helper.problem && <span className="text-destructive">The host helper's settings aren't usable: {status.helper.problem} </span>}
-          One-click Update and Reload need the host helper beside the gateway:{" "}
-          <a className="underline underline-offset-2" href={status.helper.install} target="_blank" rel="noopener noreferrer">
-            its install steps
-          </a>
-          .
+        <p className="type-caption pt-4 text-text-secondary">
+          {status.helper.problem && <span className="text-critical-text">The host helper's settings aren't usable: {status.helper.problem} </span>}
+          Update and Reload from here need the host helper beside the gateway.{" "}
+          <Button variant="link" size="inline" render={<a href={status.helper.install} target="_blank" rel="noopener noreferrer" />}>
+            Its install steps
+          </Button>
         </p>
       )}
-      {status.checkedAt && <p className="text-xs text-muted-foreground">Last checked {new Date(status.checkedAt * 1000).toLocaleString()}.</p>}
-      {status.enabled && (
-        <div className="flex items-start gap-3">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <h3 id="gateway-update-auto-heading" className="text-sm font-medium">
-              Check for updates automatically
-            </h3>
-            <p className="text-xs text-muted-foreground">When the gateway starts and every six hours. It only looks: nothing is downloaded or restarted until you press Update.</p>
-          </div>
-          <Switch
-            checked={status.autoCheck}
-            aria-labelledby="gateway-update-auto-heading"
-            onCheckedChange={(on) =>
-              void run(() => setGatewayAutoCheck(on)).then((ok) => ok && toast.success(on ? "The gateway checks for updates on its own" : "The gateway checks only when you ask", { duration: 2000 }))
-            }
-          />
-        </div>
-      )}
-    </section>
+    </SettingBlock>
   )
 }
 
-/** The command that updates a compose setup, to copy and run on the gateway's server. */
-function UpdateCommand({ status, command }: { status: GatewayUpdates; command: string }) {
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(command)
-      toast.success("Command copied", { duration: 2000 })
-    } catch {
-      toast.error("Couldn't reach the clipboard")
-    }
-  }
+/** With no host helper (brief T12): the command that takes the newer image, to run beside the gateway's compose.yaml. */
+function UpdateCommand({ status, command, size }: { status: GatewayUpdates; command: string; size: "stacked" | "default" }) {
+  const { copied, copy } = useCopy({ what: "command", label: "Update command" })
   return (
-    <div className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3" data-role="gateway-update">
-      <p className="text-sm">
-        To update, run this on the gateway's server, in the folder with its <code>compose.yaml</code>:
-      </p>
-      <InputGroup>
-        <InputGroupInput aria-label="Update command" readOnly value={command} onFocus={(e) => e.target.select()} />
-        <InputGroupAddon align="inline-end">
-          <InputGroupButton size="icon-xs" aria-label="Copy command" onClick={() => void copy()}>
-            <Icon name="copy" />
-          </InputGroupButton>
-        </InputGroupAddon>
-      </InputGroup>
-      <p className="text-xs text-muted-foreground">
-        It pulls <code>{status.image}:main</code> (the same build as <code>{status.image}:{status.offered}</code>) and starts the new container on the same data and settings. Back up the
-        data volume first.
-      </p>
-      <div>
-        <Button size="sm" variant="ghost" render={<a href={status.page} target="_blank" rel="noopener noreferrer" />}>
-          <Icon name="launch" data-icon="inline-start" />
-          See the build on GitHub
-        </Button>
-      </div>
-    </div>
+    <FieldRow
+      size={size}
+      label="Update command"
+      description={`Run it on the gateway's server, beside its compose.yaml. It pulls ${status.image}:main, the same build as ${status.offered}, on the same data and settings. Back up the data volume first.`}
+      action={
+        <>
+          <FieldRowAction onClick={() => void copy(command)}>{copied ? "Copied" : "Copy"}</FieldRowAction>
+          <FieldRowAction href={status.page} target="_blank" rel="noopener noreferrer">
+            Release notes
+          </FieldRowAction>
+        </>
+      }
+    >
+      <FieldRowValue truncate="wrap">{command}</FieldRowValue>
+    </FieldRow>
   )
 }

@@ -13,8 +13,5 @@ export const NOTE_COLOR_LABEL: Record<NoteColor, string> = {
   gray: "Gray",
 }
 
-/** The card fill for a color, from the tokens (ADR-0038); plain cards use the card surface. */
-export const noteFill = (c: NoteColor | null | undefined) => `var(--c-note-card-${c ?? "plain"})`
-
-/** The card's edge: its own fill, a little toward the text color, so it holds on any background. */
-export const noteEdge = (c: NoteColor | null | undefined) => (c ? `color-mix(in oklab, ${noteFill(c)} 82%, var(--foreground))` : undefined)
+/** The note's color button's name: what it does, and the color the note has. */
+export const colorLabel = (value: NoteColor | null) => (value ? `Color: ${NOTE_COLOR_LABEL[value]}` : "Color")

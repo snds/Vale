@@ -1,6 +1,7 @@
 import { useState } from "react"
 
-import { Icon, Button, Field, FieldLabel, Input, toast } from "@unicron/ui"
+import { Button, DropdownMenuItem, FieldRow, FieldRowAction, ListRow, TextField, toast } from "@unicron/ui"
+import { FormLayer, FormLayerForm } from "@/components/editor-frame"
 import { FormatBar } from "@/components/format-bar"
 import { RichEditor } from "@/components/rich-editor"
 import { useRichEditor } from "@/components/use-rich-editor"
@@ -8,150 +9,162 @@ import { getCoreClient } from "@/core/client"
 import { useAccounts, useSignatures, useTemplates } from "@/core/queries"
 import type { Account, Template } from "@/core/types"
 import { htmlToText } from "@/features/mail/rich-text"
+import { useRowSize } from "@/features/settings/row-size"
+import { SettingBlock } from "@/features/settings/setting-block"
+import { useLeaveGuard } from "@/lib/leave-guard"
+
+const said = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+/** What a row shows of a signature: its first line, or that there is none. */
+const firstLine = (html: string) => htmlToText(html).split("\n").find((l) => l.trim())?.trim() ?? ""
 
 /**
- * Signatures (one per account, added to new messages and replies) and
- * templates (inserted from the composer). Both live in the core (ADR-0017).
+ * Settings › Signatures and templates (brief T3; ADR-0017, ADR-0110).
+ * SIGNATURES: a row per account with its first line and EDIT, which opens
+ * the form layer with the shared rich-text field and format bar (ADR-0089).
+ * TEMPLATES: a row per template; a press opens its form, the row's menu
+ * deletes it, with UNDO.
  */
 export function WritingSettings() {
   const { data: accounts = [] } = useAccounts()
-  const { data: signatures } = useSignatures()
+  const { data: signatures = [] } = useSignatures()
   const { data: templates = [] } = useTemplates()
+  const size = useRowSize()
+  const [signing, setSigning] = useState<Account | null>(null)
   const [editing, setEditing] = useState<Template | "new" | null>(null)
-  return (
-    <div className="flex flex-col gap-6">
-      <section className="flex flex-col gap-3" aria-labelledby="signatures-heading">
-        <h3 id="signatures-heading" className="text-sm font-medium">
-          Signatures
-        </h3>
-        {accounts.length === 0 && <p className="text-sm text-muted-foreground">Add an account first.</p>}
-        {signatures &&
-          accounts.map((a) => <SignatureEditor key={a.id} account={a} html={signatures.find((s) => s.accountId === a.id)?.html ?? ""} />)}
-      </section>
 
-      <section className="flex flex-col gap-3" aria-labelledby="templates-heading">
-        <div className="flex items-center justify-between">
-          <h3 id="templates-heading" className="text-sm font-medium">
-            Templates
-          </h3>
-          {editing === null && (
-            <Button variant="outline" size="sm" onClick={() => setEditing("new")}>
-              <Icon name="add" data-icon="inline-start" /> New template
-            </Button>
-          )}
-        </div>
-        {editing !== null && <TemplateEditor key={editing === "new" ? "new" : editing.id} template={editing === "new" ? null : editing} onDone={() => setEditing(null)} />}
-        {templates.length === 0 && editing === null ? (
-          <p className="text-sm text-muted-foreground">No templates yet. Write one here, or use “Save as template” in the composer.</p>
-        ) : (
-          <ul className="flex flex-col divide-y rounded-xl border" aria-label="Templates">
+  if (!accounts.length) return <p className="type-caption text-text-secondary">Add an account first.</p>
+  const html = (a: Account) => signatures.find((s) => s.accountId === a.id)?.html ?? ""
+
+  const remove = async (t: Template) => {
+    const client = await getCoreClient()
+    try {
+      await client.deleteTemplate(t.id)
+    } catch (e) {
+      toast.error(said(e))
+      return
+    }
+    toast(`Deleted ${t.name}`, { action: { label: "Undo", onClick: () => void client.saveTemplate({ id: null, name: t.name, subject: t.subject, html: t.html }).catch((e) => toast.error(said(e))) } })
+  }
+
+  return (
+    <div className="flex flex-col gap-8">
+      <SettingBlock title="Signatures">
+        {accounts.map((a) => (
+          <FieldRow key={a.id} size={size} label={a.displayName} action={<FieldRowAction onClick={() => setSigning(a)}>Edit</FieldRowAction>}>
+            {firstLine(html(a)) || "No signature"}
+          </FieldRow>
+        ))}
+      </SettingBlock>
+
+      <SettingBlock
+        title="Templates"
+        count={templates.length}
+        action={
+          <Button variant="ghost" size="sm" onClick={() => setEditing("new")}>
+            New template
+          </Button>
+        }
+      >
+        {templates.length ? (
+          <ul aria-label="Templates" className="flex flex-col">
             {templates.map((t) => (
-              <li key={t.id} className="flex items-center gap-3 px-3 py-2.5">
-                <Icon name="document" tone="muted" />
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium">{t.name}</span>
-                  <span className="truncate text-xs text-muted-foreground">{t.subject || htmlToText(t.html).slice(0, 80)}</span>
-                </span>
-                <Button variant="ghost" size="icon-sm" aria-label={`Edit ${t.name}`} onClick={() => setEditing(t)}>
-                  <Icon name="edit" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Delete ${t.name}`}
-                  onClick={async () => {
-                    const client = await getCoreClient()
-                    await client.deleteTemplate(t.id)
-                    toast(`Deleted “${t.name}”`, {
-                      action: { label: "Undo", onClick: () => void client.saveTemplate({ name: t.name, subject: t.subject, html: t.html }) },
-                    })
-                  }}
-                >
-                  <Icon name="trash-can" />
-                </Button>
+              <li key={t.id}>
+                <ListRow
+                  size="compact"
+                  title={t.name}
+                  meta={t.subject || undefined}
+                  metaStyle="plain"
+                  onClick={() => setEditing(t)}
+                  menu={
+                    <DropdownMenuItem variant="destructive" onClick={() => void remove(t)}>
+                      Delete
+                    </DropdownMenuItem>
+                  }
+                />
               </li>
             ))}
           </ul>
+        ) : (
+          <p className="type-caption pt-4 text-text-secondary">No templates yet. Save one from a message.</p>
         )}
-      </section>
+      </SettingBlock>
+
+      <FormLayer open={signing !== null} onClose={() => setSigning(null)}>
+        {signing && <SignatureForm key={signing.id} account={signing} html={html(signing)} onDone={() => setSigning(null)} />}
+      </FormLayer>
+      <FormLayer open={editing !== null} onClose={() => setEditing(null)}>
+        {editing !== null && <TemplateForm key={editing === "new" ? "new" : editing.id} template={editing === "new" ? null : editing} onDone={() => setEditing(null)} />}
+      </FormLayer>
     </div>
   )
 }
 
-function SignatureEditor({ account, html }: { account: Account; html: string }) {
-  const editor = useRichEditor({ html, placeholder: "No signature", focusFirst: false, label: `Signature for ${account.address}`, compact: true })
+/** A signature, in the form layer: the rich-text field and its format bar; SAVE. Saved empty, the account has none. */
+function SignatureForm({ account, html, onDone }: { account: Account; html: string; onDone: () => void }) {
+  const editor = useRichEditor({ html, placeholder: "No signature", focusFirst: true, label: `Signature for ${account.address}`, compact: true })
   const [saving, setSaving] = useState(false)
-  return (
-    <div className="flex flex-col gap-2">
-      {/* The shared rich-text field (ADR-0089), named for the account it signs. */}
-      <RichEditor editor={editor} label={`${account.displayName} // ${account.address}`} bar={<FormatBar editor={editor} />} />
-      <div className="flex justify-end">
-        <Button
-          size="sm"
-          variant="secondary"
-          loading={saving}
-          aria-label={`Save the signature for ${account.address}`}
-          onClick={async () => {
-            setSaving(true)
-            try {
-              await (await getCoreClient()).setSignature(account.id, editor.isEmpty ? "" : editor.getHTML())
-              toast.success(editor.isEmpty ? `Removed the signature for ${account.address}` : `Saved the signature for ${account.address}`)
-            } catch (e) {
-              toast.error(e instanceof Error ? e.message : String(e))
-            } finally {
-              setSaving(false)
-            }
-          }}
-        >
-          Save
-        </Button>
-      </div>
-    </div>
-  )
-}
-
-function TemplateEditor({ template, onDone }: { template: Template | null; onDone: () => void }) {
-  const [name, setName] = useState(template?.name ?? "")
-  const [subject, setSubject] = useState(template?.subject ?? "")
   const [error, setError] = useState<string | null>(null)
-  const editor = useRichEditor({ html: template?.html ?? "", placeholder: "Write the template", focusFirst: false, label: "Template text", compact: true })
+  const now = () => (editor.isEmpty ? "" : editor.getHTML())
+  // The editor's own form of what it opened with, so an untouched signature never asks.
+  const [opened] = useState(now)
+  useLeaveGuard(() => now() !== opened)
   return (
-    <form
-      className="flex flex-col gap-3 rounded-xl border bg-muted/30 p-3"
-      onSubmit={async (e) => {
-        e.preventDefault()
+    <FormLayerForm
+      overline="Signature"
+      title={account.displayName}
+      primary={{ label: "Save", loading: saving }}
+      error={error}
+      onSubmit={async () => {
+        setSaving(true)
+        setError(null)
         try {
-          await (await getCoreClient()).saveTemplate({ id: template?.id ?? null, name, subject, html: editor.getHTML() })
+          await (await getCoreClient()).setSignature(account.id, now())
           onDone()
-        } catch (err) {
-          setError(err instanceof Error ? err.message : String(err))
+        } catch (e) {
+          setError(said(e))
+        } finally {
+          setSaving(false)
         }
       }}
     >
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field>
-          <FieldLabel htmlFor="tpl-name">Name</FieldLabel>
-          <Input id="tpl-name" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Meeting follow-up" autoFocus />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="tpl-subject">Subject (optional)</FieldLabel>
-          <Input id="tpl-subject" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Fills an empty subject" />
-        </Field>
-      </div>
+      <RichEditor editor={editor} label={account.address} bar={<FormatBar editor={editor} />} />
+    </FormLayerForm>
+  )
+}
+
+/** A template, in the form layer: NAME, SUBJECT and the text; SAVE TEMPLATE. */
+function TemplateForm({ template, onDone }: { template: Template | null; onDone: () => void }) {
+  const [name, setName] = useState(template?.name ?? "")
+  const [subject, setSubject] = useState(template?.subject ?? "")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const editor = useRichEditor({ html: template?.html ?? "", placeholder: "Write the template", focusFirst: false, label: "Template text", compact: true })
+  const text = () => (editor.isEmpty ? "" : editor.getHTML())
+  const [opened] = useState(text)
+  useLeaveGuard(() => name !== (template?.name ?? "") || subject !== (template?.subject ?? "") || text() !== opened)
+  return (
+    <FormLayerForm
+      overline={template ? "Template" : "New template"}
+      title={name.trim() || (template ? "Template" : "New template")}
+      primary={{ label: "Save template", disabled: !name.trim(), loading: saving }}
+      error={error}
+      onSubmit={async () => {
+        setSaving(true)
+        setError(null)
+        try {
+          await (await getCoreClient()).saveTemplate({ id: template?.id ?? null, name, subject, html: editor.getHTML() })
+          onDone()
+        } catch (e) {
+          setError(said(e))
+        } finally {
+          setSaving(false)
+        }
+      }}
+    >
+      <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} data-form-focus="" />
+      <TextField label="Subject" helper="Fills an empty subject." value={subject} onChange={(e) => setSubject(e.target.value)} />
       <RichEditor editor={editor} label="Text" bar={<FormatBar editor={editor} />} />
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onDone}>
-          Cancel
-        </Button>
-        <Button type="submit" size="sm" disabled={!name.trim()}>
-          {template ? "Save changes" : "Save template"}
-        </Button>
-      </div>
-    </form>
+    </FormLayerForm>
   )
 }

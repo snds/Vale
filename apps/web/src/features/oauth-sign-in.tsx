@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
-import { Icon, type IconName, Button, Field, FieldDescription, FieldGroup, FieldLabel, Input, Spinner, DialogAction, DialogActions, toast } from "@unicron/ui"
-import { SettingsHeading } from "./settings/section-header"
+import { Icon, type IconName, Banner, Button, Skeleton, TextField } from "@unicron/ui"
 import { getCoreClient } from "@/core/client"
-import type { OAuthClientInfo, OAuthIssuer } from "@/core/types"
+import type { Account, OAuthClientInfo, OAuthIssuer } from "@/core/types"
+
+import { AccountFormEnd, AccountFormTop, FormFailed } from "./onboarding/add-form"
+import { useAddPlace } from "./onboarding/add-place"
 
 interface ProviderCopy {
-  title: string
   company: string
   grants: { icon: IconName; text: string }[]
   stays: string
@@ -31,7 +32,6 @@ const DOCS = "https://github.com/snds/Vale/blob/main/docs"
 
 const COPY: Record<OAuthIssuer, ProviderCopy> = {
   google: {
-    title: "Add Gmail",
     company: "Google",
     grants: [
       { icon: "email", text: "Read, organize, and send your Gmail" },
@@ -53,7 +53,6 @@ const COPY: Record<OAuthIssuer, ProviderCopy> = {
     docs: `${DOCS}/google-verification.md#use-your-own-oauth-client`,
   },
   microsoft: {
-    title: "Add Outlook",
     company: "Microsoft",
     grants: [
       { icon: "email", text: "Read, organize, and send your Outlook mail" },
@@ -78,90 +77,110 @@ const COPY: Record<OAuthIssuer, ProviderCopy> = {
 }
 
 /**
- * Adds a Google or Microsoft account by signing in on the provider's own
- * page, in the system browser. The app never sees the password; it gets
- * tokens it can refresh.
+ * Step 2 for Google and Microsoft (brief X8; ADR-0107): the person signs in
+ * on the provider's own page, in the system browser. The app never sees the
+ * password; it gets tokens it can refresh. CONTINUE IN BROWSER keeps its
+ * word while it waits, with a way to cancel. The client the build signs in
+ * with can be replaced by the person's own, and a build with none set up
+ * opens on that form.
  */
-export function OAuthSignIn({ issuer, onBack, onDone }: { issuer: OAuthIssuer; onBack: () => void; onDone: () => void }) {
+export function OAuthSignIn({ issuer, title, onAdded }: { issuer: OAuthIssuer; title: string; onAdded: (a: Account) => void }) {
   const copy = COPY[issuer]
+  const { block, onBack } = useAddPlace()
   const qc = useQueryClient()
   const { data: client, isPending } = useQuery({ queryKey: ["oauth-client", issuer], queryFn: async () => (await getCoreClient()).getOAuthClient(issuer) })
   const [editing, setEditing] = useState(false)
   const [hint, setHint] = useState("")
+  // CANCEL ends the wait on purpose: the core's "sign-in was cancelled" is then no news.
+  const [cancelled, setCancelled] = useState(false)
 
   const signIn = useMutation({
     mutationFn: async () => (await getCoreClient()).addOAuthAccount(issuer, hint.trim() || null),
     onSuccess: (a) => {
       void qc.invalidateQueries()
-      toast.success(`${a.address} added — fetching mail, calendars, and contacts`)
-      onDone()
+      onAdded(a)
     },
   })
-  const cancel = () => void getCoreClient().then((c) => c.cancelOAuthSignIn())
+  const start = () => {
+    setCancelled(false)
+    signIn.mutate()
+  }
+  const cancel = () => {
+    setCancelled(true)
+    void getCoreClient().then((c) => c.cancelOAuthSignIn())
+  }
   const needsClient = !isPending && (!client || editing)
+  const failed = signIn.error && !cancelled ? (signIn.error instanceof Error ? signIn.error.message : String(signIn.error)) : null
 
   return (
-    <div className="flex flex-col gap-4">
-      <SettingsHeading
-        title={copy.title}
-        description={`You'll sign in on ${copy.company}'s page in your browser. This app never sees your ${copy.company} password.`}
-        onBack={() => (signIn.isPending && cancel(), onBack())}
-      />
+    <div className="flex flex-1 flex-col gap-8">
+      <AccountFormTop title={title} onBack={() => (signIn.isPending && cancel(), onBack())} />
+      <p className="type-body text-text-secondary">{`You'll sign in on ${copy.company}'s page in your browser. This app never sees your ${copy.company} password.`}</p>
 
-      {signIn.isPending ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border bg-muted/40 px-4 py-6 text-center" role="status" aria-live="polite">
-          {/* The status around it says what's happening; the spinner would add "Loading". */}
-          <Spinner className="size-6" aria-hidden />
-          <p className="text-sm font-medium">Finish signing in in your browser</p>
-          <p className="max-w-xs text-xs text-muted-foreground">When {copy.company} says you're signed in, come back here. The tab can be closed.</p>
-          <Button variant="outline" size="sm" onClick={cancel}>
-            Cancel
-          </Button>
-        </div>
+      {isPending ? (
+        <Skeleton variant="row" />
       ) : needsClient ? (
         <ClientForm issuer={issuer} copy={copy} current={client ?? null} onClose={() => setEditing(false)} />
       ) : (
         <>
-          <section aria-label="What the app can do" className="flex flex-col gap-2 rounded-xl border px-3 py-2.5">
-            <p className="text-xs font-medium text-muted-foreground">{copy.company} will ask you to allow this app to:</p>
-            <ul className="flex flex-col gap-1.5">
+          <section aria-label="What the app can do" className="flex flex-col gap-3">
+            <p className="type-caption text-text-label">{copy.company} will ask you to allow this app to:</p>
+            <ul className="flex flex-col gap-3">
               {copy.grants.map((g) => (
-                <li key={g.text} className="flex items-center gap-2 text-sm">
-                  <Icon name={g.icon} tone="muted" size="sm" /> {g.text}
+                <li key={g.text} className="type-body flex items-center gap-3 text-text-body">
+                  <Icon name={g.icon} tone="muted" /> {g.text}
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-muted-foreground">{copy.stays}</p>
+            <p className="type-caption text-text-secondary">{copy.stays}</p>
           </section>
-          <Field>
-            <FieldLabel htmlFor="oauth-hint">{copy.hintLabel}</FieldLabel>
-            <Input id="oauth-hint" type="email" autoComplete="email" placeholder={copy.hintPlaceholder} value={hint} onChange={(e) => setHint(e.target.value)} />
-            <FieldDescription>{copy.hintHelp}</FieldDescription>
-          </Field>
-          {signIn.error && (
-            <p className="text-sm text-destructive" role="alert">
-              {signIn.error instanceof Error ? signIn.error.message : String(signIn.error)}
-            </p>
-          )}
-          <p className="flex gap-2 text-xs text-muted-foreground">
-            <Icon name="information" size="sm" className="mt-0.5" />
-            {client?.builtIn ? copy.builtInWarning : copy.ownWarning}
-          </p>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <Button type="button" variant="link" size="sm" className="px-0" onClick={() => setEditing(true)}>
-              {client?.builtIn ? `Use your own ${copy.clientNoun}` : `Change ${copy.clientNoun}`}
-            </Button>
-            <Button onClick={() => signIn.mutate()}>
-              <Icon name="launch" data-icon="inline-start" /> Continue in browser
-            </Button>
-          </div>
+          <TextField
+            id="oauth-hint"
+            label={copy.hintLabel}
+            type="email"
+            autoComplete="email"
+            autoCapitalize="none"
+            placeholder={copy.hintPlaceholder}
+            helper={copy.hintHelp}
+            readOnly={signIn.isPending}
+            value={hint}
+            onChange={(e) => setHint(e.target.value)}
+          />
+          {/* The provider shows a warning page first: say so before the person meets it. */}
+          <Banner tone="info" size="compact" body={client?.builtIn ? copy.builtInWarning : copy.ownWarning} />
+          <FormFailed message={failed} />
+          <AccountFormEnd
+            primary={
+              <Button block={block} loading={signIn.isPending} onClick={start}>
+                <Icon name="launch" data-icon="inline-start" /> Continue in browser
+              </Button>
+            }
+          >
+            {signIn.isPending ? (
+              <>
+                <div role="status" className="flex flex-col gap-1">
+                  <p className="type-ui text-text-body">Finish signing in in your browser</p>
+                  <p className="type-caption text-text-secondary">When {copy.company} says you're signed in, come back here. The tab can be closed.</p>
+                </div>
+                <Button variant="ghost" onClick={cancel}>
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <Button variant="ghost" onClick={() => setEditing(true)}>
+                {client?.builtIn ? "Use your own client" : "Change client"}
+              </Button>
+            )}
+          </AccountFormEnd>
         </>
       )}
     </div>
   )
 }
 
+/** CLIENT ID and, for Google, CLIENT SECRET, with the provider's own instructions; SAVE CLIENT, and REMOVE CLIENT for a saved one. */
 function ClientForm({ issuer, copy, current, onClose }: { issuer: OAuthIssuer; copy: ProviderCopy; current: OAuthClientInfo | null; onClose: () => void }) {
+  const { block } = useAddPlace()
   const [clientId, setClientId] = useState("")
   const [secret, setSecret] = useState("")
   const qc = useQueryClient()
@@ -171,50 +190,62 @@ function ClientForm({ issuer, copy, current, onClose }: { issuer: OAuthIssuer; c
       void qc.invalidateQueries({ queryKey: ["oauth-client", issuer] })
       onClose()
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
   })
   return (
-    <form className="flex flex-col gap-4" onSubmit={(e) => (e.preventDefault(), save.mutate({ clientId: clientId.trim(), clientSecret: secret.trim() || null }))}>
+    <form aria-label={`Your own ${copy.clientNoun}`} className="flex flex-1 flex-col gap-8" onSubmit={(e) => (e.preventDefault(), save.mutate({ clientId: clientId.trim(), clientSecret: secret.trim() || null }))}>
       {!current && (
-        <p className="flex gap-2 rounded-lg bg-muted px-3 py-2 text-sm" role="status">
-          <Icon name="password" size="sm" className="mt-0.5" />
+        <p className="type-body text-text-body" role="status">
           {copy.noClient}
         </p>
       )}
-      <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="oauth-client-id">{copy.clientIdLabel}</FieldLabel>
-          <Input id="oauth-client-id" required autoComplete="off" placeholder={copy.clientIdPlaceholder} value={clientId} onChange={(e) => setClientId(e.target.value)} />
-          <FieldDescription>
-            {copy.clientIdHelp}{" "}
-            <a href={copy.docs} target="_blank" rel="noreferrer" className="underline underline-offset-2">
-              Step-by-step guide
-            </a>
-          </FieldDescription>
-        </Field>
+      <div className="flex flex-col gap-4">
+        <TextField
+          id="oauth-client-id"
+          label={copy.clientIdLabel}
+          required
+          autoComplete="off"
+          placeholder={copy.clientIdPlaceholder}
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          helper={
+            <>
+              {copy.clientIdHelp}{" "}
+              <a href={copy.docs} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                Step-by-step guide
+              </a>
+            </>
+          }
+        />
         {copy.secret && (
-          <Field>
-            <FieldLabel htmlFor="oauth-client-secret">Client secret</FieldLabel>
-            <Input id="oauth-client-secret" autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} />
-            <FieldDescription>Google gives Desktop clients one and asks for it at sign-in. In an installed app it isn't a real secret; it's kept on this device.</FieldDescription>
-          </Field>
+          <TextField
+            id="oauth-client-secret"
+            label="Client secret"
+            autoComplete="off"
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            helper="Google gives Desktop clients one and asks for it at sign-in. In an installed app it isn't a real secret; it's kept on this device."
+          />
         )}
-      </FieldGroup>
-      <DialogActions>
+      </div>
+      <FormFailed message={save.error ? (save.error instanceof Error ? save.error.message : String(save.error)) : null} />
+      <AccountFormEnd
+        primary={
+          <Button type="submit" block={block} loading={save.isPending && save.variables !== null}>
+            Save client
+          </Button>
+        }
+      >
         {current && !current.builtIn && (
-          <DialogAction kind="destructive" type="button" onClick={() => save.mutate(null)}>
-            Remove saved {copy.clientNoun}
-          </DialogAction>
+          <Button variant="ghost" type="button" loading={save.isPending && save.variables === null} onClick={() => save.mutate(null)}>
+            Remove client
+          </Button>
         )}
         {current && (
-          <DialogAction kind="cancel" type="button" onClick={onClose}>
+          <Button variant="ghost" type="button" onClick={onClose}>
             Cancel
-          </DialogAction>
+          </Button>
         )}
-        <DialogAction type="submit" disabled={!clientId.trim() || save.isPending}>
-          Save {copy.clientNoun}
-        </DialogAction>
-      </DialogActions>
+      </AccountFormEnd>
     </form>
   )
 }

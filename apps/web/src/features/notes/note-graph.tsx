@@ -1,16 +1,17 @@
 import { type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react"
 
-import { Button, Icon, IconButton, toast } from "@unicron/ui"
+import { EmptyState, FilterChip, FilterChipGroup, Icon, Toolbar, ToolbarButton, ToolbarSeparator, ToolbarToggle, toast } from "@unicron/ui"
 import { useNoteGraph } from "@/core/queries"
 import type { NoteGraph, NoteLinkKind, NoteQuery, NoteSummary } from "@/core/types"
-import { cn } from "@/lib/utils"
+import { noteSwatch, swatchId } from "@/lib/swatches"
 
 import { bounds, layout, nearestInDirection, type Pt } from "./graph-layout"
-import { NOTE_COLOR_LABEL, noteFill } from "./note-color"
+import { NOTE_COLOR_LABEL } from "./note-color"
 import { LINK_ICON, useOpenLink } from "./use-open-link"
 
-/** The map of notes (ADR-0053): notes, the `[[links]]` between them, and the
- * events, people, and conversations they link to. It shows the notes the
+/** The map of notes (ADR-0053, ADR-0105): notes as small squares, the
+ * `[[links]]` between them as hairlines, and the events, people, and
+ * conversations they link to as outlined squares with their glyph. It shows the notes the
  * list would (search, tag, and folder apply), lays them out once, and holds
  * still. Pan, zoom, and drag to rearrange; a tap opens what it lands on. */
 
@@ -24,10 +25,17 @@ interface GNode {
   target?: string | null
 }
 
-/** A linked item (an event, a person, a conversation) is one neutral ink; its glyph says which. */
-const LINK_INK = "var(--text-label)"
-/** A note with no color of its own. */
-const NOTE_INK = "var(--text-secondary)"
+/** The map's inks, all roles (ADR-0105): squares on the raised surface, hairline links, the primary only for the selection. */
+const INK = {
+  body: "var(--text-body)",
+  label: "var(--text-label)",
+  link: "var(--text-faint)",
+  ground: "var(--surface-ground)",
+  raised: "var(--surface-raised)",
+  soft: "var(--primary-soft)",
+  primary: "var(--primary-fill)",
+  ring: "var(--ring)",
+}
 const KIND_NAME: Record<NoteLinkKind, [string, string]> = {
   event: ["Event", "Events"],
   contact: ["Person", "People"],
@@ -35,6 +43,8 @@ const KIND_NAME: Record<NoteLinkKind, [string, string]> = {
 }
 const ITEM_KINDS: NoteLinkKind[] = ["event", "contact", "thread"]
 const MIN_ZOOM = 0.2
+/** The map's least height, in px (`min-h-80`): below it, the column scrolls. */
+const MIN_HEIGHT = 320
 const MAX_ZOOM = 3
 
 const short = (s: string) => (s.length > 28 ? `${s.slice(0, 27).trimEnd()}…` : s)
@@ -88,6 +98,23 @@ export function NoteGraphView({ query, selectedId, onOpenNote }: { query: NoteQu
     if (!el) return
     const ro = new ResizeObserver(([e]) => setSize({ w: e!.contentRect.width, h: e!.contentRect.height }))
     ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  // The map fills what is left of its column under the head, down to the column's own clearance (the phone's
+  // floating bottom row), so its toolbar stands at the column's foot. The column scrolls, so no height reaches it.
+  const [room, setRoom] = useState<number | null>(null)
+  useEffect(() => {
+    const el = box.current
+    const column = el?.closest<HTMLElement>("[data-scroll-root]")
+    if (!el || !column) return
+    const measure = () => {
+      const top = el.getBoundingClientRect().top - column.getBoundingClientRect().top + column.scrollTop
+      const clear = parseFloat(getComputedStyle(column).paddingBottom) || 0
+      setRoom(Math.max(MIN_HEIGHT, Math.floor(column.clientHeight - clear - top)))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(column)
     return () => ro.disconnect()
   }, [])
   const fit = () => {
@@ -251,39 +278,42 @@ export function NoteGraphView({ query, selectedId, onOpenNote }: { query: NoteQu
     const p = pos.get(id) ?? { x: 0, y: 0 }
     return { x: p.x * view.k + view.x, y: p.y * view.k + view.y }
   }
-  const radius = (n: GNode) => (n.kind === "note" ? 7 + 1.8 * Math.sqrt(neighbors.get(n.id)?.size ?? 0) : 12) * scale
+  // Half a square's side: notes grow a little with their links; linked items are one size, to hold their glyph.
+  const half = (n: GNode) => (n.kind === "note" ? 6 + 1.5 * Math.sqrt(neighbors.get(n.id)?.size ?? 0) : 11) * scale
 
   const noteCount = nodes.filter((n) => n.kind === "note").length
   const summary = `${noteCount} ${noteCount === 1 ? "note" : "notes"} and ${nodes.length - noteCount} linked ${nodes.length - noteCount === 1 ? "item" : "items"}, with ${edges.length} ${edges.length === 1 ? "connection" : "connections"}.`
+  const kinds = ITEM_KINDS.filter((k) => counts[k] > 0)
 
   return (
-    <div ref={box} data-slot="note-graph" className="relative h-full min-h-80 touch-none overflow-hidden select-none">
-      <div className="absolute top-0 left-0 z-10 flex max-w-full gap-1.5 overflow-x-auto px-4 pb-2" role="group" aria-label="Show on the map">
-        {ITEM_KINDS.filter((k) => counts[k] > 0).map((k) => (
-          <Button
-            key={k}
-            size="xs"
-            shape="pill"
-            variant={hidden.has(k) ? "ghost" : "secondary"}
-            aria-pressed={!hidden.has(k)}
-            onClick={() => setHidden((h) => (h.has(k) ? new Set([...h].filter((x) => x !== k)) : new Set([...h, k])))}
+    <div ref={box} data-slot="note-graph" className="relative min-h-80 touch-none overflow-hidden select-none" style={room ? { height: room } : undefined}>
+      {kinds.length > 0 && (
+        // The map's legend, and what it shows: each kind of linked item, on or off.
+        <div className="absolute top-0 left-0 z-10 max-w-full px-4 pb-2">
+          <FilterChipGroup
+            type="multiple"
+            scroll
+            label="Show on the map"
+            value={kinds.filter((k) => !hidden.has(k))}
+            onValueChange={(on) => setHidden(new Set(kinds.filter((k) => !on.includes(k))))}
           >
-            {/* The kind's glyph, so the chips read as the map's legend. */}
-            <Icon name={LINK_ICON[k]} />
-            {KIND_NAME[k][1]} {counts[k]}
-          </Button>
-        ))}
-        {counts.unlinked > 0 && (
-          <Button size="xs" shape="pill" variant={unlinked ? "secondary" : "ghost"} aria-pressed={unlinked} onClick={() => setUnlinked(!unlinked)}>
-            Unlinked notes {counts.unlinked}
-          </Button>
-        )}
-      </div>
+            {kinds.map((k) => (
+              <FilterChip key={k} value={k} count={counts[k]}>
+                {KIND_NAME[k][1]}
+              </FilterChip>
+            ))}
+          </FilterChipGroup>
+        </div>
+      )}
 
       {!isPending && nodes.length === 0 ? (
-        <p className="absolute inset-x-0 top-1/3 px-6 text-center text-sm text-muted-foreground">
-          {data?.notes.length ? "Nothing to show. Turn on unlinked notes to see the rest." : "No notes to map."}
-        </p>
+        <div className="absolute inset-x-0 top-1/4">
+          {data?.notes.length ? (
+            <EmptyState size="sm" title="Nothing to show." body="Turn on unlinked notes." />
+          ) : (
+            <EmptyState size="sm" overline="Map // 00" title="No notes to map." />
+          )}
+        </div>
       ) : (
         <svg
           className="block size-full cursor-grab active:cursor-grabbing"
@@ -295,30 +325,18 @@ export function NoteGraphView({ query, selectedId, onOpenNote }: { query: NoteQu
           onPointerUp={up}
           onPointerCancel={up}
         >
+          {/* Links are hairlines. */}
           <g aria-hidden>
             {edges.map(([a, b]) => {
               const pa = at(a)
               const pb = at(b)
-              const item = byId.get(b)!.kind !== "note" ? (byId.get(b)!.kind as NoteLinkKind) : null
               const on = !litSet || (litSet.has(a) && litSet.has(b) && (a === lit || b === lit))
-              return (
-                <line
-                  key={`${a} ${b}`}
-                  x1={pa.x}
-                  y1={pa.y}
-                  x2={pb.x}
-                  y2={pb.y}
-                  stroke={item ? LINK_INK : "var(--muted-foreground)"}
-                  strokeWidth={litSet && on ? 1.75 : 1.1}
-                  strokeDasharray={item ? "3 3" : undefined}
-                  strokeOpacity={litSet ? (on ? 0.95 : 0.12) : item ? 0.6 : 0.5}
-                />
-              )
+              return <line key={`${a} ${b}`} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} stroke={litSet && on ? INK.body : INK.link} strokeWidth={1} strokeOpacity={litSet && !on ? 0.2 : 1} />
             })}
           </g>
           {nodes.map((n) => {
             const p = at(n.id)
-            const r = radius(n)
+            const h = half(n)
             const dim = litSet && !litSet.has(n.id)
             const selected = n.id === selectedId
             const label = n.kind === "note" ? n.label || "New note" : n.label
@@ -328,65 +346,70 @@ export function NoteGraphView({ query, selectedId, onOpenNote }: { query: NoteQu
               n.kind === "note"
                 ? `${label}${n.note?.color ? `, ${NOTE_COLOR_LABEL[n.note.color]}` : ""}${n.note?.locked ? ", locked" : ""}, ${links} ${links === 1 ? "link" : "links"}`
                 : `${KIND_NAME[n.kind][0]}: ${label}, ${links} ${links === 1 ? "note" : "notes"}${n.target ? "" : ", not on this device"}`
+            const swatch = n.kind === "note" ? noteSwatch(n.note?.color) : null
             return (
               <g
                 key={n.id}
                 ref={(el) => void (el ? nodeEls.current.set(n.id, el) : nodeEls.current.delete(n.id))}
                 data-node={n.id}
                 data-kind={n.kind}
+                data-selected={selected || undefined}
                 role="button"
                 tabIndex={n.id === tabStop ? 0 : -1}
                 aria-label={name}
                 aria-current={selected || undefined}
                 className="cursor-pointer outline-none"
-                style={{
-                  opacity: dim ? 0.25 : 1,
-                  transition: "opacity var(--g-duration-base) var(--g-ease-standard)",
-                }}
+                opacity={dim ? 0.25 : 1}
                 onPointerEnter={(e) => e.pointerType === "mouse" && setHover(n.id)}
                 onPointerLeave={() => setHover((h) => (h === n.id ? null : h))}
                 onFocus={(e) => (setActive(n.id), setFocusVisible(e.currentTarget.matches(":focus-visible")))}
                 onBlur={() => setFocusVisible(false)}
                 onKeyDown={(e) => keyDown(e, n.id)}
               >
-                {(selected || (focusVisible && active === n.id)) && (
-                  <circle cx={p.x} cy={p.y} r={r + 4} fill="none" stroke={selected ? "var(--foreground)" : "var(--ring)"} strokeWidth={2} />
-                )}
+                {/* Selected: a 2 px outline in the primary fill around the square, which turns primary-soft. Never solid. */}
+                {selected && <rect data-role="selection" x={p.x - h - 3} y={p.y - h - 3} width={2 * h + 6} height={2 * h + 6} fill="none" stroke={INK.primary} strokeWidth={2} />}
+                {focusVisible && active === n.id && <rect x={p.x - h - 6} y={p.y - h - 6} width={2 * h + 12} height={2 * h + 12} fill="none" stroke={INK.ring} strokeWidth={2} />}
                 {n.kind === "note" ? (
-                  <circle
-                    cx={p.x}
-                    cy={p.y}
-                    r={r}
-                    fill={n.note?.color ? noteFill(n.note.color) : NOTE_INK}
-                    stroke={n.note?.color ? `color-mix(in oklab, ${noteFill(n.note.color)} 45%, var(--foreground))` : "var(--surface-ground)"}
-                    strokeWidth={1.5}
+                  // A note: a small square; its color is the square's edge.
+                  <rect
+                    data-role="square"
+                    x={p.x - h}
+                    y={p.y - h}
+                    width={2 * h}
+                    height={2 * h}
+                    fill={selected ? INK.soft : INK.raised}
+                    stroke={swatch ? `var(--swatch-${swatchId(swatch)})` : INK.label}
+                    strokeWidth={swatch ? 2 : 1}
                   />
                 ) : (
                   <>
-                    <circle
-                      cx={p.x}
-                      cy={p.y}
-                      r={r}
-                      fill={`color-mix(in oklab, ${LINK_INK} 16%, var(--surface-ground))`}
-                      stroke={LINK_INK}
-                      strokeWidth={1.5}
+                    {/* A linked item: an outlined square with its glyph; dashed when it is not on this device. */}
+                    <rect
+                      data-role="square"
+                      x={p.x - h}
+                      y={p.y - h}
+                      width={2 * h}
+                      height={2 * h}
+                      fill={selected ? INK.soft : INK.ground}
+                      stroke={INK.label}
+                      strokeWidth={1}
                       strokeDasharray={n.target ? undefined : "2 2"}
                     />
-                    <g style={{ color: LINK_INK }}>
-                      <Icon name={LINK_ICON[n.kind]} x={p.x - r * 0.65} y={p.y - r * 0.65} width={r * 1.3} height={r * 1.3} />
+                    <g color={INK.label}>
+                      <Icon name={LINK_ICON[n.kind]} x={p.x - h * 0.65} y={p.y - h * 0.65} width={h * 1.3} height={h * 1.3} />
                     </g>
                   </>
                 )}
-                {/* A bigger, invisible hit area, so small nodes are easy to tap. */}
-                <circle cx={p.x} cy={p.y} r={Math.max(r, 16)} fill="transparent" />
+                {/* A bigger, unseen hit area, so small squares are easy to tap. */}
+                <rect x={p.x - Math.max(h, 16)} y={p.y - Math.max(h, 16)} width={2 * Math.max(h, 16)} height={2 * Math.max(h, 16)} fill="transparent" />
                 {showLabel && (
                   <text
                     x={p.x}
-                    y={p.y + r + 13}
+                    y={p.y + h + 14}
                     textAnchor="middle"
-                    className={cn("text-[11px]", selected || lit === n.id ? "font-semibold" : "font-medium")}
-                    fill="var(--foreground)"
-                    stroke="var(--surface-ground)"
+                    className={selected || lit === n.id ? "type-meta font-semibold" : "type-meta"}
+                    fill={INK.body}
+                    stroke={INK.ground}
                     strokeWidth={3}
                     strokeLinejoin="round"
                     paintOrder="stroke"
@@ -404,10 +427,15 @@ export function NoteGraphView({ query, selectedId, onOpenNote }: { query: NoteQu
       <p id="note-graph-summary" className="sr-only">
         {summary} Use the arrow keys to move between them, Enter to open one, and plus or minus to zoom.
       </p>
-      <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-1 rounded-full border bg-background/80 p-1 shadow-sm backdrop-blur">
-        <IconButton label="Zoom in" icon="add" size="icon-sm" shortcut="+" onClick={() => zoomBy(1.25)} />
-        <IconButton label="Zoom out" icon="subtract" size="icon-sm" shortcut="−" onClick={() => zoomBy(0.8)} />
-        <IconButton label="Fit the map" icon="fit-to-screen" size="icon-sm" shortcut="0" onClick={refit} />
+      {/* The map's tools, bottom right, on the raised surface so they hold over the squares. */}
+      <div className="absolute right-4 bottom-4 z-10 bg-surface-raised rule-box">
+        <Toolbar aria-label="Map">
+          <ToolbarButton label="Zoom in" icon="zoom--in" shortcut="+" onClick={() => zoomBy(1.25)} />
+          <ToolbarButton label="Zoom out" icon="zoom--out" shortcut="−" onClick={() => zoomBy(0.8)} />
+          <ToolbarButton label="Fit" icon="fit-to-screen" shortcut="0" onClick={refit} />
+          <ToolbarSeparator />
+          <ToolbarToggle label="Unlinked notes" pressed={unlinked} onPressedChange={setUnlinked} />
+        </Toolbar>
       </div>
     </div>
   )

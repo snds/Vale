@@ -1,4 +1,4 @@
-import { isTauri } from "@/core/client"
+import { getCoreClient, isTauri } from "@/core/client"
 
 /** Where an update stands (the update kit's `UpdateState`). */
 export type UpdateState = "idle" | "checking" | "up_to_date" | "downloading" | "ready" | "available" | "failed"
@@ -57,10 +57,25 @@ export interface UpdateClient {
 }
 
 let client: Promise<UpdateClient> | null = null
+let stand: UpdateClient | null = null
 
-/** The desktop's update client; null anywhere else (`isTauri` is false in the web app and Vale Demo). */
-export function updateClient(): Promise<UpdateClient> | null {
-  if (!isTauri()) return null
+/**
+ * Only the in-memory demo's scenarios call this (`desktop-update-ready`,
+ * core/demo-scenarios/settings.ts): a stand-in for the desktop's updater, so
+ * About › This app and the mark on the way into Settings can be seen in a
+ * browser. It never reaches Tauri.
+ */
+export function standInForUpdater(c: UpdateClient) {
+  stand = c
+}
+
+/**
+ * The desktop's update client; null anywhere else (`isTauri` is false in the
+ * web app and Vale Demo), unless a demo scenario stands in for it. Outside
+ * Tauri it answers once the demo has started, since its scenarios run then.
+ */
+export function updateClient(): Promise<UpdateClient | null> {
+  if (!isTauri()) return getCoreClient().then(() => stand, () => null)
   client ??= (async () => {
     const { invoke } = await import("@tauri-apps/api/core")
     const { listen } = await import("@tauri-apps/api/event")
@@ -90,7 +105,7 @@ export function updateClient(): Promise<UpdateClient> | null {
 
 /** Runs one update action; errors come back as plain words. */
 export async function withUpdates<T>(fn: (c: UpdateClient) => Promise<T>): Promise<T> {
-  const c = updateClient()
+  const c = await updateClient()
   if (!c) throw new Error("Updates are only in the desktop app.")
-  return fn(await c)
+  return fn(c)
 }

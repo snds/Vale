@@ -1,72 +1,74 @@
-import { type ReactNode, useState } from "react"
+import { type ReactNode, useMemo } from "react"
 
 import { factTime, useRefresh, useScreenFact, useScreenPlace } from "@/app/screen"
+import { useSectionBanner } from "@/app/section-banner"
 import { useSectionSwitcher } from "@/app/places"
 import { SectionSwitcher } from "@/app/section-switcher"
 import { useUi } from "@/app/ui-store"
 import { vertical } from "@/app/verticals"
-import { Icon, Button, formatNavCount, DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, IconButton, Toggle, Tooltip, TooltipContent, TooltipTrigger, toast } from "@unicron/ui"
-import { EntryRow } from "@/components/list-row"
+import {
+  AppFrameInset,
+  EmptyState,
+  FilterChip,
+  FilterChipGroup,
+  SectionHeader,
+  Skeleton,
+  Tile,
+  formatNavCount,
+  useAppFrame,
+} from "@unicron/ui"
+import { LoadState } from "@/components/load-state"
 import { MasterDetail } from "@/components/master-detail"
 import { ScreenHead } from "@/components/page"
-import { getCoreClient } from "@/core/client"
 import { useNoteAction, useNotes, useNotesPrefs } from "@/core/queries"
 import type { NoteSummary, NotesPrefs } from "@/core/types"
 import { useNowSecs } from "@/hooks/use-now"
-import { reminderLabel, shortTime } from "@/lib/time"
-import { cn } from "@/lib/utils"
+import { noteSwatch, swatchId } from "@/lib/swatches"
 
-import { ImportDialog } from "./import-dialog"
-import { NOTE_COLOR_LABEL, noteEdge, noteFill } from "./note-color"
+import { NOTE_COLOR_LABEL } from "./note-color"
 import { NoteDetailPane } from "./note-detail"
 import { NoteFolderEditor } from "./note-folders"
 import { NoteGraphView } from "./note-graph"
 import { NoteCover } from "./note-image"
+import { editedLabel, noteTag, useNoteItemCounts } from "./note-meta"
+import { NoteRow } from "./note-row"
 import { NotesNav } from "./notes-nav"
 import { closeSharedNote, useOpenSharedNote } from "./open-shared-note"
-import { closeSyncSetup, openSyncSetup, useSyncSetup } from "./open-sync-setup"
-import { RelayDialog } from "./relay-dialog"
-import { OpenSharedDialog } from "./share-dialog"
-import { useSyncStatus } from "./sync"
+import { openNotesImport, openSyncSetup } from "./open-sync-setup"
+import { OpenSharedLink } from "./share-dialog"
+import { type SyncStatus, useSyncStatus } from "./sync"
 import { useNotesPlace } from "./use-notes-place"
 
-const SYNC_LABEL = { off: "Sync is off", connecting: "Connecting to the relay…", synced: "Synced with the relay", error: "Sync problem" } as const
+/** The relay's state as the status line says it (brief N1). The line sets the capitals. */
+const RELAY_FACT: Record<SyncStatus, string> = { off: "Sync off", connecting: "Connecting", synced: "Synced", error: "Not synced" }
+
+type View = "list" | "cards" | "map"
 
 export function NotesView() {
   // In the shared store, so a jump (a new note, or a link from mail,
   // calendar, or contacts) can open a note from anywhere.
   const selected = useUi((s) => s.openNote)
   const setSelected = useUi((s) => s.setOpenNote)
+  const frame = useAppFrame()
   // Notes' place (ADR-0084): a folder, narrowed by one tag. A folder or a tag that is gone just stops filtering.
   const { place, folder: activeFolder, name: placeName } = useNotesPlace()
   const tag = place.tag
   const archived = place.folder.kind === "archive"
   const pinnedOnly = place.folder.kind === "pinned"
-  // Another folder or tag, picked in the nav: the note that was open stays open, as a link's note does.
-  const [importing, setImporting] = useState(false)
-  // Opened by their intents, so the folders list and the command menu reach them too.
-  const relayOpen = useSyncSetup((s) => s.open)
+  // Opened by its intent, so the folders list and the command menu reach it too.
   const openingShared = useOpenSharedNote((s) => s.open)
   // Finding a note by its words is Search's (ADR-0085); the list is the folder, narrowed by the tag.
   const noteQuery = { search: null, tag, archived, folder: archived ? null : (activeFolder?.id ?? null) }
-  const { data: found = [], isPending, refetch } = useNotes(noteQuery)
+  const { data: found = [], isPending, error, refetch, isRefetching } = useNotes(noteQuery)
   // Pinned is a place the core has no query for: the same read, narrowed here.
   const notes = pinnedOnly ? found.filter((n) => n.pinned) : found
+  const items = useNoteItemCounts()
   const sync = useSyncStatus()
   const { data: prefs } = useNotesPrefs()
   const setPrefs = useNoteAction((c, change: Partial<NotesPrefs>) => c.setNotesPrefs({ sortChecked: true, ...prefs, ...change }))
-  const grid = prefs?.grid ?? false
-  // The map (ADR-0053): the same notes, laid out by their links.
-  const graph = prefs?.graph ?? false
-
-  // Every note as a Markdown file with front matter, as Obsidian reads them (ADR-0034).
-  const exportAll = async () => {
-    try {
-      toast.success(`Notes saved to ${await (await getCoreClient()).exportNotes()}`, { duration: 4000 })
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e))
-    }
-  }
+  // The map (ADR-0053) wins over cards (ADR-0038), which keep their choice underneath it.
+  const view: View = prefs?.graph ? "map" : prefs?.grid ? "cards" : "list"
+  const setView = (v: View) => setPrefs.mutate(v === "map" ? { graph: true } : { graph: false, grid: v === "cards" })
 
   // A reminder that has come due lifts its note above everything, pinned
   // included, until it's marked done (ADR-0039).
@@ -75,130 +77,99 @@ export function NotesView() {
   const due = archived ? [] : notes.filter(isDue).sort((a, b) => a.remindAt! - b.remindAt!)
   const pinned = notes.filter((n) => n.pinned && !due.includes(n))
   const rest = notes.filter((n) => !n.pinned && !due.includes(n))
-  const empty = archived
-    ? "Archived notes show up here."
-    : pinnedOnly && !tag
-      ? "Nothing pinned. Pin a note from its menu to keep it here."
-    : activeFolder && !tag
-      ? "No notes in this folder yet. They join by themselves when they match."
-      : tag || activeFolder
-        ? "No notes match."
-        : "No notes yet. Start one, or import from Apple Notes, Keep, or a Markdown folder."
+  const sections = [
+    { label: "Due", notes: due },
+    { label: "Pinned", notes: pinned },
+    { label: "Recent", notes: rest },
+  ].filter((s) => s.notes.length > 0)
 
   const open = (n: NoteSummary) => setSelected({ id: n.id, fresh: false })
-  const row = (n: NoteSummary) => (
-    <div role="listitem" key={n.id}>
-      <EntryRow
-        selected={n.id === selected?.id}
-        onSelect={() => open(n)}
-        title={
-          <span className="flex items-center gap-1.5">
-            {n.pinned && <Icon name="pin--filled" size="sm" label="Pinned" />}
-            {(n.locked || isShared(n)) && <Icon name={n.locked ? "locked" : "user--multiple"} tone="muted" size="sm" />}
-            {n.color && (
-              <span
-                aria-hidden
-                data-slot="note-color-dot"
-                className="size-2.5 shrink-0 rounded-full border"
-                style={{ background: noteFill(n.color), borderColor: noteEdge(n.color) }}
-              />
-            )}
-            <span className="truncate">{n.title || "New note"}</span>
-            {/* After the title, so a row is read by its name first. */}
-            {n.color && <span className="sr-only">, {NOTE_COLOR_LABEL[n.color]}</span>}
-            {n.locked && <span className="sr-only">, locked</span>}
-            {isShared(n) && <span className="sr-only">, {sharedLabel(n)}</span>}
-          </span>
-        }
-        meta={shortTime(n.updated)}
-        supporting={
-          n.locked || n.snippet || n.tags.length || n.links.length || n.remindAt ? (
-            <>
-              {n.remindAt && (
-                <Icon
-                  name={isDue(n) ? "notification--filled" : "time"}
-                  size={14}
-                  className="mr-1 inline align-[-2px]"
-                  label={`${isDue(n) ? "Due" : "Reminder"} ${reminderLabel(n.remindAt)}`}
-                />
-              )}
-              {n.links.length > 0 && <Icon name="link" size={14} className="mr-1 inline align-[-2px]" label={`${n.links.length} linked`} />}
-              {n.locked ? <span className="italic">Locked</span> : n.snippet || <span className="italic">No more text</span>}
-            </>
-          ) : undefined
-        }
-      />
-    </div>
-  )
 
-  // What the shell says about this screen (ADR-0083): the folder as the place, and when a note here was last edited.
+  // What the shell says about this screen (ADR-0083): the folder as the place; the relay's state, and when a note here was last edited.
   useScreenPlace(placeName)
   const edited = notes.reduce((latest, n) => Math.max(latest, n.updated), 0)
-  useScreenFact(edited ? `Edited ${factTime(edited)}` : null)
+  useScreenFact([RELAY_FACT[sync.status], edited ? `edited ${factTime(edited)}` : null].filter(Boolean).join(" // "))
   useRefresh(refetch)
+  // A relay that refused or failed (brief N1; channel 4): one critical banner over Notes, with the way to fix it.
+  const banner = useMemo(
+    () => (sync.status === "error" ? { title: "Notes didn't sync", body: sync.error ?? undefined, action: { label: "Open sync", onClick: openSyncSetup } } : null),
+    [sync.status, sync.error],
+  )
+  useSectionBanner("notes", banner)
   // The page head opens the folders and tags wherever the sidebar does not list them (brief X1).
   const switching = useSectionSwitcher("Change folder or tag.")
   const headName = place.folder.kind === "all" ? "Notes" : placeName
+  const overline = [headName, tag ? `#${tag}` : null, isPending || error ? null : formatNavCount(notes.length)].filter(Boolean).join(" // ")
+
+  const empty = <NotesEmpty place={place.folder.kind} name={placeName} tag={tag} onImport={openNotesImport} />
+  const body =
+    isPending ? (
+      <AppFrameInset>
+        <div className="flex flex-col gap-5 pt-2" aria-busy="true" aria-label="Loading notes">
+          <Skeleton variant="row" />
+          <Skeleton variant="row" />
+          <Skeleton variant="row" />
+        </div>
+      </AppFrameInset>
+    ) : view === "map" ? (
+      <NoteGraphView query={noteQuery} selectedId={selected?.id ?? null} onOpenNote={(id) => setSelected({ id, fresh: false })} />
+    ) : (
+      <LoadState place="your notes" overline={headName} error={error} hasData={found.length > 0} onRetry={() => void refetch()} retrying={isRefetching}>
+        {notes.length === 0 ? (
+          empty
+        ) : (
+          <div data-role="notes-list" className="flex flex-col gap-4 pb-6">
+            {sections.map((s) => (
+              <section key={s.label} aria-label={s.label} className="flex flex-col">
+                <AppFrameInset>
+                  <SectionHeader title={s.label} count={s.notes.length} level={3} />
+                </AppFrameInset>
+                {view === "cards" ? (
+                  <AppFrameInset>
+                    <Cards columns={frame.phone || !!selected ? 2 : frame.layout === "medium" ? 3 : 4}>
+                      {s.notes.map((n) => (
+                        <NoteTile key={n.id} note={n} due={isDue(n)} selected={n.id === selected?.id} onOpen={() => open(n)} />
+                      ))}
+                    </Cards>
+                  </AppFrameInset>
+                ) : (
+                  <div role="list" aria-label={`${s.label} notes`} className="flex flex-col">
+                    {s.notes.map((n) => (
+                      <div role="listitem" key={n.id}>
+                        <NoteRow note={n} selected={n.id === selected?.id} onOpen={() => open(n)} list={{ due: isDue(n), items: items.get(n.id) }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            ))}
+          </div>
+        )}
+      </LoadState>
+    )
 
   return (
     <>
       <MasterDetail
         section="Notes"
         pick={vertical("notes").pick}
-        listFills={grid || graph}
-        detailTint={(() => {
-          const c = notes.find((n) => n.id === selected?.id)?.color
-          return c ? noteFill(c) : undefined
-        })()}
+        listFills={view !== "list"}
         onBack={() => setSelected(null)}
         header={
           <ScreenHead
-            overline={`${[headName, tag ? `#${tag}` : null].filter(Boolean).join(" // ")} // ${isPending ? "" : formatNavCount(notes.length)}`}
+            overline={overline}
             title={headName}
             switcher={switching.switcher}
+            // LIST · CARDS · MAP: the head's own choice from medium width up; a phone has it in the Folders sheet (brief X1).
+            // The set-up the More menu held is Settings › Notes' (brief T5; ADR-0111).
             actions={
-              <>
-              <IconButton label="Map of notes" render={<Toggle pressed={graph} onPressedChange={(on) => setPrefs.mutate({ graph: on })} />}>
-                <Icon name="chart--relationship" className="size-5" />
-              </IconButton>
-              {!graph && (
-                <IconButton label={grid ? "Show as a list" : "Show as cards"} onClick={() => setPrefs.mutate({ grid: !grid })}>
-                  <Icon name={grid ? "show-data--cards" : "grid"} className="size-5" />
-                </IconButton>
-              )}
-              <Tooltip>
-                <TooltipTrigger render={<Button variant="ghost" size="icon" aria-label={SYNC_LABEL[sync.status]} onClick={openSyncSetup} />}>
-                  <Icon
-                    name={sync.status === "error" ? "warning--alt" : sync.status === "off" ? "cloud--offline" : "cloud"}
-                    className={cn("size-5", sync.status === "error" && "text-destructive", sync.status === "connecting" && "animate-pulse")}
-                  />
-                </TooltipTrigger>
-                <TooltipContent>{sync.error ?? SYNC_LABEL[sync.status]}</TooltipContent>
-              </Tooltip>
-              <DropdownMenu>
-                <DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label="More" />}>
-                  <Icon name="overflow-menu--horizontal" className="size-5" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" width="auto">
-                  <DropdownMenuItem onClick={() => setImporting(true)}>
-                    <Icon name="document--import" /> Import notes…
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => void exportAll()}>
-                    <Icon name="download" /> Export all as Markdown
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={openSyncSetup}>
-                    <Icon name="renew" /> Sync between devices…
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuCheckboxItem checked={prefs?.sortChecked ?? true} onCheckedChange={(on) => setPrefs.mutate({ sortChecked: on })}>
-                    <Icon name="list--checked" /> Move checked items down
-                  </DropdownMenuCheckboxItem>
-                  <DropdownMenuCheckboxItem checked={prefs?.readImageText ?? true} onCheckedChange={(on) => setPrefs.mutate({ readImageText: on })}>
-                    <Icon name="scan--alt" /> Find text in images
-                  </DropdownMenuCheckboxItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              </>
+              !frame.phone && (
+                <FilterChipGroup label="View" value={view} onValueChange={(v) => setView(v as View)}>
+                  <FilterChip value="list">List</FilterChip>
+                  <FilterChip value="cards">Cards</FilterChip>
+                  <FilterChip value="map">Map</FilterChip>
+                </FilterChipGroup>
+              )
             }
             below={
               <SectionSwitcher state={switching} overline={["Notes", place.folder.kind === "all" ? null : placeName, tag ? `#${tag}` : null].filter(Boolean).join(" // ")} title="Folders">
@@ -207,98 +178,59 @@ export function NotesView() {
             }
           />
         }
-        list={
-          graph ? (
-            <NoteGraphView query={noteQuery} selectedId={selected?.id ?? null} onOpenNote={(id) => setSelected({ id, fresh: false })} />
-          ) : (
-            <div role="list" aria-label="Notes" className={cn(grid && "px-3 pb-4")}>
-              {!isPending && notes.length === 0 && <p className="px-6 py-8 text-center text-sm text-muted-foreground">{empty}</p>}
-              {[
-                { label: "Due", notes: due, heading: true },
-                { label: "Pinned", notes: pinned, heading: true },
-                { label: due.length || pinned.length ? "Others" : "All notes", notes: rest, heading: due.length + pinned.length > 0 },
-              ]
-                .filter((s) => s.notes.length > 0)
-                .map((s, i) => (
-                  <section key={s.label} aria-label={s.label}>
-                    {s.heading && <h3 className={cn("pb-1 text-xs font-semibold text-muted-foreground", i > 0 ? "pt-3" : "pt-1", grid ? "px-1" : "px-4")}>{s.label}</h3>}
-                    <Group grid={grid}>
-                      {s.notes.map((n) => (grid ? <NoteCard key={n.id} note={n} due={isDue(n)} selected={n.id === selected?.id} onOpen={() => open(n)} /> : row(n)))}
-                    </Group>
-                  </section>
-                ))}
-            </div>
-          )
-        }
+        list={body}
+        // The note's color no longer tints the pane (DC3, ADR-0105): it is the row's square and the card's edge.
         detail={selected && <NoteDetailPane key={selected.id} id={selected.id} fresh={selected.fresh} onClosed={() => setSelected(null)} />}
       />
-      <ImportDialog open={importing} onOpenChange={setImporting} />
-      <RelayDialog open={relayOpen} onOpenChange={(o) => !o && closeSyncSetup()} />
-      <OpenSharedDialog open={openingShared} onOpenChange={(o) => !o && closeSharedNote()} />
+      <OpenSharedLink open={openingShared} onOpenChange={(o) => !o && closeSharedNote()} />
       <NoteFolderEditor />
     </>
   )
 }
 
-const isShared = (n: NoteSummary) => !!n.share && !n.share.revoked
-const sharedLabel = (n: NoteSummary) => (n.share?.role === "guest" ? `shared by ${n.share.from ?? "someone"}` : "shared")
+/** The empty list, by where it is (brief 5.2). */
+function NotesEmpty({ place, name, tag, onImport }: { place: "all" | "pinned" | "folder" | "archive"; name: string; tag: string | null; onImport: () => void }) {
+  if (tag) return <EmptyState overline={`#${tag} // 00`} title="No notes match." />
+  if (place === "archive") return <EmptyState overline="Archive // 00" title="No archived notes." />
+  if (place === "pinned") return <EmptyState overline="Pinned // 00" title="Nothing pinned." body="Pin a note from its menu to keep it here." />
+  if (place === "folder") return <EmptyState overline={`${name} // 00`} title={`No notes in ${name} yet.`} body="They join when they match." />
+  return <EmptyState overline="Notes // 00" title="No notes yet." body="Start one, or bring them in from another app." actionLabel="Import" onAction={onImport} />
+}
 
-/** A list of rows, or Keep's cards: columns at least a card wide, as many as
- * the pane holds: Keep's width across a window, and a narrower card where
- * the pane itself is narrow (a phone, or beside an open note) so two fit. Cards flow down each column
- * (CSS columns), so a short note never leaves a hole beside a long one. */
-function Group({ grid, children }: { grid: boolean; children: ReactNode }) {
-  if (!grid) return <>{children}</>
+/** Tiles in even columns (brief N1): 2 on a phone or beside an open note, 3 at medium width, 4 on a desktop. */
+function Cards({ columns, children }: { columns: 2 | 3 | 4; children: ReactNode }) {
+  const grid = columns === 2 ? "grid-cols-2" : columns === 3 ? "grid-cols-3" : "grid-cols-4"
   return (
-    <div className="@container">
-      <div className="gap-3 [column-width:var(--c-note-card-min)] @max-lg:[column-width:var(--c-note-card-min-compact)]">{children}</div>
+    <div role="list" aria-label="Note cards" className={`grid items-start gap-4 pt-2 ${grid}`}>
+      {children}
     </div>
   )
 }
 
-function NoteCard({ note: n, due, selected, onOpen }: { note: NoteSummary; due: boolean; selected: boolean; onOpen: () => void }) {
+/**
+ * A note as a card (brief N1): a 4 px top edge in the note's swatch, the
+ * cover image, the title, up to six lines of the snippet, when it was edited
+ * and the one tag. A locked note shows its title only.
+ */
+function NoteTile({ note: n, due, selected, onOpen }: { note: NoteSummary; due: boolean; selected: boolean; onOpen: () => void }) {
+  const swatch = noteSwatch(n.color)
+  const tag = noteTag(n, due)
   return (
-    <div role="listitem" className="mb-3 break-inside-avoid">
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-current={selected || undefined}
-        className={cn(
-          "flex w-full flex-col gap-1.5 rounded-(--c-note-card-radius) border p-3 text-left outline-none transition-shadow hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring",
-          selected && "ring-2 ring-foreground"
-        )}
-        style={{ background: noteFill(n.color), borderColor: noteEdge(n.color) }}
-      >
-        {n.cover && !n.locked && <NoteCover id={n.cover} className="-mx-3 -mt-3 mb-1 w-[calc(100%+1.5rem)] max-w-none rounded-t-[calc(var(--c-note-card-radius)-1px)]" />}
-        <span className="flex items-start gap-1.5">
-          <span className={cn("min-w-0 flex-1 font-semibold break-words", !n.title && "text-muted-foreground")}>{n.title || "New note"}</span>
-          {(n.locked || isShared(n)) && <Icon name={n.locked ? "locked" : "user--multiple"} size="sm" className="text-foreground/60" label={n.locked ? "Locked" : sharedLabel(n)} />}
-          {n.pinned && <Icon name="pin--filled" size="sm" label="Pinned" />}
-        </span>
-        {n.locked ? (
-          <span className="text-sm text-foreground/60 italic">Locked</span>
-        ) : (
-          n.snippet && <span className="line-clamp-6 text-sm break-words text-foreground/80">{n.snippet}</span>
-        )}
-        {(n.tags.length > 0 || n.links.length > 0 || n.remindAt) && (
-          <span className="flex flex-wrap items-center gap-1 pt-0.5 text-xs text-foreground/70">
-            {n.remindAt && (
-              <span data-role="note-reminder" className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-foreground/8 px-2 py-0.5", due && "font-medium text-foreground")}>
-                <Icon name={due ? "notification--filled" : "time"} size={14} />
-                {due ? `Due · ${reminderLabel(n.remindAt)}` : reminderLabel(n.remindAt)}
-              </span>
-            )}
-            {n.links.length > 0 && <Icon name="link" size={14} label={`${n.links.length} linked`} />}
-            {n.tags.map((t) => (
-              <span key={t} className="rounded-full bg-foreground/8 px-2 py-0.5">
-                #{t}
-              </span>
-            ))}
+    <div role="listitem" className="min-w-0">
+      <Tile swatch={swatch ? swatchId(swatch) : undefined} edge={swatch ? undefined : "none"} size="compact" selected={selected} onClick={onOpen}>
+        <span className="flex min-w-0 flex-col gap-2">
+          {n.cover && !n.locked && <NoteCover id={n.cover} />}
+          <span className="type-subtitle break-words">
+            {n.title || "New note"}
+            {n.color && <span className="sr-only">, {NOTE_COLOR_LABEL[n.color]}</span>}
           </span>
-        )}
-        {n.color && <span className="sr-only">{NOTE_COLOR_LABEL[n.color]}</span>}
-        <span className="text-[11px] text-foreground/60">{shortTime(n.updated)}</span>
-      </button>
+          {!n.locked && n.snippet && <span className="line-clamp-6 type-caption break-words text-support-foreground">{n.snippet}</span>}
+          <span className="flex items-baseline justify-between gap-2 type-meta text-muted-foreground">
+            <span className="truncate">{editedLabel(n)}</span>
+            {tag && <span className="shrink-0 type-overline">{tag}</span>}
+          </span>
+        </span>
+      </Tile>
     </div>
   )
 }
