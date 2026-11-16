@@ -16,7 +16,7 @@ A review of the merged rebuild found 27 things. This records the fixes that chan
 ### Mail's sidebar: the accounts before Team, in sight when one is broken (Desktop / 01, 05)
 
 - Mail's groups are FOLDERS, ACCOUNTS, then TEAM. Team is the brief's addition and the frames do not draw it.
-- No "All" row, as Mobile / 05 and Desktop / 01 draw the accounts. No account chosen means all of them. Pressing the chosen account again goes back to all; the page head's overline says ALL ACCOUNTS. The page head's arrows still step through all accounts.
+- No "All" row, as Mobile / 05 and Desktop / 01 draw the accounts. No account chosen means all of them. Pressing the chosen account again goes back to all; the page head's overline says ALL ACCOUNTS. **Since Vale 1 (2026-11-16):** while an account is chosen, the ACCOUNTS heading shows an ALL text action (named "Show all accounts"), because unpicking a radio by pressing it again is hidden and breaks radio semantics for screen readers. Pressing the chosen account again still works. The page head's arrows still step through all accounts.
 - Each account has the `user--avatar` glyph, as drawn.
 - An account that stopped syncing scrolls the sidebar's middle so its row is in sight, by whole groups so no row is cut at the top. The scene `mail-sync-error` checks the row "Work, sync problem" is inside the middle at 1440 × 900.
 

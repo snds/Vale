@@ -32,6 +32,10 @@ CREATE TABLE team_threads (
 CREATE INDEX team_threads_thread ON team_threads(thread_id);
 ";
 
+/// Version 24: when the newest message in a shared conversation was written (Vale 43): the Team
+/// list's time and order, as shared inboxes sort.
+pub(crate) const MIGRATE_V24: &str = "ALTER TABLE team_threads ADD COLUMN latest INTEGER;";
+
 /// Version 21: a share's own key, when it's end-to-end encrypted (ADR-0062).
 pub(crate) const MIGRATE_V21: &str = "ALTER TABLE team_threads ADD COLUMN key TEXT;";
 
@@ -56,6 +60,8 @@ pub struct TeamThread {
     pub from: Option<String>,
     pub created: i64,
     pub updated: i64,
+    /// When the newest message in it was written, once its document has been saved with one (Vale 43).
+    pub latest: Option<i64>,
 }
 
 /// A teammate's link, as the UI read it.
@@ -73,7 +79,7 @@ pub struct TeamLink {
     pub key: Option<String>,
 }
 
-const COLS: &str = "id, role, thread_id, revoked, relay, token, title, sender, created, updated, key";
+const COLS: &str = "id, role, thread_id, revoked, relay, token, title, sender, created, updated, key, latest";
 
 fn row(r: &rusqlite::Row) -> rusqlite::Result<TeamThread> {
     Ok(TeamThread {
@@ -88,6 +94,7 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<TeamThread> {
         created: r.get(8)?,
         updated: r.get(9)?,
         key: r.get(10)?,
+        latest: r.get(11)?,
     })
 }
 
@@ -97,9 +104,10 @@ fn valid_id(id: &str) -> bool {
 }
 
 impl Store {
-    /// Every shared conversation, most recently active first.
+    /// Every shared conversation, the newest message first (Vale 43); one with no message saved yet
+    /// by when it last changed.
     pub fn team_threads(&self) -> Result<Vec<TeamThread>> {
-        let mut stmt = self.db.prepare(&format!("SELECT {COLS} FROM team_threads ORDER BY updated DESC"))?;
+        let mut stmt = self.db.prepare(&format!("SELECT {COLS} FROM team_threads ORDER BY COALESCE(latest, updated) DESC, updated DESC"))?;
         let out = stmt.query_map([], row)?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(out)
     }
@@ -188,11 +196,11 @@ impl Store {
         Ok(self.db.query_row("SELECT ydoc FROM team_threads WHERE id = ?1", [id], |r| r.get(0)).optional()?.flatten())
     }
 
-    /// Saves the document's state, with its title, and marks it active.
-    pub fn save_team_doc(&self, id: &str, ydoc: &str, title: Option<&str>) -> Result<TeamThread> {
+    /// Saves the document's state, with its title and its newest message's time, and marks it active.
+    pub fn save_team_doc(&self, id: &str, ydoc: &str, title: Option<&str>, latest: Option<i64>) -> Result<TeamThread> {
         let n = self.db.execute(
-            "UPDATE team_threads SET ydoc = ?2, title = COALESCE(?3, title), updated = MAX(?4, updated + 1) WHERE id = ?1",
-            params![id, ydoc, title.map(str::trim).filter(|t| !t.is_empty()), now()],
+            "UPDATE team_threads SET ydoc = ?2, title = COALESCE(?3, title), updated = MAX(?4, updated + 1), latest = COALESCE(?5, latest) WHERE id = ?1",
+            params![id, ydoc, title.map(str::trim).filter(|t| !t.is_empty()), now(), latest],
         )?;
         if n == 0 {
             return Err(Error::NotFound("that shared conversation isn't here any more".into()));
@@ -246,9 +254,11 @@ mod tests {
         let t = s.join_team_thread(&link).unwrap();
         assert_eq!((t.role, t.relay.as_deref(), t.thread_id.as_deref()), (ShareRole::Guest, Some("wss://notes.example.com"), None));
         assert_eq!(s.join_team_thread(&link).unwrap().created, t.created, "the same link twice is one conversation");
-        let saved = s.save_team_doc(&t.id, "AAA=", Some("Re: Offsite venue")).unwrap();
+        let saved = s.save_team_doc(&t.id, "AAA=", Some("Re: Offsite venue"), Some(1_760_000_000)).unwrap();
         assert_eq!(saved.title, "Re: Offsite venue");
         assert!(saved.updated > t.updated);
+        assert_eq!(saved.latest, Some(1_760_000_000), "the newest message's time (Vale 43)");
+        assert_eq!(s.save_team_doc(&t.id, "AAA=", None, None).unwrap().latest, Some(1_760_000_000), "a save with no messages keeps it");
         assert_eq!(s.team_doc(&t.id).unwrap().as_deref(), Some("AAA="));
         s.stop_team_thread(&t.id).unwrap();
         assert!(s.join_team_thread(&link).is_err(), "a stopped link can't be joined again");
@@ -258,6 +268,19 @@ mod tests {
         for bad in [TeamLink { id: "short".into(), ..link.clone() }, TeamLink { relay: "https://x".into(), ..link.clone() }, TeamLink { token: " ".into(), ..link.clone() }, TeamLink { key: Some("short".into()), ..link }] {
             assert!(s.join_team_thread(&bad).is_err());
         }
+    }
+
+    #[test]
+    fn the_team_list_is_newest_message_first() {
+        // Vale 43: the row time and the order follow the newest message, not when the share last changed.
+        let s = Store::open_in_memory().unwrap();
+        let link = |id: &str| TeamLink { id: id.into(), relay: "wss://notes.example.com".into(), token: "s1.x".into(), title: id.into(), from: None, key: None };
+        let old = s.join_team_thread(&link("aaaaaaaaaaaaaaaaaaaa")).unwrap();
+        let new = s.join_team_thread(&link("bbbbbbbbbbbbbbbbbbbb")).unwrap();
+        s.save_team_doc(&old.id, "AAA=", None, Some(1_760_000_000)).unwrap();
+        s.save_team_doc(&new.id, "AAA=", None, Some(1_700_000_000)).unwrap();
+        let order: Vec<String> = s.team_threads().unwrap().into_iter().map(|t| t.id).collect();
+        assert_eq!(order, vec![old.id, new.id], "the newer message leads, though the other share changed later");
     }
 
     #[test]

@@ -11,7 +11,11 @@ import type { AiPrefs, AiProvider, CollectionKind, KeyBindings, MailPrefs, Messa
 export const queryClient = new QueryClient({
   defaultOptions: {
     // The core pushes change events, so polling and refetch-on-focus are unnecessary.
-    queries: { staleTime: Infinity, refetchOnWindowFocus: false, retry: false },
+    // `offlineFirst` (Vale 17): with no network a read is still tried once, so a screen never waits on
+    // skeletons for a network that is not coming. A list read before keeps showing (its refetch waits for
+    // the network); one never read says it can't load, and the status says Offline with the last sync.
+    // The in-memory demo and the desktop core need no network, so their reads run as before.
+    queries: { staleTime: Infinity, refetchOnWindowFocus: false, retry: false, networkMode: "offlineFirst" },
   },
 })
 
@@ -258,10 +262,17 @@ export function useSetMailPrefs() {
 }
 
 /** How you appear to people you share with (ADR-0060): your first account's name. */
+/**
+ * Your own name, as teammates see it on comments (Vale 43): your name on the gateway, else your
+ * first account's address. Never the account's label ("Personal"), which names the account, not you.
+ * Accounts keep no person's name of their own yet, so the address stands in for it.
+ */
 export function useMyName() {
   const { data: accounts = [] } = useAccounts()
+  const gatewayName = gatewayMe()?.name?.trim()
+  if (gatewayName) return gatewayName
   const a = accounts[0]
-  return a ? a.displayName || a.address : "Me"
+  return a ? a.address : "Me"
 }
 
 // ── A shared inbox on the gateway (ADR-0063) ────────────────────────────────

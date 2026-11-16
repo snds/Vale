@@ -6,6 +6,7 @@ import { placeIsGroupItem } from "./places"
 import { SectionGroups } from "./section-groups"
 import { useUi } from "./ui-store"
 import { useUpdateMark } from "./update-mark"
+import { useWaitingOnYou, waitingMark } from "@/features/mail/waiting-on-you"
 import { VERTICALS, type Vertical, type VerticalId } from "./verticals"
 
 interface SidebarProps {
@@ -42,6 +43,8 @@ export function Sidebar({ sections, active, current, onNavigate, onSettings, onS
   // otherwise the section under Apps. Settings marks itself alone, and so does Search.
   const inGroup = current !== "settings" && current !== "search" && groups && placeIsGroupItem(current, calendarPlace)
   const mark = useUpdateMark()
+  // What waits on you in Mail and can wait: a count in the needs-you tone on the way in (cross-app settlement).
+  const mailMark = waitingMark(useWaitingOnYou().length)
   const { data: keys } = useKeyBindings()
   return (
     <AppFrameSidebar
@@ -63,7 +66,7 @@ export function Sidebar({ sections, active, current, onNavigate, onSettings, onS
       {sections.length > 1 && (
         <NavSection title="Apps" count={VERTICALS.length}>
           {sections.map((v) => (
-            <NavItem key={v.id} label={v.label} icon={v.icon} current={current === v.id && !inGroup} onClick={() => onNavigate(v.id)} />
+            <NavItem key={v.id} label={v.label} icon={v.icon} current={current === v.id && !inGroup} mark={v.id === "mail" ? mailMark : undefined} onClick={() => onNavigate(v.id)} />
           ))}
         </NavSection>
       )}

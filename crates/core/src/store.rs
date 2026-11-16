@@ -36,7 +36,7 @@ pub const ARCHIVE: &str = "Archive";
 /// `sync_state` key for an account's JMAP state (account-wide, not per mailbox).
 const JMAP_STATE: &str = "*jmap";
 
-const SCHEMA_VERSION: i64 = 23;
+const SCHEMA_VERSION: i64 = 24;
 
 /// Version 1: the Phase 1 schema.
 const SCHEMA_V1: &str = r#"
@@ -273,6 +273,9 @@ impl Store {
         }
         if version < 23 {
             tx.execute_batch(crate::note_files::MIGRATE_V23)?;
+        }
+        if version < 24 {
+            tx.execute_batch(crate::team_threads::MIGRATE_V24)?;
         }
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         tx.commit()?;
@@ -1100,6 +1103,26 @@ impl Store {
         Ok(self.outbox_item(id)?.draft)
     }
 
+    /// Clear a send that failed (W9, Vale 35): it leaves the Outbox. Only a
+    /// failed item can be cleared; [`Store::restore_failed_send`] puts it back.
+    pub fn clear_failed_send(&self, id: &str) -> Result<()> {
+        let n = self.db.execute("UPDATE outbox SET state = 'cleared' WHERE id = ?1 AND state = 'failed'", [id])?;
+        if n == 0 {
+            return Err(Error::Invalid("only a message that wasn't sent can be deleted from the Outbox".into()));
+        }
+        Ok(())
+    }
+
+    /// UNDO after [`Store::clear_failed_send`]: the failed send is back in the
+    /// Outbox, with its message and its error, as it was.
+    pub fn restore_failed_send(&self, id: &str) -> Result<OutboxItem> {
+        let n = self.db.execute("UPDATE outbox SET state = 'failed' WHERE id = ?1 AND state = 'cleared'", [id])?;
+        if n == 0 {
+            return Err(Error::NotFound("that message isn't in the outbox".into()));
+        }
+        self.outbox_item(id)
+    }
+
     /// Move a waiting message to another time, or `None` to send it now.
     pub fn reschedule_send(&self, id: &str, send_at: Option<i64>) -> Result<OutboxItem> {
         let at = match send_at {
@@ -1427,7 +1450,8 @@ fn outbox_row(r: &Row) -> rusqlite::Result<OutboxItem> {
             "queued" => OutboxState::Queued,
             "sending" => OutboxState::Sending,
             "sent" => OutboxState::Sent,
-            "cancelled" => OutboxState::Cancelled,
+            // A failed send someone deleted (W9) is out of the Outbox, as a cancelled one is.
+            "cancelled" | "cleared" => OutboxState::Cancelled,
             _ => OutboxState::Failed,
         },
         error: r.get(4)?,
@@ -1687,6 +1711,25 @@ mod tests {
         assert!(s.cancel_send(&item.id).is_err(), "can't undo once sending started");
         s.finish_send(&item.id, None).unwrap();
         assert!(s.outbox().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_failed_send_can_be_cleared_and_put_back() {
+        // W9, Vale 35: NOT SENT rows get DELETE, with UNDO.
+        let (s, acct) = store_with_account();
+        let item = s.queue_send(&draft(&acct), 10, None).unwrap();
+        assert!(s.clear_failed_send(&item.id).is_err(), "a waiting send is not cleared this way");
+        s.claim_due(item.send_at).unwrap();
+        s.finish_send(&item.id, Some("550 mailbox unavailable")).unwrap();
+        assert_eq!(s.outbox().unwrap().len(), 1);
+        s.clear_failed_send(&item.id).unwrap();
+        assert!(s.outbox().unwrap().is_empty(), "cleared");
+        assert!(s.clear_failed_send(&item.id).is_err(), "cleared once");
+        let back = s.restore_failed_send(&item.id).unwrap();
+        assert_eq!(back.state, OutboxState::Failed);
+        assert_eq!(back.error.as_deref(), Some("550 mailbox unavailable"));
+        assert_eq!(s.outbox().unwrap().len(), 1, "UNDO put it back");
+        assert!(s.restore_failed_send(&item.id).is_err(), "only a cleared send comes back");
     }
 
     #[test]

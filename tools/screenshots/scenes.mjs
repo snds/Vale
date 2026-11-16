@@ -18,8 +18,8 @@
 //   scenario    a demo scenario's name, or a list of them
 //               (apps/web/src/core/demo-scenarios.ts), set before the app loads
 //   offline     the connection drops once the app has loaded. A read the app
-//               hasn't made yet then waits (React Query pauses offline), so a
-//               scene that opens something new also sets loading
+//               hasn't made yet is still tried once (React Query's offlineFirst,
+//               Vale 17), so a screen opened offline settles like any other
 //   loading     the picture is of a loading screen: skeletons and aria-busy
 //               don't hold it back
 //   assert(app) runs on the still screen, before the picture; a throw fails

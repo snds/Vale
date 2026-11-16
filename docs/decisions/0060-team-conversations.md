@@ -100,3 +100,9 @@ Its own Yjs document on your relay, `mailbird/shared/<id>`, as a shared note's i
 - **The copy follows the conversation only while your app runs.** New mail arriving while it's closed joins the copy the next time it opens.
 - **Attachments stay with you.** Teammates see that a message had them only if its text says so. Sharing them would mean giving each one a share token too, as images in shared notes would need ([ADR-0056](0056-shared-notes.md)).
 - **No presence or read state yet.** Yjs awareness could show who is here, and which comments are new to you.
+
+## Since Vale 43 (2026-11-16)
+
+- **Row time and order:** the Team list shows the newest message's time and lists the newest message first, as shared inboxes such as Front do. The core keeps `latest` on each shared conversation (schema version 24), saved with its document (`save_team_doc(id, ydoc, title, latest)`); a share with no message saved yet uses when it last changed.
+- **Your name on comments:** your name on the gateway, else your first account's address; never the account's label ("Personal"). Accounts keep no person's name yet, so the address stands in.
+- **Leave asks first:** "Leave {subject}?" in a 480 question with LEAVE, focus on Cancel. Leaving cannot be undone without a new invitation.

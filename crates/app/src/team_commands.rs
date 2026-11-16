@@ -56,8 +56,8 @@ pub fn team_doc(state: &Shared, id: String) -> Res<Option<String>> {
     with_store(state, |s| s.team_doc(&id))
 }
 
-pub fn save_team_doc(app: AppHandle, state: &Shared, id: String, ydoc: String, title: Option<String>) -> Res<TeamThread> {
-    let t = with_store(state, |s| s.save_team_doc(&id, &ydoc, title.as_deref()))?;
+pub fn save_team_doc(app: AppHandle, state: &Shared, id: String, ydoc: String, title: Option<String>, latest: Option<i64>) -> Res<TeamThread> {
+    let t = with_store(state, |s| s.save_team_doc(&id, &ydoc, title.as_deref(), latest))?;
     changed(&app);
     Ok(t)
 }

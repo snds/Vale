@@ -12,7 +12,7 @@ Before, an invitation was a rounded grey card with a date badge, outline toggles
 ### The notice slot (`conversation-view.tsx`)
 
 1. **One block at most, in a fixed order:** the Screener's NEW SENDER notice (a calm notice, ADR-0114), then a reminder that came due, then the newest invitation waiting for an answer (a `request`, not outdated, with no answer or `needs-action`).
-2. **NO REPLY YET:** body "You asked to be reminded {when}.", a solid DONE (archives, toast with UNDO) and a text REMIND AGAIN (the reminder times, ADR-0092).
+2. **NO REPLY YET:** body "You asked to be reminded {when}.", a solid DONE (archives, toast with UNDO) and a text REMIND AGAIN (the reminder times, ADR-0092). Archiving dismisses a reminder that came due, so UNDO is whole (Vale 33, 2026-11-16): it un-archives, then the core's `restore_follow_up(threadId, dueAt)` puts the reminder back at its own time (which may have passed; `set_follow_up` refuses the past). Every archive's UNDO does this, from the toolbar, a key or a swipe too.
 3. **INVITATION // WED 11.18:** body "{title}, 16:30 – 17:15, {location}", a solid ACCEPT and the text actions MAYBE and DECLINE. Unicron 1.0's `NeedsYou` holds two text actions (`secondaryActions`), so the brief's first answer to **Q9** is built; if Sean says one, the two become one OTHER ANSWERS menu.
 4. **A second waiting thing** is a compact `ListRow` under `SectionHeader` WAITING ON YOU, and the block's title ends `// +1` (`NeedsYou more`). The reminder's row: "No reply yet", DONE, REMIND AGAIN in its menu. The invitation's row: its title, time and place, RESPOND (a menu of Accept, Maybe, Decline). Under the Screener's notice every waiting thing is a row, so an answer is never out of reach.
 

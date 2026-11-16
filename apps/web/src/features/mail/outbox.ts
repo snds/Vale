@@ -8,7 +8,7 @@ import { useOutbox } from "@/core/queries"
 import type { Draft, OutboxItem } from "@/core/types"
 
 import { displayName } from "./format"
-import { rowTime } from "./row-time"
+import { longTime } from "@/lib/time"
 import { sendName, undoSend } from "./sending"
 
 // ── Failed sends, said once (ADR-0095; brief M7) ─────────────────────────
@@ -58,8 +58,7 @@ export function markFailedSeen(ids: string[]) {
 
 /**
  * EDIT on a failed send (brief M7, W9): a copy of its message opens, and the
- * failed item stays listed, because the core keeps failed items and has no
- * call to clear one.
+ * failed item stays listed until DELETE clears it (Vale 35).
  */
 export function editFailed(item: OutboxItem) {
   markFailedSeen([item.id])
@@ -125,7 +124,8 @@ export const outboxActions = {
   changeTime: async (item: OutboxItem, at: number) => {
     try {
       const moved = await (await getCoreClient()).rescheduleSend(item.id, at)
-      toast(`Moved ${sendName(item)} to ${rowTime(moved.sendAt)}`)
+      // A toast is a sentence: the device's own format, not the row's (Vale 35).
+      toast(`Moved ${sendName(item)} to ${longTime(moved.sendAt)}`)
     } catch (e) {
       fail(e)
     }
@@ -152,6 +152,19 @@ export const outboxActions = {
     }
   },
   editFailed,
+  /** DELETE on a failed send (W9, Vale 35): out of the Outbox; UNDO puts it back as it was. */
+  removeFailed: async (item: OutboxItem) => {
+    try {
+      const client = await getCoreClient()
+      markFailedSeen([item.id])
+      await client.clearFailedSend(item.id)
+      toast(`Deleted ${sendName(item)}`, {
+        action: { label: "Undo", onClick: () => void client.restoreFailedSend(item.id).catch(fail) },
+      })
+    } catch (e) {
+      fail(e)
+    }
+  },
 }
 
 /**
@@ -163,7 +176,7 @@ export const outboxActions = {
 export async function backToOutbox({ draft, sendAt }: { draft: Draft; sendAt: number }) {
   try {
     const item = await (await getCoreClient()).queueSend(draft, 0, sendAt)
-    toast(`Back in Outbox for ${rowTime(item.sendAt)}`)
+    toast(`Back in Outbox for ${longTime(item.sendAt)}`)
   } catch (e) {
     toast.error(`Not back in Outbox: ${draft.subject.trim() || "message"}`, {
       description: e instanceof Error ? e.message : String(e),

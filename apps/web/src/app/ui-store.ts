@@ -169,6 +169,12 @@ export type ComposerDraft = Partial<Draft> & {
   outbox?: { draft: Draft; sendAt: number }
   /** A bottom-posted reply: the cursor starts below the quote (ADR-0055). */
   cursorAfterQuote?: boolean
+  /**
+   * Reply filled this in and nothing was written yet (Vale 22): closing asks only once the recipients,
+   * subject or text differ from what Reply put there. Not set when the reply opens with words (a
+   * suggested reply, the pinned field's text), nor on a message reopened by Undo send.
+   */
+  fromReply?: boolean
 }
 
 /** Every section's first place: where a section opens, and where it falls back when its place is gone. */

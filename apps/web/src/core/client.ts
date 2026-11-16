@@ -155,6 +155,12 @@ export interface CoreClient {
   rescheduleSend(id: string, sendAt: number | null): Promise<OutboxItem>
   // Follow-ups, unsubscribe, templates, signatures (ADR-0017)
   setFollowUp(threadId: string, dueAt: number): Promise<void>
+  /** UNDO after DONE (Vale 33): the reminder DONE dismissed, back at its own time, which may have passed. */
+  restoreFollowUp(threadId: string, dueAt: number): Promise<void>
+  /** DELETE on a send that failed (W9, Vale 35): it leaves the Outbox. */
+  clearFailedSend(id: string): Promise<void>
+  /** Its UNDO: back in the Outbox as it was. */
+  restoreFailedSend(id: string): Promise<OutboxItem>
   cancelFollowUp(threadId: string): Promise<void>
   unsubscribe(messageId: string): Promise<UnsubscribeMethod>
   listTemplates(): Promise<Template[]>
@@ -198,7 +204,8 @@ export interface CoreClient {
   removeTeamThread(id: string): Promise<void>
   /** The shared document's last saved state (base64 Yjs). */
   teamDoc(id: string): Promise<string | null>
-  saveTeamDoc(id: string, ydoc: string, title: string | null): Promise<TeamThread>
+  /** `latest`: when the newest message in it was written (Vale 43). */
+  saveTeamDoc(id: string, ydoc: string, title: string | null, latest?: number | null): Promise<TeamThread>
   /** Opt-in AI (ADR-0059). Keys go to the keychain (or the gateway's sealed store) and never come back. */
   aiSettings(): Promise<AiSettings>
   setAiPrefs(prefs: AiPrefs): Promise<AiSettings>
@@ -442,6 +449,9 @@ function commands(call: Call): Omit<CoreClient, "kind" | "remote" | "on"> {
     listOutbox: () => call("list_outbox"),
     rescheduleSend: (id, sendAt) => call("reschedule_send", { id, sendAt }),
     setFollowUp: (threadId, dueAt) => call("set_follow_up", { threadId, dueAt }),
+    restoreFollowUp: (threadId, dueAt) => call("restore_follow_up", { threadId, dueAt }),
+    clearFailedSend: (id) => call("clear_failed_send", { id }),
+    restoreFailedSend: (id) => call("restore_failed_send", { id }),
     cancelFollowUp: (threadId) => call("cancel_follow_up", { threadId }),
     unsubscribe: (messageId) => call("unsubscribe", { id: messageId }),
     listTemplates: () => call("list_templates"),
@@ -472,7 +482,7 @@ function commands(call: Call): Omit<CoreClient, "kind" | "remote" | "on"> {
     stopTeamThread: (id) => call("stop_team_thread", { id }),
     removeTeamThread: (id) => call("remove_team_thread", { id }),
     teamDoc: (id) => call("team_doc", { id }),
-    saveTeamDoc: (id, ydoc, title) => call("save_team_doc", { id, ydoc, title }),
+    saveTeamDoc: (id, ydoc, title, latest = null) => call("save_team_doc", { id, ydoc, title, latest }),
     aiSettings: () => call("ai_settings"),
     setAiPrefs: (prefs) => call("set_ai_prefs", { prefs }),
     setAiKey: (provider, key) => call("set_ai_key", { provider, key }),

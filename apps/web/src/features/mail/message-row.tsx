@@ -5,6 +5,7 @@ import type { Lane, MessageSummary } from "@/core/types"
 
 import { displayName } from "./format"
 import { rowTime } from "./row-time"
+import { RowTimeTip } from "./row-time-tip"
 
 export interface MessageRowProps {
   message: MessageSummary
@@ -57,14 +58,19 @@ export function MessageRow({ message: m, onOpen, selected, lane, now, account, q
         ) : undefined
       }
       account={account}
+      // The clock time as the frames write it; its relative age in a tooltip (cross-app settlement).
       time={
         returns ? (
           <span className="inline-flex items-center gap-1 align-bottom">
             <Icon name={returns} size="sm" label={returns === "time" ? "Back at" : "Reminder at"} />
-            {rowTime(at, today)}
+            <RowTimeTip at={at} now={today}>
+              {rowTime(at, today)}
+            </RowTimeTip>
           </span>
         ) : (
-          rowTime(at, today)
+          <RowTimeTip at={at} now={today}>
+            {rowTime(at, today)}
+          </RowTimeTip>
         )
       }
       subject={query ? <Highlight text={subject} query={query} /> : <TruncatedText>{subject}</TruncatedText>}

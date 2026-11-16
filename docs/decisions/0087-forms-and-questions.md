@@ -45,7 +45,7 @@ ADR-0037 and the baton's sheet rule put Quick Note and the editors in the adapti
 
 ## DC10 (proposal)
 
-Closing a form dropped what was typed, and deleting an event ran at once; neither can be undone. Forms now ask first (this ADR). Deleting an event asks through `useConfirm` when the calendar lane builds it. **Question for Sean:** a message asks whenever it holds anything, so a reply closed untouched asks too. Right, or should a reply ask only once something is typed?
+Closing a form dropped what was typed, and deleting an event ran at once; neither can be undone. Forms now ask first (this ADR). Deleting an event asks through `useConfirm` when the calendar lane builds it. **Answered (Vale 22, 2026-11-16):** a reply closed untouched does not ask. Reply fills in the recipient, the subject and the quote, so nothing is lost; it asks once the recipients, subject or text differ from what Reply filled in (`fromReply` on the composer's draft). A reply that opens with words (a suggested reply, the pinned field's text) and a message reopened by Undo send still ask whenever they hold anything.
 
 ## Not built, and why
 

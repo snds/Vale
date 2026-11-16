@@ -17,6 +17,15 @@ export function useTriage(onLeave: () => void) {
   const archive = useMailAction<{ threadId: string; archived: boolean }>((c, a) => c.setThreadArchived(a.threadId, a.archived))
   const snooze = useMailAction<{ threadId: string; until: number }>((c, a) => c.snoozeThread(a.threadId, a.until))
   const unsnooze = useMailAction<{ threadId: string }>((c, a) => c.unsnoozeThread(a.threadId))
+  // Archiving a conversation a reminder brought back dismisses the reminder (DONE does just that), so its
+  // UNDO puts both back: the conversation, then the reminder at its own time (Vale 33).
+  const unarchive = useMailAction<{ threadId: string; reminder: number | null }>(async (c, a) => {
+    // A conversation of only your own mail has nothing to un-archive: the reminder is all there is to put back.
+    await c.setThreadArchived(a.threadId, false).catch((e) => {
+      if (a.reminder === null) throw e
+    })
+    if (a.reminder !== null) await c.restoreFollowUp(a.threadId, a.reminder)
+  })
 
   const fail = (e: unknown) => toast.error(String(e instanceof Error ? e.message : e))
 
@@ -26,6 +35,7 @@ export function useTriage(onLeave: () => void) {
     toggleFlag: (m: MessageSummary) => flag.mutate({ threadId: m.threadId, flagged: !m.flagged }, { onError: fail }),
     toggleArchive: (m: MessageSummary) => {
       const archived = !m.archived
+      const reminder = archived && m.followUpAt != null && m.followUpAt <= Date.now() / 1000 ? m.followUpAt : null
       archive.mutate(
         { threadId: m.threadId, archived },
         {
@@ -34,7 +44,11 @@ export function useTriage(onLeave: () => void) {
             onLeave()
             // Toasts name the thing (cross-app decisions §12).
             toast(archived ? `Archived ${name(m)}` : `Moved ${name(m)} to Inbox`, {
-              action: { label: "Undo", onClick: () => archive.mutate({ threadId: m.threadId, archived: !archived }) },
+              action: {
+                label: "Undo",
+                onClick: () =>
+                  archived ? unarchive.mutate({ threadId: m.threadId, reminder }, { onError: fail }) : archive.mutate({ threadId: m.threadId, archived: true }, { onError: fail }),
+              },
             })
           },
         },

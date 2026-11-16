@@ -8,7 +8,7 @@ import { useSectionBanner, type SectionBanner } from "@/app/section-banner"
 import { SectionSwitcher } from "@/app/section-switcher"
 import { pendingJump, useUi } from "@/app/ui-store"
 import { vertical } from "@/app/verticals"
-import { Icon, Button, EmptyState, formatListCount, type PageHeadSwipe } from "@unicron/ui"
+import { Icon, Button, EmptyState, NeedsYou, formatListCount, type PageHeadSwipe } from "@unicron/ui"
 import { LoadState } from "@/components/load-state"
 import { leaveThen } from "@/lib/leave-guard"
 import { MasterDetail } from "@/components/master-detail"
@@ -33,6 +33,7 @@ import { SenderPanelSlot } from "./sender-profile"
 import { useTeamCount } from "../team/link-form"
 import { TeamHeadAction, TeamList, TeamThreadView } from "../team/team-view"
 import { InboxChips, NewsletterBundle, ScreenerPointer } from "./splits"
+import { useWaitingOnYou } from "./waiting-on-you"
 import { LaneConversation, LoadingRows, SnoozedBeside } from "./lane-list"
 import { rowTime } from "./row-time"
 import { useSnoozed } from "./use-snoozed"
@@ -99,6 +100,7 @@ export function MailView() {
   // A check the person asks for is live status while it runs (ADR-0086).
   const checking = useStatus((s) => s.checking > 0)
   const triage = useTriage(() => setSelected(null))
+  const waitingOnYou = useWaitingOnYou()
   const verb = useMailVerbs(triage, senderActions)
   const { data: swipes = { right: "read", rightLong: "none", left: "archive", leftLong: "none" } } = useSwipeActions()
   const markSeen = triage.markSeen
@@ -256,6 +258,23 @@ export function MailView() {
           <LoadingRows count={5} label={`Loading ${laneInfo.label}`} />
         ) : (
           <LoadState place={laneInfo.label} overline={laneInfo.label} error={readError} hasData={list.length > 0} onRetry={() => void refetch()} retrying={isRefetching}>
+            {/* What waits on you and can wait, as the block on Mail's home screen (cross-app settlement): conversations a
+                reminder brought back with no reply yet. Hidden while one is open beside the list, which has its own block. */}
+            {tab === "inbox" && !category && !split && !selected && waitingOnYou.length > 0 && (
+              <div className="px-4 pb-4" data-role="waiting-on-you">
+                <NeedsYou
+                  title="No reply yet"
+                  more={waitingOnYou.length > 1 ? waitingOnYou.length - 1 : undefined}
+                  body={`You asked to be reminded about ${waitingOnYou[0]!.subject || "(no subject)"}.`}
+                  announce={false}
+                  action={
+                    <Button variant="needs-you" onClick={() => leaveThen(() => setSelected(waitingOnYou[0]!))}>
+                      Open
+                    </Button>
+                  }
+                />
+              </div>
+            )}
             {/* Above the first conversation, at most two compact rows (brief M1): the Screener where the sidebar can't say it, and the newsletters. */}
             {tab === "inbox" && !category && !split && waiting > 0 && switching.switcher && (
               <ScreenerPointer waiting={waiting} onOpen={() => useUi.getState().setMailTab("screener")} />

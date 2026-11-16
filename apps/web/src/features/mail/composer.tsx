@@ -367,16 +367,19 @@ function WritingForm({ initial, onDone, onSaveTemplate }: { initial: ComposerDra
     }
   }
 
-  // Closing asks whenever the message holds a recipient, a subject, text or a file (brief X6): a reply
-  // and a message reopened by Undo send always do. The signature alone is not writing.
-  // A message EDIT took out of the Outbox asks only when it was changed: closed as it was, it goes back (brief X6).
+  // Closing asks whenever the message holds a recipient, a subject, text or a file (brief X6), and a
+  // message reopened by Undo send always does. The signature alone is not writing.
+  // Two kinds ask only when changed from how they opened: a message EDIT took out of the Outbox (closed as
+  // it was, it goes back; brief X6), and a reply (Vale 22, cross-app §10): the recipient, subject and quote
+  // came from Reply, so an untouched reply closes without asking, as Apple Mail's does.
   const written = () => JSON.stringify([to, showCc ? cc : "", subject, files.length, htmlToText(editor.getHTML()), followUp, receipt, sendAt])
   const asOpened = useRef<string | null>(null)
+  const comparesToOpened = !!initial.outbox || !!initial.fromReply
   useEffect(() => {
-    if (initial.outbox && asOpened.current === null && signatures) asOpened.current = written()
+    if (comparesToOpened && asOpened.current === null && signatures) asOpened.current = written()
   })
   useLeaveGuard(() => {
-    if (initial.outbox) return asOpened.current !== null && written() !== asOpened.current
+    if (comparesToOpened) return asOpened.current !== null && written() !== asOpened.current
     if (to.trim() || (showCc && cc.trim()) || subject.trim() || files.length) return true
     const html = editor.isEmpty ? "" : editor.getHTML()
     return htmlToText(shownBlock.current ? html.replace(shownBlock.current, "") : html).trim() !== ""

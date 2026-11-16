@@ -142,7 +142,9 @@ export const scenes = [
       ensure(await quickCreate(page).isVisible(), "Shift+F10 on create did not open quick create")
       await leave(app)
       ensure(!(await quickCreate(page).count()), "Escape did not close quick create")
+      await app.settle()
       await button(page, "Compose").click({ button: "right" })
+      await app.settle()
     },
     assert: async ({ page }) => ensure(await quickCreate(page).isVisible(), "quick create is not open"),
   },
@@ -360,7 +362,7 @@ export const scenes = [
         ensure(await strip(page).locator('[data-slot="accessory-open"]').count(), "the strip's text area is not a button")
       } else {
         const items = await statusItems(page).allInnerTexts()
-        ensure(items.length === 2 && /^CHECKING \/\/ 2 ACCOUNTS$/i.test(items[0].trim()) && /^SYNCED \/\/ 09:16$/i.test(items[1].trim()), `the status line says ${JSON.stringify(items)}`)
+        ensure(items.length === 2 && /^CHECKING \/\/ 002 ACCOUNTS$/i.test(items[0].trim()) && /^SYNCED \/\/ 09:16$/i.test(items[1].trim()), `the status line says ${JSON.stringify(items)}`)
         ensure((await statusItems(page).first().getAttribute("data-tone")) === "live", "the live item is not first")
         ensure(!(await statusLine(page).getByRole("button", { name: /Check again$/ }).count()), "Check again is still offered while checking")
       }
@@ -399,7 +401,7 @@ export const scenes = [
       await message.waitFor({ state: "detached" })
       // A second send inside the window: the status shows the newest and counts both.
       await send(app, "Pier parking")
-      ensure(/SENDING \/\/ 2 MESSAGES \/\/ 10 S/i.test(await said(live(app))), `two sends read “${await said(live(app))}”`)
+      ensure(/SENDING \/\/ 002 MESSAGES \/\/ 10 S/i.test(await said(live(app))), `two sends read “${await said(live(app))}”`)
       if (app.phone) ensure(/Pier parking/.test(await said(strip(page))), "the strip does not name the newest send")
       // Ctrl+Z outside a text field takes back the newest.
       await rest(page)
@@ -501,6 +503,50 @@ export const scenes = [
     },
   },
   {
+    // Vale 17: offline, a section not read yet still shows its list (the demo needs no network; a gateway's
+    // read fails and says so) instead of skeletons that never end, and the status says Offline.
+    name: "status-offline-section",
+    sizes: ["desktop", "phone"],
+    scenario: "offline",
+    offline: true,
+    run: async (app) => {
+      await area(app, "Contacts")
+      await app.settle()
+    },
+    assert: async (app) => {
+      const { page } = app
+      ensure(!(await page.locator('[data-slot="skeleton"]:visible').count()), "a section opened offline waits on skeletons")
+      ensure(await page.getByRole("group", { name: "People" }).getByRole("listitem").first().isVisible(), "a section opened offline shows no list")
+      const part = app.phone ? strip(page) : statusItems(page).first()
+      ensure(/OFFLINE/i.test(await said(part)), "the status does not say Offline")
+    },
+  },
+  {
+    // Vale 15: on a phone a toast never covers the Offline strip, which is a lasting state: the toast stands above it.
+    name: "status-offline-toast",
+    sizes: ["phone"],
+    scenario: "offline",
+    offline: true,
+    run: async (app) => {
+      const { page } = app
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
+      // A copy from a menu raises a toast: the note's "Copy as Markdown".
+      await noteAction(app, "Copy as Markdown")
+      await toasts(page).first().waitFor()
+      await page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      const bar = strip(page)
+      ensure(await bar.isVisible(), "the Offline strip gave way to a toast")
+      ensure(/OFFLINE/i.test(await said(bar)), "the strip does not say Offline")
+      const held = await bar.boundingBox()
+      for (const box of await Promise.all((await toasts(page).all()).map((t) => t.boundingBox()))) {
+        if (!box) continue
+        ensure(box.y + box.height <= held.y + 1, `a toast (ends ${Math.round(box.y + box.height)}) is not above the Offline strip (starts ${Math.round(held.y)})`)
+      }
+    },
+  },
+  {
     // Two reminders came due while Vale was closed: one notice, and SEE opens the Missed list.
     name: "status-missed",
     scenario: "missed",
@@ -518,21 +564,28 @@ export const scenes = [
     },
   },
   {
-    // The browser refuses the clipboard: the value shows in a toast, to select and copy by hand.
+    // The browser refuses the clipboard. A whole note does not go in a toast (Vale 16): the toast says
+    // "Couldn't copy note as Markdown" with SHOW, which opens a 560 dialog with the text selected to copy by hand.
     name: "status-copy-blocked",
     run: async (app) => {
       const { page } = app
       await page.evaluate(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new DOMException("blocked", "NotAllowedError")) } }))
       // A copy from a menu: the note's "Copy as Markdown".
       await noteAction(app, "Copy as Markdown")
-      await page.locator('[data-role="copy-value"]').waitFor()
-      await rest(page)
+      const toast = toasts(page).filter({ hasText: "Couldn’t copy note as Markdown" })
+      await toast.waitFor()
+      ensure(!(await toast.locator('[data-role="copy-value"]').count()), "the whole note is in the toast")
+      await press(app, toast.getByRole("button", { name: "Show", exact: true }))
+      await page.getByRole("dialog", { name: "Note as Markdown" }).waitFor()
     },
     assert: async ({ page }) => {
-      const toast = toasts(page).filter({ has: page.locator('[data-role="copy-value"]') })
-      ensure(/Note as Markdown/.test(await toast.innerText()), "the toast does not say what the value is")
-      ensure(/Cabin packing list/.test(await page.locator('[data-role="copy-value"]').innerText()), "the toast does not show the text")
-      ensure((await page.locator('[data-role="copy-value"]').evaluate((el) => getComputedStyle(el).userSelect)) === "all", "the value cannot be selected")
+      const dialog = page.getByRole("dialog", { name: "Note as Markdown" })
+      const box = await dialog.boundingBox()
+      if (page.viewportSize().width > 600) ensure(Math.round(box.width) === 560, `the dialog is ${Math.round(box.width)} wide, not 560`)
+      const text = dialog.getByRole("textbox", { name: "Note as Markdown" })
+      ensure(/Cabin packing list/.test(await text.inputValue()), "the dialog does not show the text")
+      const selected = await text.evaluate((el) => el === document.activeElement && el.selectionStart === 0 && el.selectionEnd === el.value.length)
+      ensure(selected, "the text is not selected, ready to copy")
     },
   },
 ]

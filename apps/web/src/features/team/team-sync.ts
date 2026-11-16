@@ -100,7 +100,10 @@ class TeamWatch {
     const state = stateOf(this.doc)
     if (state === this.saved) return
     this.saved = state
-    await this.o.core.saveTeamDoc(this.t.id, state, snapshot(this.doc).subject || null).catch(() => {})
+    const snap = snapshot(this.doc)
+    // The newest message's time is the Team list's time and order (Vale 43).
+    const latest = snap.messages.reduce<number | null>((n, m) => (n === null || m.date > n ? m.date : n), null)
+    await this.o.core.saveTeamDoc(this.t.id, state, snap.subject || null, latest).catch(() => {})
   }
 
   stop() {

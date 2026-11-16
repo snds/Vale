@@ -1,3 +1,4 @@
+import { CopyReview } from "@/components/copy-review"
 import { QueryClientProvider } from "@tanstack/react-query"
 import { Activity, useEffect, useState } from "react"
 import { ThemeProvider } from "next-themes"
@@ -129,6 +130,7 @@ function Root() {
         <>
           <ReminderWatcher />
           <MissedList />
+          <CopyReview />
           <NotesSyncRunner />
           <TeamSyncRunner />
           <ImageTextRunner />

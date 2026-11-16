@@ -707,6 +707,8 @@ export interface TeamThread {
   from: string | null
   created: number
   updated: number
+  /** When the newest message in it was written (Vale 43): the Team list's time and order. */
+  latest?: number | null
 }
 
 /** A teammate's link, as read from it. */
