@@ -660,9 +660,22 @@ export const scenes = [
       ensure(/^No reply yet/i.test((await block.locator('[data-slot="needs-you-title"]').innerText()).trim()), "the block's title is not NO REPLY YET")
       const way = app.phone ? page.getByRole("tab", { name: /^Mail, .*no reply yet/ }) : sidebar(page).getByRole("button", { name: /^Mail, .*no reply yet/ })
       ensure(await way.count(), "the way into Mail has no needs-you count")
-      await press(app, block.getByRole("button", { name: "Open", exact: true }))
+    },
+  },
+  {
+    // OPEN on the Inbox's block opens the conversation, whose own block takes over: one yellow block on screen.
+    name: "mail-waiting-on-you-open",
+    scenario: "follow-up-due",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await area(app, "Mail")
+      await press(app, page.locator('[data-role="waiting-on-you"]').getByRole("button", { name: "Open", exact: true }))
       await needsYou(page).first().waitFor()
+    },
+    assert: async ({ page }) => {
       ensure(!(await page.locator('[data-role="waiting-on-you"]:visible').count()), "the Inbox's block stays beside the open conversation's")
+      ensure((await needsYou(page).count()) === 1, `${await needsYou(page).count()} needs-you blocks show, not one`)
     },
   },
   {
