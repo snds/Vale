@@ -401,7 +401,8 @@ export const scenes = [
   },
   {
     // An event open (Desktop / 07, Mobile / 09; brief C2): from Upcoming, in the detail column beside the
-    // list, where it is the selected card and the next event is neutral with its NEXT line. A phone's Day
+    // list, where it is the selected card (the selected row's edge, Unicron 89) and the next event is neutral
+    // with its NEXT line. A phone's Day
     // pushes it: Edit and Delete in the top bar, the place button in the bottom row.
     name: "calendar-event",
     sean: { kind: "drawn", area: "calendar", screen: "event" },
@@ -429,6 +430,21 @@ export const scenes = [
       const next = all.find((e) => /^Standup/.test(e.name))
       ensure(next && !next.primary, "the next event takes the selected look")
       ensure(await page.locator('[data-slot="calendar-event"]', { hasText: "Next // in" }).count(), "the next event does not say so")
+      // Vale's own calendar event (ADR-0117; Unicron 2, 89): the selected one is drawn as a selected row is, the
+      // 2px edge in --primary-mark the full height in place of the bar, so it never looks like the next event.
+      const open = page.locator('[data-slot="calendar-event"][aria-current="true"]:visible').first()
+      const edge = await open.evaluate((el) => {
+        const probe = document.createElement("span")
+        probe.style.color = "var(--primary-mark)"
+        el.append(probe)
+        const mark = getComputedStyle(probe).color
+        probe.remove()
+        return { shadow: getComputedStyle(el).boxShadow, mark, bar: getComputedStyle(el.querySelector('[data-slot="calendar-event-bar"]')).visibility }
+      })
+      ensure(/inset/.test(edge.shadow) && edge.shadow.includes(edge.mark), `the selected event has no edge in --primary-mark: ${edge.shadow}`)
+      ensure(edge.bar === "hidden", "the selected event still draws its bar beside the edge")
+      const others = page.locator('[data-slot="calendar-event"]:not([aria-current]):visible')
+      ensure(!(await others.evaluateAll((els) => els.some((el) => /inset/.test(getComputedStyle(el).boxShadow)))), "an event that is not open draws the selected edge")
     },
   },
   {

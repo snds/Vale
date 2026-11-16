@@ -17,6 +17,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      # Vale's own theme (ADR-0117), measured on both grounds by Unicron's contrast tool.
+      - run: pnpm --filter web contrast
       - run: pnpm build
       # The build watch's rules and the build stamp (ADR-0091).
       - run: pnpm --filter web test

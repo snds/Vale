@@ -8,8 +8,11 @@ import { cn } from "@/lib/utils"
 
 /**
  * One event in a day, a week or a list: a 2px bar, its time, title and place (Figma's Calendar
- * Event, 32:116). Unicron 1.1 took it out of the core, since only Vale has a calendar (Unicron 2);
- * this is Unicron 1.0's part, moved here as its migration guide says (docs/08 → CalendarEvent).
+ * Event, 32:116). Vale's own part since Unicron 1.1 took it out of the core, as only Vale has a
+ * calendar (Unicron 2; ADR-0117). Built from core parts only: the surface and primary roles, the
+ * hover and press washes, the type roles, Tile's swatch fills, `hit-area` and the selected row's
+ * `edge-l`. It draws as Unicron 1.0 drew it, with one change: a selected event has a look of its
+ * own (Unicron 89).
  */
 
 /** `primary`: the event that matters now (the next one). `neutral`: every other. */
@@ -26,6 +29,14 @@ const event = cva(
         primary: "bg-primary-soft",
         neutral: "bg-surface-raised",
       },
+      // The event open beside the list (Unicron 89): drawn as a selected ListRow is, the soft fill
+      // and the 2px edge in --primary-mark the full height, in place of the bar. In 1.0 it took the
+      // next event's look exactly (soft fill, primary bar inside the padding), so the two could not
+      // be told apart.
+      selected: {
+        true: "edge-l",
+        false: "",
+      },
       compact: {
         // As drawn: 8 top and bottom, 12 right, 12 between the bar and the text.
         false: "gap-3 py-2 pr-3",
@@ -34,7 +45,7 @@ const event = cva(
         true: "hit-area gap-2 py-0.5 pr-2",
       },
     },
-    defaultVariants: { look: "neutral", compact: false },
+    defaultVariants: { look: "neutral", compact: false, selected: false },
   }
 )
 
@@ -56,7 +67,10 @@ export type CalendarEventProps = Omit<useRender.ComponentProps<"button">, "child
   swatch?: SwatchId
   /** One line, title first, then time: for a week strip, a time grid or a month cell. */
   compact?: boolean
-  /** The event open in the detail beside the list: the primary look and `aria-current`. */
+  /**
+   * The event open in the detail beside the list: a selected row's look (the soft fill and the
+   * full-height edge in place of the bar), and `aria-current`.
+   */
   selected?: boolean
   /** A small mark at the end of the first line. */
   mark?: React.ReactNode
@@ -82,7 +96,8 @@ export function CalendarEvent({
   ...props
 }: CalendarEventProps) {
   const look: CalendarEventTone = selected ? "primary" : tone
-  const bar = swatch ? swatchFillClasses[swatch] : BAR[look]
+  // Selected, the edge stands where the bar was; the bar keeps its room so nothing shifts.
+  const bar = selected ? "invisible" : swatch ? swatchFillClasses[swatch] : BAR[look]
   const markNode = mark ? (
     <span data-slot="calendar-event-mark" className="ml-auto inline-flex shrink-0 items-center self-center">
       {mark}
@@ -134,7 +149,7 @@ export function CalendarEvent({
       {
         ...(href ? { href } : render ? null : { type: "button" }),
         "aria-current": selected ? "true" : undefined,
-        className: event({ look, compact }),
+        className: event({ look, compact, selected }),
         children: content,
       },
       props

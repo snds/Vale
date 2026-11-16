@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "node --experimental-strip-types --test \"test/*.test.mjs\"",
+    "contrast": "unicron-contrast src/styles/theme.css --exceptions src/styles/contrast-exceptions.json",
     "tauri": "tauri"
   },
   "dependencies": {
