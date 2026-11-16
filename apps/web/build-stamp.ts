@@ -14,7 +14,7 @@ import type { Plugin } from "vite"
  * 3. writes `build.json`, `{"build": "<id>"}`, beside it.
  *
  * The page reads its own id from the tag and asks for `build.json` again
- * later (`src/lib/build-watch.ts`). A page without the tag (`vite dev`)
+ * later (the shared watch from @unicron/ui, started in `src/lib/build-watch.ts`). A page without the tag (`vite dev`)
  * does not watch. The id is in the page, not in a script, because it is
  * made from the scripts' final content.
  */

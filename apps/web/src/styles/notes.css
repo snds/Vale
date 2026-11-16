@@ -27,7 +27,7 @@
      to a note that does not exist yet in the label ink. */
   --c-note-wikilink-text: var(--primary-text);
   --c-note-wikilink-missing: var(--text-label);
-  --c-note-placeholder: var(--text-faint);
+  --c-note-placeholder: var(--text-label);
 
   /* Scan: the page outline over a photo (ADR-0045). Must read on any photo, so it's the ring color, not a neutral. */
   --c-scan-edge: var(--ring);

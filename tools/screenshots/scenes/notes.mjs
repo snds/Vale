@@ -313,7 +313,7 @@ export const scenes = [
     },
     assert: async ({ page }) => {
       const overline = (await page.locator('[data-slot="page-head-overline"]:visible').first().textContent()) ?? ""
-      ensure(/Notes \/\/ #work \/\/ 01/i.test(overline), `the overline reads “${overline}”`)
+      ensure(/Notes \/\/ #work \/\/ 001/i.test(overline), `the overline reads “${overline}”`)
       ensure((await notesList(page).getByRole("listitem").count()) === 1, "the tag did not narrow the list to its note")
     },
   },
@@ -1386,6 +1386,40 @@ export const scenes = [
       const here = layer.getByRole("list", { name: "Notes here already" })
       await here.waitFor()
       ensure(await here.getByRole("button", { name: /Ask Ana for the audit's color pairs/ }).count(), "the saved note is not linked to the conversation")
+    },
+  },
+  {
+    // HERE ALREADY lists three notes, then MORE (Vale 68), which saves what was typed and opens the full list on the item.
+    name: "notes-quick-note-more",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await area(app, "Mail")
+      await conversation(app, /Token audit/)
+      for (const words of ["Audit pairs one", "Audit pairs two", "Audit pairs three", "Audit pairs four"]) {
+        await page.keyboard.press("Alt+KeyN")
+        await app.settle()
+        await quickNote(page).waitFor()
+        await page.keyboard.type(words)
+        await press(app, quickNote(page).getByRole("button", { name: "Done", exact: true }))
+        await toastSaying(page, "Saved to Notes").first().waitFor()
+        await toastGone(app)
+      }
+      await page.keyboard.press("Alt+KeyN")
+      await app.settle()
+      await quickNote(page).getByRole("list", { name: "Notes here already" }).waitFor()
+    },
+    assert: async ({ page }) => {
+      const layer = quickNote(page)
+      const here = layer.getByRole("list", { name: "Notes here already" })
+      ensure((await here.getByRole("listitem").count()) === 3, `HERE ALREADY lists ${await here.getByRole("listitem").count()} notes, not three`)
+      const more = layer.getByRole("button", { name: /^More notes here/ })
+      ensure(await more.isVisible(), "HERE ALREADY has no MORE past three notes")
+      await more.click()
+      await quickNote(page).waitFor({ state: "detached" })
+      const opened = page.locator('[data-slot="page-head-title"]:visible, h1:visible, h2:visible').filter({ hasText: /Token audit/ })
+      await opened.first().waitFor({ timeout: 5000 }).catch(() => {})
+      ensure(await opened.count(), "MORE did not open the conversation the notes are linked to")
     },
   },
   {

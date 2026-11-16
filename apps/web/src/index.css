@@ -3,11 +3,13 @@
  * Geist Mono, the dark variant, the base layer, and the primitives' classes.
  * Icons are IBM Carbon, drawn inline by unicron's Icon: no icon font loads.
  *
- * Then Vale's own layer, one file per area, so each area's owner edits its
- * own file. shell.css comes first: it holds the rules for the layer and what
- * every area shares.
+ * Then Vale's own layer: its theme first (theme.css, the 28 slots Unicron 1.1
+ * no longer ships), then one file per area, so each area's owner edits its
+ * own file. shell.css comes first among those: it holds the rules for the
+ * layer and what every area shares.
  */
 @import "@unicron/ui/styles";
+@import "./styles/theme.css";
 @import "./styles/shell.css";
 @import "./styles/mail.css";
 @import "./styles/calendar.css";

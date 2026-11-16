@@ -137,6 +137,8 @@ async fn every_command_routes_and_works() {
     assert_eq!((&joined["role"], &joined["from"], &joined["threadId"]), (&json!("guest"), &json!("Sam"), &Value::Null));
     dispatch(&app, &state, "save_team_doc", json!({ "id": joined["id"], "ydoc": "AAA=", "title": null })).await.unwrap();
     assert_eq!(json_of(dispatch(&app, &state, "team_doc", json!({ "id": joined["id"] })).await.unwrap()), "AAA=");
+    // Vale 43: a copy with no time yet takes its newest message's, once.
+    assert_eq!(json_of(dispatch(&app, &state, "fill_team_latest", json!({ "id": joined["id"], "latest": 1_700_000_000 })).await.unwrap())["latest"], 1_700_000_000);
     assert_eq!(json_of(dispatch(&app, &state, "stop_team_thread", json!({ "id": joined["id"] })).await.unwrap())["revoked"], true);
     assert!(dispatch(&app, &state, "join_team_thread", json!({ "link": link })).await.is_err());
     dispatch(&app, &state, "remove_team_thread", json!({ "id": joined["id"] })).await.unwrap();
@@ -317,6 +319,21 @@ async fn compose_commands() {
     // Follow-ups need mail you sent.
     let thread = state.store.lock().unwrap().message(&by_mail).unwrap().summary.thread_id;
     assert!(call("set_follow_up", json!({ "threadId": thread, "dueAt": at })).await.unwrap_err().contains("you've sent"));
+    // UNDO after DONE puts a reminder back at its own time (Vale 33); it needs mail you sent too.
+    assert!(call("restore_follow_up", json!({ "threadId": thread, "dueAt": pim_core::now() - 60 })).await.unwrap_err().contains("you've sent"));
+
+    // A send that failed: DELETE takes it out of the Outbox, UNDO puts it back (W9, Vale 35).
+    let failed = call("queue_send", json!({ "draft": draft, "undoSecs": 0 })).await.unwrap();
+    let id = failed["id"].as_str().unwrap().to_string();
+    {
+        let s = state.store.lock().unwrap();
+        s.claim_due(pim_core::now() + 1).unwrap();
+        s.finish_send(&id, Some("550 no such user")).unwrap();
+    }
+    assert!(call("clear_failed_send", json!({ "id": item["id"] })).await.unwrap_err().contains("wasn't sent"), "only a failed send");
+    call("clear_failed_send", json!({ "id": id })).await.unwrap();
+    assert!(call("list_outbox", Value::Null).await.unwrap().as_array().unwrap().iter().all(|i| i["id"] != json!(id)));
+    assert_eq!(call("restore_failed_send", json!({ "id": id })).await.unwrap()["state"], "failed");
 
     // Templates and signatures.
     let t = call("save_template", json!({ "input": { "name": "Thanks", "subject": "Thank you", "html": "<p>Thanks!</p>" } })).await.unwrap();

@@ -3,7 +3,7 @@ import { checkMail, useStatus } from "@/app/live-status"
 import { useNavPicked } from "@/app/places"
 import { FirstGroup } from "@/app/section-switcher"
 import { useUi } from "@/app/ui-store"
-import { FieldRow, FieldRowAction, NavItem, NavSection, SectionHeader, type IconName } from "@unicron/ui"
+import { Button, FieldRow, FieldRowAction, NavItem, NavSection, SectionHeader, type IconName } from "@unicron/ui"
 import { isMember } from "@/core/client"
 import { useCore } from "@/core/queries"
 import { startAddAccount } from "@/features/onboarding/start-add-account"
@@ -64,9 +64,30 @@ export function MailNav({ layer = false, more = false }: { layer?: boolean; more
       {accounts.length > 1 && (
         <div className="flex flex-col gap-1">
           {/* A filter, not a place: a radio group, so no row here is ever "current". No "All" row, as
-              Mobile / 05 and Desktop / 01 draw it: none chosen is all of them, and pressing the chosen
-              account again goes back to all (the page head's overline says ALL ACCOUNTS). */}
-          <NavSection title="Accounts" count={accounts.length} checkable="single" aria-label="Account">
+              Mobile / 05 and Desktop / 01 draw it: none chosen is all of them. While one is chosen, the
+              heading's ALL goes back to all of them (Vale 1): unpicking a radio by pressing it again is
+              hidden from most people and from screen readers. Pressing the chosen account still works. */}
+          <NavSection
+            title="Accounts"
+            count={accounts.length}
+            checkable="single"
+            aria-label="Account"
+            action={
+              account ? (
+                <Button
+                  variant="link"
+                  size="inline"
+                  aria-label="Show all accounts"
+                  onClick={() => {
+                    useUi.getState().setMailAccount(null)
+                    picked()
+                  }}
+                >
+                  All
+                </Button>
+              ) : undefined
+            }
+          >
             {accounts.map((a) => (
               <NavItem
                 key={a.id}

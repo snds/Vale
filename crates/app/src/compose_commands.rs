@@ -18,6 +18,27 @@ pub fn set_follow_up(app: AppHandle, state: &Shared, thread_id: String, due_at: 
     Ok(())
 }
 
+/// UNDO after DONE (Vale 33): the reminder DONE dismissed, back at its own time.
+pub fn restore_follow_up(app: AppHandle, state: &Shared, thread_id: String, due_at: i64) -> Res<()> {
+    with_store(state, |s| s.restore_follow_up(&thread_id, due_at))?;
+    let _ = app.emit(events::MAIL_CHANGED, ());
+    Ok(())
+}
+
+/// DELETE on a send that failed (W9, Vale 35).
+pub fn clear_failed_send(app: AppHandle, state: &Shared, id: String) -> Res<()> {
+    with_store(state, |s| s.clear_failed_send(&id))?;
+    let _ = app.emit(events::OUTBOX_CHANGED, ());
+    Ok(())
+}
+
+/// Its UNDO: the failed send back in the Outbox, as it was.
+pub fn restore_failed_send(app: AppHandle, state: &Shared, id: String) -> Res<OutboxItem> {
+    let item = with_store(state, |s| s.restore_failed_send(&id))?;
+    let _ = app.emit(events::OUTBOX_CHANGED, ());
+    Ok(item)
+}
+
 pub fn cancel_follow_up(app: AppHandle, state: &Shared, thread_id: String) -> Res<()> {
     with_store(state, |s| s.cancel_follow_up(&thread_id))?;
     let _ = app.emit(events::MAIL_CHANGED, ());

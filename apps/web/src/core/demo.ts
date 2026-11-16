@@ -231,6 +231,8 @@ export function createDemoClient(): CoreClient {
   const state = seed()
   state.messages.push(...bulkMessages())
   const outbox = new Map<string, OutboxItem>()
+  /** Failed sends DELETE took out (W9): UNDO puts back only these. */
+  const cleared = new Set<string>()
   const { followUps } = state
   const templates: Template[] = [
     { id: "tpl-thanks", name: "Thanks, will reply soon", subject: "", html: "<p>Thanks for this — I'll get back to you by the end of the week.</p>", updated: now() },
@@ -726,6 +728,13 @@ export function createDemoClient(): CoreClient {
       followUps.set(mine.messageId!, dueAt)
       done()
     },
+    restoreFollowUp: async (threadId, dueAt) => {
+      if (dueAt > now() + 366 * 24 * HOUR) throw new Error("reminders can be set up to a year ahead")
+      const mine = thread(threadId).filter((m) => m.mailbox === SENT && m.messageId).sort((a, b) => b.date - a.date)[0]
+      if (!mine) throw new Error("follow-up reminders are for conversations where you've sent a message")
+      followUps.set(mine.messageId!, dueAt)
+      done()
+    },
     cancelFollowUp: async (threadId) => {
       sentIn(threadId).forEach((id) => followUps.delete(id))
       done()
@@ -851,6 +860,21 @@ export function createDemoClient(): CoreClient {
       item.state = "cancelled"
       emit("outbox:changed")
       return structuredClone(item.draft)
+    },
+    clearFailedSend: async (id) => {
+      const item = outbox.get(id)
+      if (!item || item.state !== "failed") throw new Error("only a message that wasn't sent can be deleted from the Outbox")
+      cleared.add(id)
+      item.state = "cancelled"
+      emit("outbox:changed")
+    },
+    restoreFailedSend: async (id) => {
+      const item = outbox.get(id)
+      if (!item || !cleared.has(id)) throw new Error("that message isn't in the outbox")
+      cleared.delete(id)
+      item.state = "failed"
+      emit("outbox:changed")
+      return structuredClone(item)
     },
     listOutbox: () => later([...outbox.values()].filter((i) => i.state === "queued" || i.state === "failed")),
     rescheduleSend: async (id, sendAt) => {

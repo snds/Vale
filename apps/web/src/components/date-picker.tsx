@@ -117,6 +117,7 @@ function DateTimeBody({ action, note, value, onPick }: { action: string; note?: 
   const [time, setTime] = useState(() => timeInput(start))
   const field = useRef<HTMLInputElement>(null)
   const now = useNowSecs(15_000)
+  const [today] = useState(() => startOfDay(new Date()))
   const at = /^\d\d:\d\d/.test(time) ? secs(fromInputs(dateInput(day), time)) : null
   const tooSoon = at !== null && at <= now + 60
   return (
@@ -132,10 +133,13 @@ function DateTimeBody({ action, note, value, onPick }: { action: string; note?: 
         onPick(at)
       }}
     >
+      {/* No past day can be picked (Vale 54): you cannot schedule into the past, so they are faint and the keys
+          skip them. Earlier today stays pickable, and a time already gone is the field's error. */}
       <MonthGrid
         month={month}
         onMonthChange={setMonth}
         selected={day}
+        min={today}
         onPick={(d) => {
           setDay(startOfDay(d))
           setMonth(d)

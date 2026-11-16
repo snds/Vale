@@ -28,7 +28,7 @@ Before, a scheduled message was a row with four inline buttons in a lane named S
 4. **Opening a row** shows it read-only in the detail column, pushed on a phone: `MetaList` TO, FROM, SENDS (or FAILED); the subject as title; the body; that section's actions as secondary buttons. Nothing is primary.
 5. **EDIT on a scheduled message** takes it out (`cancelSend`) and opens the composer with its time. The composer's draft carries `outbox` (the message as it waited and its time, a new optional field of `ComposerDraft`): closed **unchanged** it asks nothing and goes back, "Back in Outbox for {time}"; closed **with changes** it asks "Discard changes?", and DISCARD puts the original back the same way. If its time has come meanwhile, the toast says it could not go back, in the core's words, with EDIT.
 6. **DELETE** says "Deleted {subject}" with UNDO, which queues it again with its time. **CHANGE TIME** says "Moved {subject} to {time}". **SEND NOW** sends at once (`rescheduleSend(id, null)`), and the send's own toast says "Sent {subject}".
-7. **EDIT on a failed send** opens a copy of its message. The failed row stays, because the core keeps failed items and has no call to clear one (W9, a wish for Sean).
+7. **EDIT on a failed send** opens a copy of its message. The failed row stays until DELETE. **DELETE** (the row's menu, a full swipe, the message's buttons) clears it through the core's `clear_failed_send`, with UNDO through `restore_failed_send` (W9 granted, Vale 35, 2026-11-16). Toasts that name a time ("Moved … to …", "Back in Outbox for …") use the device's format (`longTime`); menus keep the row's times.
 
 ### A failed send, said once (brief M7, X4)
 
@@ -57,4 +57,4 @@ Four things, each once per failed item: the toast "Not sent: {subject}" with EDI
 
 - `ComposerDraft` gains optional `outbox`; `features/mail/outbox.ts` holds the Outbox's data and actions and the shown ids, so the views stay component-only.
 - The calendar lane's `picker-keys` scene presses the composer menu's "Pick a time…", which is now "Pick date and time…" (brief M7). It needs that word at the merge.
-- A failed send cannot be dismissed (W9): it stays in NOT SENT until the core can clear it. Q3 asks for one call to do that.
+- ~~A failed send cannot be dismissed (W9).~~ Answered by Vale 35: DELETE with UNDO (above).

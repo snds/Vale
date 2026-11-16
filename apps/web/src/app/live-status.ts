@@ -1,4 +1,4 @@
-import { toast } from "@unicron/ui"
+import { formatNavCount, toast } from "@unicron/ui"
 import { create } from "zustand"
 
 import { getCoreClient } from "@/core/client"
@@ -90,7 +90,8 @@ export function useLiveStatus(): LiveStatus | null {
   if (sending) {
     const several = sending.items.length > 1
     const subject = sending.newest.draft.subject.trim() || "(no subject)"
-    const what = several ? `Sending // ${sending.items.length} messages` : "Sending"
+    // An overline counts in three digits; the spoken sentence keeps the plain number (Vale 6).
+    const what = several ? `Sending // ${formatNavCount(sending.items.length)} messages` : "Sending"
     return {
       kind: "sending",
       tone: "live",
@@ -123,7 +124,7 @@ export function useLiveStatus(): LiveStatus | null {
   }
   if (checking && accounts.length) {
     const title = `Checking ${count(accounts.length, "account")}`
-    return { kind: "checking", tone: "live", meta: `Syncing // ${names(accounts)}`, title, line: `Checking // ${count(accounts.length, "account")}`, announce: `${title} for new mail.` }
+    return { kind: "checking", tone: "live", meta: `Syncing // ${names(accounts)}`, title, line: `Checking // ${formatNavCount(accounts.length)} ${accounts.length === 1 ? "account" : "accounts"}`, announce: `${title} for new mail.` }
   }
   return null
 }

@@ -51,14 +51,16 @@ export function replyDraft(m: MessageDetail, style: ReplyStyle = { quote: true, 
   // The quote is rebuilt from the text part: the sender's HTML is untrusted
   // and the editor's schema would drop most of it anyway.
   const quoteHtml = `<p>${escapeHtml(intro)}</p><blockquote>${textToHtml(m.bodyText.trimEnd())}</blockquote>`
-  const head = {
+  const said = (style.openingHtml ? htmlToText(style.openingHtml) : style.opening)?.trim() ?? ""
+  const head: ComposerDraft = {
     accountId: m.accountId,
     to: [m.from],
     subject: /^re:/i.test(m.subject) ? m.subject : `Re: ${m.subject}`,
     inReplyTo: m.messageId,
     references: m.references,
+    // Nothing written yet: closing it untouched loses nothing (Vale 22).
+    fromReply: !said || undefined,
   }
-  const said = (style.openingHtml ? htmlToText(style.openingHtml) : style.opening)?.trim() ?? ""
   const saidHtml = style.openingHtml && said ? style.openingHtml : said ? textToHtml(said) : "<p></p>"
   if (!style.quote) return { ...head, body: said, bodyHtml: saidHtml }
   if (style.replyBelow) return { ...head, body: `${intro}\n${quoted}\n\n${said}`, bodyHtml: `${quoteHtml}${saidHtml}`, cursorAfterQuote: true }

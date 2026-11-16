@@ -1,4 +1,5 @@
-// The build watch's rules and the reload-safety registry (ADR-0091).
+// The build watch's rules (the shared copy in @unicron/ui since 1.1, run on Vale's cases) and
+// Vale's reload-safety registry (ADR-0091, ADR-0116).
 // Run: pnpm --filter web test   (node --test, TypeScript types stripped by Node).
 import assert from "node:assert/strict"
 import { test } from "node:test"
@@ -11,7 +12,7 @@ import {
   createBuildWatch,
   quietByTheClock,
   readBuild,
-} from "../src/lib/build-watch.ts"
+} from "../node_modules/@unicron/ui/dist/lib/update-watch.js"
 import { addReloadCheck, beforeReload, canReloadNow, fieldHoldsWords, holdReload, reloadBlockers, saveBeforeReload } from "../src/lib/can-reload.ts"
 
 /** A page on build "a" with a fake clock, server, tab and session storage. */
@@ -144,21 +145,21 @@ test("checks close together are dropped, and one at a time", async () => {
 
 test("the clock asks every 15 minutes while visible, and not while hidden", async () => {
   const w = page()
-  w.watch.tick()
+  await w.watch.tick()
   await w.watch.check()
   assert.equal(w.fetches, 1, "the first tick asks")
   w.pass(CHECK_EVERY_MS - 1)
-  w.watch.tick()
+  await w.watch.tick()
   assert.equal(w.fetches, 1)
   w.pass(1)
-  w.watch.tick()
+  await w.watch.tick()
   await w.watch.check()
   assert.equal(w.fetches, 2)
 
   w.hidden = true
   w.watch.visibility()
   w.pass(CHECK_EVERY_MS * 3)
-  w.watch.tick()
+  await w.watch.tick()
   assert.equal(w.fetches, 2, "hidden: no asking")
   w.hidden = false
   w.watch.visibility()
@@ -173,19 +174,19 @@ test("the clock asks every 15 minutes while visible, and not while hidden", asyn
 test("a new build reloads by itself only after five idle minutes, and saves first", async () => {
   const w = page({ served: '{"build":"b"}' })
   await w.watch.check()
-  w.watch.tick()
+  await w.watch.tick()
   assert.equal(w.reloads, 0, "someone may be here")
   w.pass(IDLE_FOR_MS - 1)
   w.watch.activity()
   w.pass(IDLE_FOR_MS - 1)
-  w.watch.tick()
+  await w.watch.tick()
   assert.equal(w.reloads, 0, "activity starts the wait again")
   w.pass(1)
-  w.watch.tick()
+  await w.watch.tick()
   assert.equal(w.reloads, 1)
   assert.equal(w.saved, 1)
   assert.equal(w.noted, "b")
-  w.watch.tick()
+  await w.watch.tick()
   assert.equal(w.reloads, 1, "one reload")
 })
 
@@ -195,17 +196,17 @@ test("a hidden tab reloads after a minute; coming back cancels the wait", async 
   w.hidden = true
   w.watch.visibility()
   w.pass(HIDDEN_FOR_MS - 1)
-  w.watch.tick()
+  await w.watch.tick()
   assert.equal(w.reloads, 0)
   w.hidden = false
   w.watch.visibility()
   w.pass(HIDDEN_FOR_MS)
-  w.watch.tick()
+  await w.watch.tick()
   assert.equal(w.reloads, 0, "visible again: the hidden minute no longer counts")
   w.hidden = true
   w.watch.visibility()
   w.pass(HIDDEN_FOR_MS)
-  w.watch.tick()
+  await w.watch.tick()
   assert.equal(w.reloads, 1)
 })
 
@@ -214,7 +215,7 @@ test("it never reloads by itself while the app says work would be lost", async (
     const w = page({ served: '{"build":"b"}', free: notFree })
     await w.watch.check()
     w.pass(IDLE_FOR_MS * 10)
-    w.watch.tick()
+    await w.watch.tick()
     assert.equal(w.reloads, 0)
     assert.equal(w.watch.state().ready, true, "it keeps offering")
     assert.equal(w.noted, null, "nothing is noted for a reload that did not happen")
@@ -230,13 +231,13 @@ test("once per id: a deploy that still serves the old page cannot loop", async (
   const w = page({ served: '{"build":"b"}', noted: "b" })
   await w.watch.check()
   w.pass(IDLE_FOR_MS * 10)
-  w.watch.tick()
+  await w.watch.tick()
   assert.equal(w.reloads, 0)
   assert.equal(w.watch.state().ready, true)
   // A later build is a new id: one more try.
   w.served = '{"build":"c"}'
   await w.watch.check(true)
-  w.watch.tick()
+  await w.watch.tick()
   assert.equal(w.reloads, 1)
   assert.equal(w.noted, "c")
 })
@@ -245,29 +246,30 @@ test("where the once-per-id note cannot be kept, it only offers", async () => {
   const w = page({ served: '{"build":"b"}', keepsNotes: false })
   await w.watch.check()
   w.pass(IDLE_FOR_MS * 10)
-  w.watch.tick()
+  await w.watch.tick()
   assert.equal(w.reloads, 0)
   assert.equal(w.watch.state().ready, true)
 })
 
-test("a lazy file that fails: reload if quiet, else say Reload to continue", async () => {
+test("a lazy file that fails: reload as soon as nothing would be lost, else say Reload to continue", async () => {
   // No new build known: not the watch's business.
   let w = page()
   assert.equal(await w.watch.preloadFailed(), false)
   assert.equal(w.watch.state().needed, false)
   assert.equal(w.reloads, 0)
 
-  // A new build, someone just clicked: say so, don't reload.
-  w = page({ served: '{"build":"b"}' })
+  // A new build, and the app says work would be lost: say so, don't reload.
+  w = page({ served: '{"build":"b"}', free: false })
   assert.equal(await w.watch.preloadFailed(), false)
   assert.deepEqual({ ready: w.watch.state().ready, needed: w.watch.state().needed }, { ready: true, needed: true })
   assert.equal(w.reloads, 0)
 
-  // A new build and a quiet page: reload.
+  // A new build, someone just clicked, nothing would be lost: the page is blocked anyway, so it
+  // reloads without waiting for a quiet moment (Unicron 1.1, Updates 5; Vale waited before).
   w = page({ served: '{"build":"b"}' })
-  w.pass(IDLE_FOR_MS)
   assert.equal(await w.watch.preloadFailed(), true)
   assert.equal(w.reloads, 1)
+  assert.equal(w.saved, 1)
 })
 
 test("a failing saver does not stop a reload a person asked for", () => {

@@ -49,14 +49,16 @@ export function createDemoTeam(thread: (threadId: string) => MessageDetail[], fr
       }
       throw new Error("that note isn't here any more")
     },
-    teamThreads: async () => later([...rows.values()].sort((a, b) => b.updated - a.updated).map(pub)),
+    // Newest message first (Vale 43), as the core sorts them.
+    teamThreads: async () => later([...rows.values()].sort((a, b) => (b.latest ?? b.updated) - (a.latest ?? a.updated) || b.updated - a.updated).map(pub)),
     threadShare: async (threadId: string) => later([...rows.values()].find((t) => t.role === "owner" && t.threadId === threadId && !t.revoked) ?? null).then((t) => (t ? pub(t) : null)),
     shareThread: async (threadId: string) => {
       const live = [...rows.values()].find((t) => t.role === "owner" && t.threadId === threadId && !t.revoked)
       if (live) return later(pub(live))
       const list = thread(threadId).sort((a, b) => a.date - b.date)
       if (!list.length) throw new Error("that conversation is no longer here")
-      const t = { id: crypto.randomUUID().replaceAll("-", ""), role: "owner" as const, threadId, revoked: false, relay: null, token: null, key: sealed() ? demoShareKey() : null, title: list.at(-1)!.subject, from: fromName(), created: now(), updated: now(), ydoc: null }
+      // The row's time from the start is the newest message's (Vale 43), as the core sets it.
+      const t = { id: crypto.randomUUID().replaceAll("-", ""), role: "owner" as const, threadId, revoked: false, relay: null, token: null, key: sealed() ? demoShareKey() : null, title: list.at(-1)!.subject, from: fromName(), created: now(), updated: now(), latest: list.at(-1)!.date, ydoc: null }
       rows.set(t.id, t)
       return done(pub(t))
     },
@@ -83,11 +85,17 @@ export function createDemoTeam(thread: (threadId: string) => MessageDetail[], fr
       return done(undefined)
     },
     teamDoc: async (id: string) => later(get(id).ydoc),
-    saveTeamDoc: async (id: string, ydoc: string, title: string | null) => {
+    saveTeamDoc: async (id: string, ydoc: string, title: string | null, latest: number | null = null) => {
       const t = get(id)
       t.ydoc = ydoc
       if (title?.trim()) t.title = title.trim()
+      if (latest !== null) t.latest = latest
       touch(t)
+      return done(pub(t))
+    },
+    fillTeamLatest: async (id: string, latest: number) => {
+      const t = get(id)
+      if (t.latest == null) t.latest = latest
       return done(pub(t))
     },
   }

@@ -651,7 +651,7 @@ function NoteTitle({ editor, readOnly, autoFocus, onLeave, large }: { editor: Ed
       readOnly={readOnly}
       value={text}
       spellCheck
-      className={`block w-full resize-none overflow-hidden bg-transparent text-foreground outline-none placeholder:text-faint-foreground ${large ? "type-display-compact" : "type-title"}`}
+      className={`block w-full resize-none overflow-hidden bg-transparent text-foreground outline-none placeholder:text-muted-foreground ${large ? "type-display-compact" : "type-title"}`}
       onChange={(e) => {
         const next = e.target.value.replace(/\n/g, "")
         setText(next)

@@ -16,6 +16,7 @@ import { LANES } from "@/features/mail/lanes"
 import { MessageRow } from "@/features/mail/message-row"
 import { NoteRow } from "@/features/notes/note-row"
 import { useNowSecs } from "@/hooks/use-now"
+import { useSettled } from "@/hooks/use-settled"
 
 import { setSearchField } from "./field"
 import { leaveSearch } from "./open"
@@ -24,6 +25,9 @@ import { openedKey, type Opened } from "./opened"
 import { EVENT_DAYS, useContactResults, useEventResults, useLaneResults, useMailResults, useNoteResults, type Results } from "./use-results"
 
 type Kind = "mail" | "calendar" | "contacts" | "notes"
+
+/** How long typing pauses before the kinds not on screen read the words (Vale 39). */
+export const OTHER_KINDS_AFTER_MS = 250
 
 /** Each kind as its chip, its section header and its empty line name it. */
 const KINDS: { id: Kind; chip: string; header: string; none: (q: string) => string }[] = [
@@ -60,6 +64,10 @@ export function SearchView() {
   const typed = place?.query ?? ""
   const query = useDeferredValue(typed.trim())
   const on = query !== ""
+  // Vale 39: the chosen kind reads as you type; the other kinds read once typing pauses, so each chip
+  // still gets its count without a read of every kind on every key. Cleared words clear them at once.
+  const paused = useSettled(query, OTHER_KINDS_AFTER_MS)
+  const later = query === "" ? "" : paused
 
   // Mail's account choice narrows mail here as it does there (brief X2).
   const accountId = useUi((s) => s.mailAccount)
@@ -71,11 +79,14 @@ export function SearchView() {
   const swatches = calendarSwatches(calendars)
 
   // Every kind is read once there are words, so each chip can say its count (brief X2). A team member reads mail alone.
-  const inLane = useLaneResults(lane, account, me.id, query, on && !member)
-  const mail = useMailResults(account, query, on)
-  const events = useEventResults(query, now, on && !member)
-  const people = useContactResults(query, on && !member)
-  const notes = useNoteResults(query, on && !member)
+  // The kinds on screen read the words as typed; the others wait for the pause (Vale 39).
+  const chosen = (k: Kind | "lane") => scope === "all" || scope === k
+  const wordsFor = (k: Kind | "lane") => (chosen(k) ? query : later)
+  const inLane = useLaneResults(lane, account, me.id, wordsFor("lane"), wordsFor("lane") !== "" && !member)
+  const mail = useMailResults(account, wordsFor("mail"), wordsFor("mail") !== "")
+  const events = useEventResults(wordsFor("calendar"), now, wordsFor("calendar") !== "" && !member)
+  const people = useContactResults(wordsFor("contacts"), wordsFor("contacts") !== "" && !member)
+  const notes = useNoteResults(wordsFor("notes"), wordsFor("notes") !== "" && !member)
 
   // What is open beside the results, or pushed over them. A new search starts with nothing open.
   const [opened, setOpened] = useState<Opened | null>(null)

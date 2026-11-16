@@ -110,14 +110,30 @@ function OutboxRow({ item, section, selected, onOpen }: { item: OutboxItem; sect
         Undo
       </Button>,
     )
-  // A failed send has one way on, EDIT, and no swipe: nothing about it can be undone (W9).
-  if (section === "failed")
-    return row(
-      <DropdownMenuItem onClick={() => outboxActions.editFailed(item)}>
-        <Icon name="edit" />
-        Edit
-      </DropdownMenuItem>,
+  // A failed send: EDIT opens a copy, DELETE clears it with UNDO (W9, Vale 35). DELETE also runs on a full
+  // swipe, since its toast's UNDO puts it back.
+  if (section === "failed") {
+    const failedActions: SwipeRowAction[] = [
+      { icon: "edit", label: "Edit", tone: "neutral", onAction: () => outboxActions.editFailed(item) },
+      { icon: "trash-can", label: "Delete", tone: "primary", reversible: true, onAction: () => void outboxActions.removeFailed(item) },
+    ]
+    return (
+      <SwipeRow trailing={failedActions}>
+        {row(
+          <>
+            <DropdownMenuItem onClick={() => outboxActions.editFailed(item)}>
+              <Icon name="edit" />
+              Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void outboxActions.removeFailed(item)}>
+              <Icon name="trash-can" />
+              Delete
+            </DropdownMenuItem>
+          </>,
+        )}
+      </SwipeRow>
     )
+  }
   // Scheduled: EDIT inner, DELETE outer. Only DELETE runs on a full swipe, because its toast's UNDO queues it again.
   const trailing: SwipeRowAction[] = [
     { icon: "edit", label: "Edit", tone: "neutral", onAction: () => void outboxActions.edit(item) },
@@ -201,9 +217,14 @@ export function OutboxMessage({ id, onGone }: { id: string; onGone: () => void }
           </Button>
         )}
         {section === "failed" && (
-          <Button variant="secondary" onClick={then(() => outboxActions.editFailed(item))}>
-            <Icon name="edit" data-icon="inline-start" /> Edit
-          </Button>
+          <>
+            <Button variant="secondary" onClick={then(() => outboxActions.editFailed(item))}>
+              <Icon name="edit" data-icon="inline-start" /> Edit
+            </Button>
+            <Button variant="secondary" onClick={then(() => outboxActions.removeFailed(item))}>
+              <Icon name="trash-can" data-icon="inline-start" /> Delete
+            </Button>
+          </>
         )}
         {section === "scheduled" && (
           <>

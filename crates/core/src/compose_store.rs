@@ -69,6 +69,12 @@ impl Store {
         if due_at > now() + MAX_FOLLOW_UP {
             return Err(Error::Invalid("reminders can be set up to a year ahead".into()));
         }
+        let (account, mid) = self.newest_sent(thread_id)?;
+        self.add_follow_up(&account, &mid, due_at)
+    }
+
+    /// The newest message you sent in a conversation: the one a reminder hangs on.
+    fn newest_sent(&self, thread_id: &str) -> Result<(String, String)> {
         let sent: Option<(String, String)> = self
             .db
             .query_row(
@@ -81,9 +87,17 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        let Some((account, mid)) = sent else {
-            return Err(Error::Invalid("follow-up reminders are for conversations where you've sent a message".into()));
-        };
+        sent.ok_or_else(|| Error::Invalid("follow-up reminders are for conversations where you've sent a message".into()))
+    }
+
+    /// Put back a reminder DONE dismissed (Vale 33): UNDO after DONE restores
+    /// it at its own time, which has passed, so it is due again at once.
+    /// Unlike [`Store::set_follow_up`] the time may be in the past.
+    pub fn restore_follow_up(&self, thread_id: &str, due_at: i64) -> Result<()> {
+        if due_at > now() + MAX_FOLLOW_UP {
+            return Err(Error::Invalid("reminders can be set up to a year ahead".into()));
+        }
+        let (account, mid) = self.newest_sent(thread_id)?;
         self.add_follow_up(&account, &mid, due_at)
     }
 
@@ -324,6 +338,32 @@ mod tests {
         assert_eq!(lane(&s, Lane::Inbox).len(), 1, "back, though the received mail is archived");
         assert_eq!(s.cancel_follow_up(&thread).unwrap(), 1);
         assert!(lane(&s, Lane::Inbox).is_empty());
+    }
+
+    #[test]
+    fn undo_after_done_brings_the_reminder_back() {
+        // Vale 33: DONE archives a conversation a reminder brought back, which dismisses the reminder;
+        // UNDO un-archives and restores the reminder at its own (past) time, so it is due again.
+        let (s, acct) = store();
+        let received = s
+            .insert_local(&acct, INBOX, b"From: Ana <ana@example.com>\r\nSubject: Quote\r\nMessage-ID: <a@x>\r\nDate: Tue, 13 Oct 2026 08:00:00 +0000\r\n\r\nHow much?\r\n", false)
+            .unwrap();
+        let thread = s.message(&received).unwrap().summary.thread_id;
+        let reply = b"From: Me <me@example.com>\r\nTo: ana@example.com\r\nSubject: Re: Quote\r\nMessage-ID: <mine@x>\r\nIn-Reply-To: <a@x>\r\nDate: Tue, 13 Oct 2026 09:00:00 +0000\r\n\r\nAny news?\r\n";
+        s.insert_local(&acct, SENT, reply, true).unwrap();
+        s.set_follow_up(&thread, now() + 3600).unwrap();
+        make_due(&s);
+        let due_at: i64 = s.db.query_row("SELECT due_at FROM follow_ups", [], |r| r.get(0)).unwrap();
+        assert_eq!(lane(&s, Lane::Inbox).len(), 1, "the reminder brought it back");
+        s.set_thread_archived(&thread, true).unwrap();
+        assert!(lane(&s, Lane::Inbox).is_empty(), "DONE");
+        assert!(lane(&s, Lane::Waiting).is_empty(), "DONE dismissed the reminder");
+        s.set_thread_archived(&thread, false).unwrap();
+        s.restore_follow_up(&thread, due_at).unwrap();
+        let back = lane(&s, Lane::Inbox);
+        assert_eq!(back.len(), 1, "UNDO");
+        assert_eq!(back[0].follow_up_at, Some(due_at), "the reminder is back, at its own time");
+        assert!(s.restore_follow_up(&thread, now() + 400 * 86400).is_err(), "too far");
     }
 
     #[test]

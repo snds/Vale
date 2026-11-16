@@ -18,3 +18,21 @@ export function rowTime(secs: number, now = new Date()) {
   if (days > 0) return `${days < 7 ? weekday : date} ${clock(d)}`
   return days > -7 ? weekday : date
 }
+
+/**
+ * How long ago, for the tooltip on a row's time (cross-app settlement, 2026-11-16): the row writes the
+ * clock time, its tooltip the relative age in the device's language ("2 hours ago", "yesterday",
+ * "in 3 days").
+ */
+export function relativeAge(secs: number, now = new Date()): string {
+  const diff = secs - now.getTime() / 1000
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
+  const abs = Math.abs(diff)
+  if (abs < 60) return rtf.format(0, "second")
+  if (abs < 3600) return rtf.format(Math.round(diff / 60), "minute")
+  if (abs < 86_400) return rtf.format(Math.round(diff / 3600), "hour")
+  if (abs < 7 * 86_400) return rtf.format(Math.round(diff / 86_400), "day")
+  if (abs < 30 * 86_400) return rtf.format(Math.round(diff / (7 * 86_400)), "week")
+  if (abs < 365 * 86_400) return rtf.format(Math.round(diff / (30 * 86_400)), "month")
+  return rtf.format(Math.round(diff / (365 * 86_400)), "year")
+}

@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react"
 import {
   AppFrame,
   AppFrameFocus,
-  AppLockup,
   Banner,
   Button,
   EmptyState,
@@ -50,16 +49,17 @@ function byDay(slots: TimeSlot[]) {
 }
 
 /**
- * The page for a visitor (brief C7; ADR-0026, ADR-0031, ADR-0101): Vale's
+ * The page for a visitor (brief C7; ADR-0026, ADR-0031, ADR-0101): the
  * focus frame, 432 wide, in Vale's theme as the visitor's system sets it,
- * with no account and no shell. In the owner's preview the same content
- * stands in the preview's column instead.
+ * with no account and no shell. It leads with the owner's name, not Vale's
+ * lockup (Vale 56): visitors book a person, not an app, as in Calendly. In
+ * the owner's preview the same content stands in the preview's column instead.
  */
-function Visitor({ preview, children }: { preview: boolean; children: ReactNode }) {
+function Visitor({ preview, host, children }: { preview: boolean; host?: string; children: ReactNode }) {
   if (preview) return <div className="mx-auto flex w-full max-w-(--c-app-frame-focus) flex-col gap-8">{children}</div>
   return (
     <AppFrame>
-      <AppFrameFocus lockup={<AppLockup name="Vale" />} aria-label="Booking">
+      <AppFrameFocus lockup={host ? <p className="type-ui-emphasis text-foreground" data-slot="booking-host">{host}</p> : undefined} aria-label={host ? `Booking with ${host}` : "Booking"}>
         <div className="flex flex-col gap-8">{children}</div>
       </AppFrameFocus>
     </AppFrame>
@@ -112,7 +112,14 @@ function Inactive({ overline }: { overline: string }) {
  * time; each time's name says its day.
  */
 function Times({ label, slots, value, onPick }: { label: string; slots: TimeSlot[]; value: number | null; onPick: (s: TimeSlot) => void }) {
+  // A phone shows the first three days, then MORE DAYS (Vale 56): seven days of chips make a very long page.
+  const phone = useAppFrame().phone
+  const [allDays, setAllDays] = useState(false)
+  const days = byDay(slots)
+  const pickedDay = value === null ? -1 : days.findIndex((d) => d.slots.some((s) => s.start === value))
+  const shown = phone && !allDays ? days.slice(0, Math.max(PHONE_DAYS, pickedDay + 1)) : days
   return (
+    <>
     <FilterChipGroup
       type="single"
       label={label}
@@ -122,7 +129,7 @@ function Times({ label, slots, value, onPick }: { label: string; slots: TimeSlot
         if (s) onPick(s)
       }}
     >
-      {byDay(slots).map((d) => (
+      {shown.map((d) => (
         // 8 inside a day, 16 between days: the days read as groups (rules 12.2, 1:2).
         <div key={d.key} className="flex w-full flex-col gap-2 not-first:pt-2" data-slot="booking-day">
           <span className="type-overline text-text-label" aria-hidden>
@@ -138,8 +145,20 @@ function Times({ label, slots, value, onPick }: { label: string; slots: TimeSlot
         </div>
       ))}
     </FilterChipGroup>
+    {shown.length < days.length && (
+      <div>
+        {/* A button in Vale's mono capitals (Vale 56: MORE DAYS), not a link: it adds to this page, it goes nowhere. */}
+        <Button variant="ghost" size="sm" onClick={() => setAllDays(true)}>
+          More days
+        </Button>
+      </div>
+    )}
+    </>
   )
 }
+
+/** The days a phone shows before MORE DAYS (Vale 56). */
+const PHONE_DAYS = 3
 
 /**
  * A scheduling link's public page (brief C7, B; ADR-0026): the link's head,
@@ -153,7 +172,7 @@ export function BookingPage({ token, preview = false }: { token: string; preview
   // In the owner's preview, the booker's own page opens right here (ADR-0031).
   if (done && peek) return <ManageBookingPage token={token} code={done.code} preview />
   return (
-    <Visitor preview={preview}>
+    <Visitor preview={preview} host={data?.host}>
       {done ? (
         <Confirmed booked={done} token={token} preview={preview} onPeek={() => setPeek(true)} />
       ) : isPending ? (
@@ -304,7 +323,7 @@ function Confirmed({ booked, token, preview, onPeek }: { booked: Booked; token: 
 export function ManageBookingPage({ token, code, preview = false }: { token: string; code: string; preview?: boolean }) {
   const { data, error, isPending, refetch } = useQuery({ queryKey: ["pim", "managed-booking", token, code], queryFn: () => visitorManaged(token, code), retry: false, refetchOnMount: "always" })
   return (
-    <Visitor preview={preview}>
+    <Visitor preview={preview} host={data?.host}>
       {isPending ? <Loading what="Loading your booking…" /> : error || !data ? <Inactive overline="Booking" /> : <Manage token={token} code={code} data={data} refetch={refetch} />}
     </Visitor>
   )

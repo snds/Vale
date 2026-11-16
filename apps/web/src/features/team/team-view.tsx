@@ -34,6 +34,7 @@ import { longTime } from "@/lib/time"
 import { initials, replyDraft, replyTarget } from "../mail/format"
 import { LoadingRows } from "../mail/lane-list"
 import { rowTime } from "../mail/row-time"
+import { RowTimeTip } from "../mail/row-time-tip"
 import { parseShareUrl } from "../notes/share-link"
 import { useShareHere } from "./here"
 import { HereTiles } from "./here-tiles"
@@ -87,7 +88,8 @@ export function TeamList() {
                   meta={who(t)}
                   metaStyle="plain"
                   badge={t.revoked ? <Badge>Stopped</Badge> : undefined}
-                  status={rowTime(t.updated)}
+                  // The newest message's time (Vale 43), as shared inboxes show it; when it changed before any message is saved.
+                  status={<RowTimeTip at={t.latest ?? t.updated}>{rowTime(t.latest ?? t.updated)}</RowTimeTip>}
                 />
               ))}
             </ul>
@@ -156,7 +158,10 @@ export function TeamThreadView({ id }: { id: string }) {
       () => toast(done),
       (e: Error) => toast.error(e.message),
     )
-  const leave = () => act(remove, `Left ${subject}`)
+  // Leaving cannot be undone without a new invitation, so it asks first, focus on Cancel (Vale 43).
+  const leave = async () => {
+    if (await confirm.ask({ title: `Leave ${subject}?`, description: "You'll need a new link to see it again.", confirmLabel: "Leave", run: remove })) toast(`Left ${subject}`)
+  }
   const removeIt = async () => {
     // Removing a share that still works stops the link too: asked first, since it cannot be undone (brief X6).
     if (t && !t.revoked) {
@@ -181,7 +186,7 @@ export function TeamThreadView({ id }: { id: string }) {
                   </AdaptiveMenuItem>
                 )}
                 {leaves ? (
-                  <AdaptiveMenuItem icon="logout" onSelect={leave}>
+                  <AdaptiveMenuItem icon="logout" onSelect={() => void leave()}>
                     Leave
                   </AdaptiveMenuItem>
                 ) : (
@@ -238,7 +243,7 @@ export function TeamThreadView({ id }: { id: string }) {
           {!phone && (canShare || leaves || t.revoked) && (
             <Toolbar aria-label="Shared conversation">
               {canShare && <ToolbarButton label="Sharing…" onClick={() => setSharing(true)} />}
-              {leaves ? <ToolbarButton label="Leave" onClick={leave} /> : t.revoked && <ToolbarButton label="Remove" onClick={() => void removeIt()} />}
+              {leaves ? <ToolbarButton label="Leave" onClick={() => void leave()} /> : t.revoked && <ToolbarButton label="Remove" onClick={() => void removeIt()} />}
             </Toolbar>
           )}
         </div>

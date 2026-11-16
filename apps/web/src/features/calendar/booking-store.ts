@@ -1,7 +1,8 @@
 import { create } from "zustand"
+import { formatNavCount } from "@unicron/ui"
 
 /** Booking links' overline (brief C7): `BOOKING LINKS // 02`, in two digits. */
-export const bookingOverline = (n: number | undefined) => `Booking links // ${String(n ?? 0).padStart(2, "0")}`
+export const bookingOverline = (n: number | undefined) => `Booking links // ${formatNavCount(n ?? 0)}`
 
 /** What the detail column says while no link is open. */
 export const BOOKING_PICK = "Pick a booking link to see it here."

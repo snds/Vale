@@ -1,5 +1,8 @@
 import { createElement, useCallback, useEffect, useRef, useState } from "react"
 import { toast, toastDurations } from "@unicron/ui"
+import { create } from "zustand"
+
+import { fitsInToast } from "./copy-fits"
 
 /**
  * Copying, built once (ADR-0086; brief 4.0, cross-app decisions §1):
@@ -9,6 +12,9 @@ import { toast, toastDurations } from "@unicron/ui"
  * - A copy from a menu or a key raises the toast "Copied {what}": `copyText`.
  * - When the browser blocks the clipboard, either way, a toast shows the
  *   label and the value, selectable, for 6 s, so it can be copied by hand.
+ *   A value longer than two lines (a whole note) does not flood the screen:
+ *   the toast says "Couldn't copy {what}" with SHOW, which opens a 560 review
+ *   dialog with the text selected, ready to copy by hand (Vale 16).
  */
 
 /** How long a COPY control says "Copied". */
@@ -33,9 +39,20 @@ async function write(value: string) {
   }
 }
 
+/** The value the clipboard refused, open in the review dialog (`CopyReview`), or null. */
+export const useCopyReview = create<{ value: string; label: string } | null>(() => null)
+
 /** The clipboard said no: the value itself, to select and copy by hand. */
 function showValue(value: string, { what, label }: CopyWhat) {
-  toast(label ?? capitalized(what), {
+  const name = label ?? capitalized(what)
+  if (!fitsInToast(value)) {
+    toast(`Couldn’t copy ${what}`, {
+      duration: toastDurations.action,
+      action: { label: "Show", onClick: () => useCopyReview.setState({ value, label: name }) },
+    })
+    return
+  }
+  toast(name, {
     description: createElement("span", { className: "break-all select-all", "data-role": "copy-value" }, value),
     duration: toastDurations.action,
   })

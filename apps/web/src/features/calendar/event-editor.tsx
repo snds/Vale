@@ -124,7 +124,7 @@ const quickRead = (q: QuickEvent) => [q.title, q.allDay ? dayLabel(q.start) : `$
 /**
  * The event form (ADR-0099; brief C3, Desktop / 08, Mobile / 10) in the form
  * layer: what and when first (TITLE, All day, STARTS and ENDS, FIND A TIME,
- * LOCATION, INVITE), the rest under MORE as Field Rows with menus. A new
+ * LOCATION, GUESTS), the rest under MORE as Field Rows with menus. A new
  * event's TITLE reads a sentence (brief C4): its helper says what it read,
  * and USE THIS fills the times and the place.
  */
@@ -351,7 +351,7 @@ function EventForm({ state, onDone }: { state: EventEditorState; onDone: () => v
         {invites && (
           // The shared recipient field (ADR-0089): guests as chips; a chip that is not an address says so under the field.
           <div className="flex flex-col gap-1">
-            <RecipientField id="event-guests" label="Invite" value={guests} onChange={setGuests} placeholder="Add people by name or email" />
+            <RecipientField id="event-guests" label="Guests" value={guests} onChange={setGuests} placeholder="Add people by name or email" />
             <p className="type-caption text-text-secondary" data-slot="invite-note">
               {inviteNote}
             </p>

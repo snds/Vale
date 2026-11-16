@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 
-import { CalendarEvent, Highlight, type CalendarEventProps } from "@unicron/ui"
+import { Highlight } from "@unicron/ui"
+import { CalendarEvent, type CalendarEventProps } from "@/components/calendar-event"
 import type { Occurrence } from "@/core/types"
 
 import { clock, folio, fromSecs } from "./dates"
@@ -37,7 +38,7 @@ export interface OccurrenceCardProps {
 }
 
 /**
- * An occurrence as a card (ADR-0085): the core's `Occurrence` on unicron's
+ * An occurrence as a card (ADR-0085): the core's `Occurrence` on Vale's
  * calendar event. Search lists with it; the calendar's views use it with the
  * optional props they need (ADR-0098).
  */

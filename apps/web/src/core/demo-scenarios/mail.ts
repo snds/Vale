@@ -60,8 +60,13 @@ function teamDocState(subject: string, from: string, messages: { from: string; e
       }),
     )
   })
-  return toBase64(Y.encodeStateAsUpdate(doc))
+  // The newest message's time goes with it, as the app saves it (Vale 43): the Team row's time and order.
+  return { state: toBase64(Y.encodeStateAsUpdate(doc)), latest: messages.length ? t - Math.min(...messages.map((m) => m.ago)) : null }
 }
+
+/** Saves a seeded document with its newest message's time, as `TeamWatch.save` does. */
+const seedTeamDoc = (client: { saveTeamDoc(id: string, ydoc: string, title: string | null, latest?: number | null): Promise<unknown> }, id: string, d: ReturnType<typeof teamDocState>, title: string) =>
+  client.saveTeamDoc(id, d.state, title, d.latest)
 
 /** Mail (ADR-0081, ADR-0113): the inbox and its lanes, such as swipe slots or an inbox worked to zero. Names and words are the demo's own. */
 export const mail: DemoScenarios = {
@@ -321,7 +326,8 @@ export const mail: DemoScenarios = {
     const ready = (async () => {
       await client.setNotesRelay({ url: "wss://relay.studio.example", token: "demo-relay-token" })
       const mine = await client.shareThread("t-audit")
-      await client.saveTeamDoc(
+      await seedTeamDoc(
+        client,
         mine.id,
         teamDocState(
           "Re: Token audit",
@@ -341,7 +347,8 @@ export const mail: DemoScenarios = {
         "Re: Token audit",
       )
       const theirs = await client.joinTeamThread({ id: "suppliercontract2026", relay: "wss://relay.northshore.example", token: "demo-guest-token", title: "Supplier contract renewal", from: "Noor Haddad", key: null })
-      await client.saveTeamDoc(
+      await seedTeamDoc(
+        client,
         theirs.id,
         teamDocState(
           "Supplier contract renewal",
@@ -356,7 +363,8 @@ export const mail: DemoScenarios = {
         "Supplier contract renewal",
       )
       const stopped = await client.joinTeamThread({ id: "venueshortlist2026x", relay: "wss://relay.northshore.example", token: "demo-guest-token", title: "Venue shortlist", from: "Oskar Lind", key: null })
-      await client.saveTeamDoc(
+      await seedTeamDoc(
+        client,
         stopped.id,
         teamDocState(
           "Venue shortlist",

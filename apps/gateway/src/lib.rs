@@ -243,7 +243,10 @@ const MEMBER_COMMANDS: &[&str] = &[
     "cancel_send",
     "list_outbox",
     "reschedule_send",
+    "clear_failed_send",
+    "restore_failed_send",
     "set_follow_up",
+    "restore_follow_up",
     "cancel_follow_up",
     "unsubscribe",
     "list_templates",
@@ -330,9 +333,10 @@ impl Gateway {
         res
     }
 
-    /// The owner, named as their first account names them (as their comments are).
+    /// The owner, by their own name (the core's `owner_name`, as the booking page names them; Vale 43, 56),
+    /// else their first account's address.
     fn owner(&self) -> Who {
-        let name = self.state.store.lock().ok().and_then(|s| s.accounts().ok()).and_then(|a| a.into_iter().next()).map(|a| if a.config.display_name.trim().is_empty() { a.config.address } else { a.config.display_name });
+        let name = self.state.store.lock().ok().and_then(|s| s.owner_name(None).ok().flatten().or_else(|| s.accounts().ok()?.into_iter().next().map(|a| a.config.address)));
         Who { id: OWNER_ID.into(), name: name.unwrap_or_else(|| "Owner".into()), owner: true }
     }
 

@@ -95,6 +95,27 @@ export const scenes = [
     },
   },
   {
+    // Vale 39: the chosen kind reads as you type; the other kinds read once typing pauses (about 250 ms), and then
+    // their chips count too.
+    name: "search-other-kinds-wait",
+    sizes: ["desktop"],
+    run: async (app) => {
+      const { page } = app
+      await area(app, "Mail")
+      await open(app)
+      ensure(await chip(page, "Inbox").isChecked(), "Search from the Inbox is not inside the Inbox")
+      await field(page).pressSequentially("design", { delay: 40 })
+      // While typing, the other kinds have not been read: their chips have no count yet.
+      ensure(!(await counted(page, "Contacts")), "Contacts was read on every key, before typing paused")
+      await page.waitForTimeout(600)
+      await app.settle()
+    },
+    assert: async ({ page }) => {
+      ensure(await counted(page, "Contacts"), "after typing paused, the Contacts chip has no count")
+      ensure(await counted(page, "Notes"), "after typing paused, the Notes chip has no count")
+    },
+  },
+  {
     // Search in a lane of Mail (ADR-0085, ADR-0096): the ways in, what is current, the keys, a result and the way out.
     name: "search-mail",
     sizes: ["desktop", "phone", "medium"],

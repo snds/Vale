@@ -4,7 +4,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 
 import { BUILD_META, buildId, buildJson, stampPage } from "../build-stamp.ts"
-import { readBuild } from "../src/lib/build-watch.ts"
+import { readBuild } from "../node_modules/@unicron/ui/dist/lib/update-watch.js"
 
 const files = [
   ["index.html", "<html><head></head><body></body></html>"],

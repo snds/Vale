@@ -35,6 +35,7 @@ import { getCoreClient } from "@/core/client"
 import { useAccounts, useEvent, usePimAction } from "@/core/queries"
 import type { Collection, EditScope, EventDetail as Detail, Repeat } from "@/core/types"
 import { useConfirm } from "@/lib/confirm"
+import { mapLink } from "@/lib/maps"
 import { calendarSwatches, swatchSquare } from "@/lib/swatches"
 
 import { displayName, initials } from "../mail/format"
@@ -63,7 +64,8 @@ const ANSWER: Record<string, string> = { accepted: "Going", declined: "Not going
 const safeUrl = (u: string | null) => (u && /^https?:\/\//i.test(u) ? u : null)
 
 /** A map search for the place, in the browser (brief C2, MAP). OpenStreetMap: no account, no tracking, any device. */
-const mapSearch = (place: string) => `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`
+// MAP: the maps app on Apple devices, OpenStreetMap elsewhere (Vale 48).
+const mapSearch = (place: string) => mapLink(place)
 
 /** A place a map can find: not a call's link or its name ("Microsoft Teams Meeting"). */
 function mappable(e: Pick<Detail, "location" | "meetingUrl">) {

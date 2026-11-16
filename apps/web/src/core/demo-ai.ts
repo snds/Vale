@@ -18,10 +18,10 @@ export function createDemoAi(thread: (threadId: string) => MessageDetail[], late
   }
   const ready = () => {
     const p = prefs
-    if (p.provider === "off") throw new Error("AI is off. Turn it on in Settings → AI summaries and replies.")
+    if (p.provider === "off") throw new Error("AI is off. Turn it on in Settings → AI.")
     const model = p.provider === "local" ? p.local.model : p.provider === "anthropic" ? p.anthropicModel : p.compatible.model
-    if (!model) throw new Error("Pick a model in Settings → AI summaries and replies.")
-    if (p.provider !== "local" && !keys[p.provider]) throw new Error("the server rejected the sign-in: add your API key in Settings → AI summaries and replies")
+    if (!model) throw new Error("Pick a model in Settings → AI.")
+    if (p.provider !== "local" && !keys[p.provider]) throw new Error("the server rejected the sign-in: add your API key in Settings → AI")
     return { provider: p.provider, model }
   }
   const messages = (threadId: string) => {

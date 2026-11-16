@@ -3,6 +3,7 @@ import { AppFrameBottomRow, AppFrameTopRow, AppLockup, FloatButton, TabBar, TabB
 import { QuickCreateButton, type CreateHandlers } from "./quick-create"
 import { returnToRoot, useScreen } from "./screen"
 import { useUpdateMark } from "./update-mark"
+import { useWaitingOnYou, waitingMark } from "@/features/mail/waiting-on-you"
 import type { Vertical, VerticalId } from "./verticals"
 
 interface PhoneChromeProps {
@@ -78,6 +79,7 @@ export function PhoneTopRow({ settingsOpen, searchOpen, onSettings, onCloseSetti
 export function PhoneBottomRow({ sections, active, onNavigate, settingsOpen, searchOpen, onSearch, onCreate, handlers }: Omit<PhoneChromeProps, "onSettings" | "onCloseSettings" | "onLeaveSearch">) {
   const frame = useAppFrame()
   const pushed = useScreen((s) => s.pushed)
+  const mailMark = waitingMark(useWaitingOnYou().length)
   if (settingsOpen) return null
   if (frame.detailOpen) {
     return pushed && (pushed.start || pushed.fill || pushed.end) ? <AppFrameBottomRow variant="detail" start={pushed.start} fill={pushed.fill} end={pushed.end} /> : null
@@ -91,7 +93,7 @@ export function PhoneBottomRow({ sections, active, onNavigate, settingsOpen, sea
         tabs={
           <TabBar label="Sections" value={searchOpen ? undefined : active.id} onValueChange={(id) => onNavigate(id as VerticalId)} onReselect={returnToRoot}>
             {sections.map((v) => (
-              <TabBarItem key={v.id} value={v.id} icon={v.icon} label={v.label} />
+              <TabBarItem key={v.id} value={v.id} icon={v.icon} label={v.label} mark={v.id === "mail" ? mailMark : undefined} />
             ))}
           </TabBar>
         }

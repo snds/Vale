@@ -1,6 +1,6 @@
 import { useMemo } from "react"
 
-import { AdaptiveDialog, ListRow } from "@unicron/ui"
+import { AdaptiveDialog, ListRow, formatNavCount } from "@unicron/ui"
 import { useUi } from "@/app/ui-store"
 import { useOccurrences } from "@/core/queries"
 import type { DueReminder, Occurrence } from "@/core/types"
@@ -27,7 +27,7 @@ export function MissedList() {
       open={open}
       onOpenChange={(o) => !o && closeMissed()}
       size="question"
-      overline={`Reminders // ${String(items.length).padStart(2, "0")}`}
+      overline={`Reminders // ${formatNavCount(items.length)}`}
       title="Missed"
       description="These came due while Vale was closed."
     >

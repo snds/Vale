@@ -22,7 +22,9 @@ export const tabBar = (page) => page.getByRole("tablist", { name: "Sections" })
 export const area = async (app, name) => {
   const { page } = app
   for (let i = 0; i < 3 && !(await sidebar(page).count()) && !(await tabBar(page).count()); i++) await press(app, button(page, "Back"))
-  await press(app, (await sidebar(page).count()) ? sidebar(page).getByRole("button", { name, exact: true }) : tabBar(page).getByRole("tab", { name, exact: true }))
+  // A section's name, or its name and then its mark's words ("Mail, 1 reminder with no reply yet").
+  const named = new RegExp(`^${name}(, |$)`)
+  await press(app, (await sidebar(page).count()) ? sidebar(page).getByRole("button", { name: named }) : tabBar(page).getByRole("tab", { name: named }))
 }
 
 /** The page head as the switcher: the way to a section's groups wherever the sidebar does not list them (a phone, medium width, beside the rail). */

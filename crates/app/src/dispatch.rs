@@ -72,7 +72,10 @@ pub const COMMANDS: &[&str] = &[
     "cancel_send",
     "list_outbox",
     "reschedule_send",
+    "clear_failed_send",
+    "restore_failed_send",
     "set_follow_up",
+    "restore_follow_up",
     "cancel_follow_up",
     "unsubscribe",
     "list_templates",
@@ -178,6 +181,7 @@ pub const COMMANDS: &[&str] = &[
     "remove_team_thread",
     "team_doc",
     "save_team_doc",
+    "fill_team_latest",
     "ai_settings",
     "set_ai_prefs",
     "set_ai_key",
@@ -303,9 +307,21 @@ pub async fn dispatch(app: &AppHandle, state: &Shared, name: &str, args: Value) 
             args!(args, id: String, send_at: Option<i64>);
             Output::json(compose_commands::reschedule_send(app.clone(), state, id, send_at)?)
         }
+        "clear_failed_send" => {
+            args!(args, id: String);
+            Output::json(compose_commands::clear_failed_send(app.clone(), state, id)?)
+        }
+        "restore_failed_send" => {
+            args!(args, id: String);
+            Output::json(compose_commands::restore_failed_send(app.clone(), state, id)?)
+        }
         "set_follow_up" => {
             args!(args, thread_id: String, due_at: i64);
             Output::json(compose_commands::set_follow_up(app.clone(), state, thread_id, due_at)?)
+        }
+        "restore_follow_up" => {
+            args!(args, thread_id: String, due_at: i64);
+            Output::json(compose_commands::restore_follow_up(app.clone(), state, thread_id, due_at)?)
         }
         "cancel_follow_up" => {
             args!(args, thread_id: String);
@@ -699,8 +715,12 @@ pub async fn dispatch(app: &AppHandle, state: &Shared, name: &str, args: Value) 
             Output::json(crate::team_commands::team_doc(state, id)?)
         }
         "save_team_doc" => {
-            args!(args, id: String, ydoc: String, title: Option<String>);
-            Output::json(crate::team_commands::save_team_doc(app.clone(), state, id, ydoc, title)?)
+            args!(args, id: String, ydoc: String, title: Option<String>, latest: Option<i64>);
+            Output::json(crate::team_commands::save_team_doc(app.clone(), state, id, ydoc, title, latest)?)
+        }
+        "fill_team_latest" => {
+            args!(args, id: String, latest: i64);
+            Output::json(crate::team_commands::fill_team_latest(app.clone(), state, id, latest)?)
         }
         // Opt-in AI (ADR-0059).
         "ai_settings" => Output::json(crate::ai_commands::ai_settings(state)?),

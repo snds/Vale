@@ -251,7 +251,7 @@ export const scenes = [
     assert: async ({ page }) => {
       const list = page.getByRole("list", { name: "Inbox", exact: true })
       const rows = list.locator('[data-slot="list-row"]')
-      ensure(await rows.filter({ has: page.locator('[data-slot="list-row-count"]', { hasText: /^0[2-9]$/ }) }).count(), "no row shows its thread's count")
+      ensure(await rows.filter({ has: page.locator('[data-slot="list-row-count"]', { hasText: /^00[2-9]$/ }) }).count(), "no row shows its thread's count")
       ensure(await rows.filter({ has: page.getByRole("img", { name: "Starred" }) }).count(), "no row shows a star")
       ensure(await rows.filter({ has: page.getByRole("img", { name: "Has attachments" }) }).count(), "no row shows an attachment")
       ensure(await rows.filter({ has: page.locator('[data-slot="list-row-time"]', { hasText: /^Work \/\// }) }).count(), "no row names its account")
@@ -284,7 +284,7 @@ export const scenes = [
       const { page } = app
       const meta = await reader(page).locator('[data-slot="meta-list"]').innerText()
       for (const label of ["FROM", "MESSAGES", "LATEST"]) ensure(meta.toUpperCase().includes(label), `the meta line has no ${label}`)
-      ensure(/\b03\b/.test(meta), "the meta line does not count the thread's three messages")
+      ensure(/\b003\b/.test(meta), "the meta line does not count the thread's three messages")
       ensure((await reader(page).getByRole("region", { name: /^Message from / }).count()) === 3, "the thread does not show its three messages")
       ensure(await replyField(page).isVisible(), "no reply field")
       ensure((await replyField(page).getAttribute("placeholder")) === "Reply to Priya", "the reply field does not say whom it answers")
@@ -332,7 +332,7 @@ export const scenes = [
       ensure((await closed.count()) === 4, `${await closed.count()} messages start closed, not the four older read ones`)
       ensure((await toggles(true).count()) === 1, "the newest does not start open")
       const meta = await reader(page).locator('[data-slot="meta-list"]').innerText()
-      ensure(/\b05\b/.test(meta), "the meta line does not count five messages")
+      ensure(/\b005\b/.test(meta), "the meta line does not count five messages")
       await closed.first().focus()
       await page.keyboard.press("Enter")
       await app.settle()
@@ -452,7 +452,7 @@ export const scenes = [
     assert: async ({ page }) => {
       const block = reader(page).locator('[data-slot="summary-block"]').first()
       const text = await block.innerText()
-      ensure(/SUMMARY\s*\/\/\s*03 POINTS/.test(text), "the summary's overline does not count its points")
+      ensure(/SUMMARY\s*\/\/\s*003 POINTS/.test(text), "the summary's overline does not count its points")
       ensure(text.includes("It can be wrong. Check what matters."), "the summary does not say it can be wrong")
       ensure(/llama3\.2/i.test(text), "the summary does not say which model wrote it")
       for (const name of ["Copy", "Close"]) ensure(await block.getByRole("button", { name, exact: true }).isVisible(), `the summary has no ${name}`)
@@ -488,7 +488,7 @@ export const scenes = [
       await press(app, reader(page).getByRole("button", { name: "Suggest replies", exact: true }))
       const block = reader(page).locator('[data-slot="summary-block"]')
       await block.getByRole("list", { name: "Suggested replies" }).waitFor()
-      ensure(/REPLIES\s*\/\/\s*03/.test(await block.innerText()), "the replies' overline does not count them")
+      ensure(/REPLIES\s*\/\/\s*003/.test(await block.innerText()), "the replies' overline does not count them")
       await press(app, block.getByRole("button", { name: /^Thanks, Priya\. That works for me\./ }))
       ensure((await replyField(page).inputValue()) === "Thanks, Priya. That works for me.", "picking a reply did not fill the reply field")
       ensure(!(await strip(page).count()) && !(await page.getByText(/^Sending/i).count()), "picking a reply sent something")
@@ -646,7 +646,41 @@ export const scenes = [
     },
   },
   {
-    // DONE archives the conversation (a toast with UNDO); UNDO brings it back to the Inbox.
+    // What waits on you and can wait (cross-app settlement): a needs-you count on the way into Mail, and the block on
+    // Mail's home screen, the Inbox. OPEN opens the conversation, whose own block takes over.
+    name: "mail-waiting-on-you",
+    scenario: "follow-up-due",
+    sizes: ["desktop", "phone"],
+    sean: { kind: "undrawn", area: "mail", screen: "waiting-on-you" },
+    run: (app) => area(app, "Mail"),
+    assert: async (app) => {
+      const { page } = app
+      const block = page.locator('[data-role="waiting-on-you"] [data-slot="needs-you"]')
+      ensure((await block.count()) === 1, "the Inbox has no needs-you block for the reminder that came due")
+      ensure(/^No reply yet/i.test((await block.locator('[data-slot="needs-you-title"]').innerText()).trim()), "the block's title is not NO REPLY YET")
+      const way = app.phone ? page.getByRole("tab", { name: /^Mail, .*no reply yet/ }) : sidebar(page).getByRole("button", { name: /^Mail, .*no reply yet/ })
+      ensure(await way.count(), "the way into Mail has no needs-you count")
+    },
+  },
+  {
+    // OPEN on the Inbox's block opens the conversation, whose own block takes over: one yellow block on screen.
+    name: "mail-waiting-on-you-open",
+    scenario: "follow-up-due",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await area(app, "Mail")
+      await press(app, page.locator('[data-role="waiting-on-you"]').getByRole("button", { name: "Open", exact: true }))
+      await needsYou(page).first().waitFor()
+    },
+    assert: async ({ page }) => {
+      ensure(!(await page.locator('[data-role="waiting-on-you"]:visible').count()), "the Inbox's block stays beside the open conversation's")
+      ensure((await needsYou(page).count()) === 1, `${await needsYou(page).count()} needs-you blocks show, not one`)
+    },
+  },
+  {
+    // DONE archives the conversation (a toast with UNDO); UNDO brings it back to the Inbox, and the
+    // reminder with it (Vale 33): the row says NO REPLY YET again and the block is back.
     name: "mail-needs-you-done",
     scenario: "follow-up-due",
     run: async (app) => {
@@ -660,6 +694,15 @@ export const scenes = [
       await press(app, toast.getByRole("button", { name: "Undo", exact: true }))
       await inbox.getByRole("button", { name: /Oak shelves for the kitchen/ }).first().waitFor()
       await toastsGone(app)
+    },
+    assert: async (app) => {
+      const { page } = app
+      const row = page.getByRole("list", { name: "Inbox", exact: true }).locator('[data-slot="list-row"]').filter({ hasText: /Oak shelves for the kitchen/ }).first()
+      ensure(/No reply yet/i.test(await row.innerText()), "UNDO after DONE brought the conversation back without its reminder")
+      if (app.phone) await conversation(app, /Oak shelves for the kitchen/)
+      else if (!(await needsYou(page).count())) await conversation(app, /Oak shelves for the kitchen/)
+      await needsYou(page).first().waitFor()
+      ensure(/^No reply yet$/i.test((await needsYou(page).locator('[data-slot="needs-you-title"]').innerText()).trim()), "the conversation's NO REPLY YET block did not come back")
     },
   },
   {
@@ -1201,7 +1244,8 @@ export const scenes = [
   },
   {
     // "Discard changes?" (ADR-0087; brief X6): a message asks whenever it holds a recipient, a subject,
-    // text or a file, one reopened by Undo send too. KEEP EDITING is the no and takes focus.
+    // text or a file, one reopened by Undo send too; a reply only once it differs from what Reply filled
+    // in (Vale 22). KEEP EDITING is the no and takes focus.
     name: "discard-question",
     sean: { kind: "undrawn", area: "shell", screen: "discard-question" },
     run: async (app) => {
@@ -1238,6 +1282,23 @@ export const scenes = [
       // DISCARD closes it.
       await press(app, discard)
       ensure(!(await message.count()) && !(await question.count()), "Discard did not close the message")
+      // An untouched reply closes without asking: Reply filled in its recipient, subject and quote (Vale 22).
+      await conversation(app, /Token audit/)
+      const reply = page.getByRole("dialog", { name: /Re: Token audit/ })
+      await moreItem(app, "Reply in full")
+      await reply.waitFor()
+      await esc()
+      ensure(!(await question.count()), "an untouched reply asked before closing")
+      ensure(!(await reply.count()), "Esc did not close an untouched reply")
+      // Once something is typed, it asks.
+      await moreItem(app, "Reply in full")
+      await reply.getByRole("textbox", { name: "Message" }).click()
+      await page.keyboard.type("Thanks, ")
+      await esc()
+      ensure(await question.isVisible(), "a reply with typed text closed without asking")
+      await press(app, discard)
+      ensure(!(await reply.count()), "Discard did not close the reply")
+      if (app.phone) await goBack(app)
       // A message reopened by Undo send holds its recipient and subject, so it asks as well.
       await send(app, "Saturday ferry")
       await page.evaluate(() => document.activeElement?.blur())
@@ -1711,7 +1772,7 @@ export const scenes = [
       ensure(JSON.stringify(names) === JSON.stringify(["ALL", "PEOPLE", "UPDATES", "NEWSLETTERS", "STUDIO", "TRAVEL"]), `the chips read ${JSON.stringify(names)}`)
       ensure(await chip(page, "All").isChecked(), "All is not the chosen chip")
       ensure(!(await button(page, "Edit split").count()), "Edit split shows with no split chosen")
-      ensure(/\b01\b|\b02\b/.test(await chip(page, "Studio").innerText()), "the Studio chip has no unread count")
+      ensure(/\b001\b|\b002\b/.test(await chip(page, "Studio").innerText()), "the Studio chip has no unread count")
       ensure(await bundle(page).isVisible(), "the newsletter bundle is not above the conversations")
       const pointer = screenerPointer(page)
       if (app.size === "desktop") {
@@ -1849,7 +1910,7 @@ export const scenes = [
     },
   },
   {
-    // The Screener lane (brief M3): `SCREENER // 03 WAITING`, the rows as every lane. LET IN runs on a full swipe on a
+    // The Screener lane (brief M3): `SCREENER // 003 WAITING`, the rows as every lane. LET IN runs on a full swipe on a
     // phone (from the row's menu on a desktop) and its toast's UNDO puts the sender back; SCREEN OUT opens and stops,
     // its tile runs it, and its toast says what stays archived, with an UNDO that puts the sender back too.
     name: "mail-screener",
@@ -1860,7 +1921,7 @@ export const scenes = [
       const { page } = app
       await lane(app, "Screener")
       const head = (await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()).trim()
-      ensure(/^SCREENER\s*\/\/\s*03 WAITING/.test(head), `the Screener's overline reads ${head}`)
+      ensure(/^SCREENER\s*\/\/\s*003 WAITING/.test(head), `the Screener's overline reads ${head}`)
       const list = page.getByRole("list", { name: "Screener", exact: true })
       const toast = (text) => page.locator("[data-sonner-toast]").filter({ hasText: text })
       const row = rowOf(page, /Wholesale order for spring/, "Screener")
@@ -1968,7 +2029,7 @@ export const scenes = [
     assert: async (app) => {
       const { page } = app
       ensure((await headTitle(page)) === "Outbox", "the lane is not called Outbox")
-      ensure(/^OUTBOX\s*\/\/\s*03/i.test(await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()), "the overline does not count what waits")
+      ensure(/^OUTBOX\s*\/\/\s*003/i.test(await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()), "the overline does not count what waits")
       const heads = (await page.locator('[data-slot="section-header"]:visible').allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim().toUpperCase())
       ensure(JSON.stringify(heads.map((h) => h.replace(/\s*\d+$/, ""))) === JSON.stringify(["SENDING", "NOT SENT", "SCHEDULED"]), `the sections read ${heads.join(", ")}`)
       const list = (name) => page.getByRole("list", { name, exact: true })
@@ -2027,7 +2088,8 @@ export const scenes = [
       // CHANGE TIME, from the row's menu: the send-later times; the toast names the new time.
       await press(app, (await rowMenu()).getByRole("menuitem", { name: "Change time…" }))
       await press(app, row(app, page.getByRole(app.phone ? "dialog" : "menu", { name: "Send later" }), /^Tomorrow afternoon/))
-      await toastSaying(page, "Moved November invoice to Fri 13:00").waitFor()
+      // A toast is a sentence: the device's format, not the row's (Vale 35).
+      await toastSaying(page, /^Moved November invoice to Fri, Nov 13, 1:00\s?PM/).waitFor()
       ensure(/FRI 13:00/i.test(await scheduled().locator('[data-slot="list-row-time"]').innerText()), "the row did not move to its new time")
       await toastsGone(app)
       // EDIT: out of the Outbox, open with its time; closed unchanged, no question, and it goes back.
@@ -2040,7 +2102,7 @@ export const scenes = [
       await page.keyboard.press("Escape")
       await app.settle()
       ensure(!(await discardQuestion(page).count()), "closing it unchanged asked to discard")
-      await toastSaying(page, "Back in Outbox for Fri 13:00").waitFor()
+      await toastSaying(page, /^Back in Outbox for Fri, Nov 13, 1:00\s?PM/).waitFor()
       ensure(await scheduled().getByRole("button", { name: /^To .*November invoice$/ }).isVisible(), "closing it unchanged did not put it back")
       await toastsGone(app)
       // DELETE, then UNDO: it is queued again with its time.
@@ -2097,7 +2159,7 @@ export const scenes = [
     },
   },
   {
-    // EDIT on a failed send opens a copy; the failed row stays, since the core has no call to clear one (W9).
+    // EDIT on a failed send opens a copy and the failed row stays; DELETE clears it, with UNDO (W9, Vale 35).
     name: "mail-send-fails-edit",
     scenario: "send-fails",
     sizes: ["desktop", "phone"],
@@ -2109,12 +2171,23 @@ export const scenes = [
       ensure(!(await toastSaying(page, "Not sent:").count()), "EDIT left the toast")
       await closeForm(app)
       await lane(app, "Outbox")
-      ensure((await page.getByRole("list", { name: "Not sent", exact: true }).getByRole("listitem").count()) === 1, "the failed row left after EDIT")
+      const notSent = page.getByRole("list", { name: "Not sent", exact: true })
+      ensure((await notSent.getByRole("listitem").count()) === 1, "the failed row left after EDIT")
+      // DELETE, from the message beside the list (pushed on a phone): the row goes, and the toast's UNDO puts it back.
+      await press(app, notSent.getByRole("listitem").first().locator('[data-slot="list-row"]').first())
+      await press(app, page.getByRole("button", { name: "Delete", exact: true }).first())
+      const deleted = toastSaying(page, /^Deleted /)
+      await deleted.waitFor()
+      ensure(!(await notSent.count()), "DELETE left the failed row in the Outbox")
+      await press(app, deleted.getByRole("button", { name: "Undo", exact: true }))
+      await notSent.getByRole("listitem").first().waitFor()
+      ensure((await notSent.getByRole("listitem").count()) === 1, "UNDO did not put the failed send back")
+      await toastsGone(app)
       await page.mouse.move(0, 0)
     },
   },
   {
-    // The Team lane (brief M9): TEAM // 03, the head's OPEN A LINK…, and inline rows: the title, who shared it, STOPPED, the time.
+    // The Team lane (brief M9): TEAM // 003, the head's OPEN A LINK…, and inline rows: the title, who shared it, STOPPED, the time.
     name: "mail-team",
     scenario: "team-shared",
     sean: { kind: "undrawn", area: "mail", screen: "team-lane" },
@@ -2126,7 +2199,7 @@ export const scenes = [
       ensure(/You shared/.test(await rows.filter({ hasText: "Token audit" }).innerText()), "your own share does not say You shared")
       ensure(/From Noor Haddad/.test(await rows.filter({ hasText: "Supplier contract" }).innerText()), "a teammate's share does not say who it is from")
       ensure(/stopped/i.test(await rows.filter({ hasText: "Venue shortlist" }).innerText()), "the stopped share has no STOPPED")
-      ensure(/TEAM \/\/ 03/.test((await page.locator('[data-slot="page-head"]:visible').first().innerText()).toUpperCase()), "the overline is not TEAM // 03")
+      ensure(/TEAM \/\/ 003/.test((await page.locator('[data-slot="page-head"]:visible').first().innerText()).toUpperCase()), "the overline is not TEAM // 003")
     },
   },
   {
@@ -2165,7 +2238,7 @@ export const scenes = [
       ensure(/Noor Haddad/.test(await view.innerText()), "SHARED BY does not name Noor Haddad")
       const tabs = view.getByRole("tablist", { name: "Team" })
       const names = (await tabs.getByRole("tab").allInnerTexts()).map((t) => t.trim().toUpperCase())
-      ensure(names.join(" ") === "MESSAGES COMMENTS 01 REPLY FILES", `the tabs read ${names.join(", ")}`)
+      ensure(names.join(" ") === "MESSAGES COMMENTS 001 REPLY FILES", `the tabs read ${names.join(", ")}`)
       ensure((await view.locator('[data-role="team-message"]').count()) === 2, "MESSAGES does not show the two shared messages")
       ensure(!(await page.locator('[data-slot="composer"]:visible').count()), "a shared conversation has a Composer")
       await press(app, tabs.getByRole("tab", { name: /^Comments/ }))
@@ -2179,8 +2252,54 @@ export const scenes = [
       ensure(await view.getByRole("textbox", { name: "Reply together" }).isVisible(), "REPLY has no shared field")
       ensure(!(await view.getByRole("button", { name: "Use as reply" }).count()), "a teammate is offered Use as reply")
       await press(app, tabs.getByRole("tab", { name: /^Comments/ }))
+      // Your comment carries your own name, not the account's label "Personal" (Vale 43).
+      const mine = view.locator('[data-role="team-comment"]').filter({ hasText: "Asked for the minimum order" })
+      ensure(!/\bPersonal\b/.test(await mine.innerText()), "your comment is signed with the account's label")
       await page.evaluate(() => document.activeElement?.blur())
       await page.mouse.move(0, 0)
+    },
+  },
+  {
+    // LEAVE asks first, with focus on Cancel (Vale 43): leaving cannot be undone without a new invitation.
+    name: "team-leave-asks",
+    scenario: "team-shared",
+    sizes: ["desktop"],
+    run: async (app) => {
+      await openTeam(app, "Supplier contract renewal")
+      await press(app, teamView(app.page).getByRole("button", { name: "Leave", exact: true }))
+    },
+    assert: async ({ page }) => {
+      const question = page.getByRole("dialog").filter({ hasText: "Leave Supplier contract renewal?" })
+      ensure(await question.isVisible(), "LEAVE did not ask")
+      ensure((await page.evaluate(() => document.activeElement?.textContent?.trim())) === "Cancel", "focus is not on Cancel")
+      ensure(await question.getByRole("button", { name: "Leave", exact: true }).isVisible(), "the yes does not repeat the verb")
+    },
+  },
+  {
+    // The Team lane's time is the newest message's, newest first (Vale 43).
+    name: "team-row-time",
+    scenario: "team-shared",
+    sizes: ["desktop"],
+    run: (app) => lane(app, "Team"),
+    assert: async ({ page }) => {
+      const rows = await page
+        .getByRole("list", { name: "Team" })
+        .getByRole("listitem")
+        .evaluateAll((els) => els.map((el) => ({ text: el.textContent ?? "", time: el.querySelector('[data-slot="list-row-status"], [data-slot="list-row-time"]')?.textContent?.trim() ?? "" })))
+      ensure(rows.every((r) => r.time.length > 0), `a Team row has no time: ${JSON.stringify(rows.map((r) => r.time))}`)
+      // The scenario's newest messages: Token audit 18 minutes ago, Supplier contract renewal 6 hours ago, Venue shortlist 4 days ago.
+      const at = ["Token audit", "Supplier contract renewal", "Venue shortlist"].map((t) => rows.findIndex((r) => r.text.includes(t)))
+      ensure(at.every((i, k) => i >= 0 && (k === 0 || i > at[k - 1])), `the Team rows are not newest message first: ${JSON.stringify(rows.map((r) => r.text.slice(0, 40)))}`)
+      // Supplier contract renewal's row reads its newest message's time, not when the share last changed (the minute may have turned since).
+      const expected = await page.evaluate(() =>
+        [0, 1, 2].map((m) => {
+          const d = new Date(Date.now() - 6 * 3_600_000 - m * 60_000)
+          const pad = (n) => String(n).padStart(2, "0")
+          return (d.toDateString() === new Date().toDateString() ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : d.toLocaleDateString(undefined, { weekday: "short" })).toUpperCase()
+        }),
+      )
+      const supplier = rows[at[1]].time.toUpperCase()
+      ensure(expected.includes(supplier), `Supplier contract renewal's row reads ${supplier}, not its newest message's ${expected[0]}`)
     },
   },
   {
@@ -2197,7 +2316,7 @@ export const scenes = [
       ensure(/TEAM \/\/ NOT SENT/.test((await team.innerText()).toUpperCase()), "the team block has no TEAM // NOT SENT")
       const tabs = team.getByRole("tablist", { name: "Team" })
       const names = (await tabs.getByRole("tab").allInnerTexts()).map((t) => t.trim().toUpperCase())
-      ensure(names.join(" ") === "COMMENTS 03 REPLY FILES", `the owner's tabs read ${names.join(", ")}`)
+      ensure(names.join(" ") === "COMMENTS 003 REPLY FILES", `the owner's tabs read ${names.join(", ")}`)
       ensure((await page.locator('[data-slot="composer"]:visible').count()) === 1, "the owner's copy has more or fewer than one Composer")
       await press(app, tabs.getByRole("tab", { name: "Files", exact: true }))
       ensure((await team.locator('[data-role="team-file"]').count()) === 2, "FILES does not list the two attachments")
@@ -2321,7 +2440,7 @@ export const scenes = [
       ensure(await empty.getByRole("button", { name: "Open archive", exact: true }).isVisible(), "the empty Inbox has no Open archive")
       if (app.size === "desktop") {
         const beside = page.getByRole("region", { name: "Mail: nothing open" })
-        ensure(/SNOOZED \/\/ BACK AT FRI 08:00\s*02/.test(await beside.innerText()), "the detail column does not list the snoozed mail")
+        ensure(/SNOOZED \/\/ BACK AT FRI 08:00\s*002/.test(await beside.innerText()), "the detail column does not list the snoozed mail")
         ensure((await beside.getByRole("listitem").count()) === 2, "the detail column does not list both snoozed conversations")
       }
     },
@@ -2587,6 +2706,13 @@ export const scenes = [
         ensure(/Inbox\s*\/\/\s*All accounts/i.test(await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()), "stepping back did not return to all accounts")
         await page.evaluate(() => document.activeElement?.blur())
       }
+      // Vale 1: while an account is chosen, the ACCOUNTS heading has ALL, the visible way back to every account.
+      await press(app, (await groups(app)).getByRole("radio", { name: "Work", exact: true }))
+      const all = (await groups(app)).getByRole("button", { name: "Show all accounts", exact: true })
+      ensure(await all.isVisible(), "ACCOUNTS has no ALL while an account is chosen")
+      ensure(/^all$/i.test((await all.innerText()).trim()), `ALL reads "${await all.innerText()}"`)
+      await press(app, all)
+      ensure((await rows.count()) === everyone, "ALL did not return to all accounts")
       await groups(app)
     },
     assert: async (app) => {
@@ -2599,6 +2725,7 @@ export const scenes = [
       // As drawn (Mobile / 05): the two accounts and no "All" row; none chosen is all of them.
       ensure((await accounts.getByRole("radio").count()) === 2, "the Account group is not the two accounts")
       ensure(!(await accounts.locator('[role="radio"][aria-checked="true"]').count()), "an account is chosen while the Inbox shows all accounts")
+      ensure(!(await list.getByRole("button", { name: "Show all accounts", exact: true }).count()), "ALL shows while every account is already shown")
       ensure(!(await list.locator('[role="radio"][aria-current]').count()), "an account says it is the current place: it is a filter")
       if (await switcherLayer(page).count()) {
         ensure(/Mail\s*\/\/\s*All accounts/i.test(await list.innerText()), "the layer's overline does not name the section and the account")

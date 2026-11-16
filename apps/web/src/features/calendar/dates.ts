@@ -1,3 +1,5 @@
+import { create } from "zustand"
+
 // Calendar date math on the device clock. The core speaks seconds since the
 // epoch; views think in local days.
 
@@ -29,8 +31,39 @@ export function addMonths(d: Date, n: number) {
 
 export const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 
-/** The locale's first day of the week (0 = Sunday), via Intl where available. */
+/** Where this device keeps WEEK STARTS (Vale 46; the W4 preference): "0" Sunday, "1" Monday. Unset follows the region. */
+export const WEEK_STARTS_KEY = "vale.calendar.weekStarts"
+
+/** The day weeks start on (0 Sunday, 1 Monday) as chosen on this device, or null to follow the region. */
+export const useWeekStarts = create<{ day: number | null }>(() => ({ day: storedWeekStart() }))
+
+function storedWeekStart(): number | null {
+  try {
+    const v = typeof localStorage === "undefined" ? null : localStorage.getItem(WEEK_STARTS_KEY)
+    return v === "0" || v === "1" ? Number(v) : null
+  } catch {
+    return null
+  }
+}
+
+/** Settings › Calendar › WEEK STARTS: kept on this device, as the theme is. Every week and month follows at once. */
+export function setWeekStarts(day: 0 | 1) {
+  try {
+    localStorage.setItem(WEEK_STARTS_KEY, String(day))
+  } catch {
+    // A browser that keeps nothing still changes the weeks for this visit.
+  }
+  useWeekStarts.setState({ day })
+}
+
+/** The first day of the week (0 = Sunday): this device's choice, else the region's, via Intl where available. */
 export function firstDayOfWeek(): number {
+  const chosen = useWeekStarts.getState().day
+  return chosen ?? regionFirstDay()
+}
+
+/** The region's own first day of the week (0 = Sunday), via Intl where available. */
+export function regionFirstDay(): number {
   try {
     const loc = new Intl.Locale(navigator.language) as Intl.Locale & { getWeekInfo?: () => { firstDay: number }; weekInfo?: { firstDay: number } }
     const info = loc.getWeekInfo?.() ?? loc.weekInfo
