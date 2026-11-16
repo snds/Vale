@@ -19,7 +19,7 @@ const hours = (h: number) => `calc(var(--c-calendar-hour-height) * ${h})`
 
 /**
  * The time grid (ADR-0098; brief C1, Hours on): app-level, drawn from tokens
- * in `styles/calendar.css`, with unicron's compact CalendarEvent for each event.
+ * in `styles/calendar.css`, with Vale's compact CalendarEvent for each event.
  *
  * - A day header row as the card week draws it, today on the primary block,
  *   and an ALL DAY row of compact events. `header={false}` leaves the day

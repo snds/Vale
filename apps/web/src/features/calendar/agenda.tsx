@@ -10,7 +10,7 @@ import { placeLabel } from "./meeting"
 import { OccurrenceCard } from "./occurrence-card"
 
 // The card views (ADR-0098; brief C1): Upcoming, the Day's lists, and the
-// Week as cards, on unicron's CalendarEvent through OccurrenceCard. The time
+// Week as cards, on Vale's CalendarEvent (components/calendar-event.tsx) through OccurrenceCard. The time
 // grid is time-grid.tsx; the Month is month-grid.tsx.
 
 /** One event as a card, in the look its view gives it (card-context.ts). */

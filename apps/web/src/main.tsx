@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import './app/icons'
 import App from './App.tsx'
-import { startBuildWatch } from './lib/build-watch-dom'
+import { startBuildWatch } from './lib/build-watch'
 import { watchKeyboardInset } from './lib/keyboard-inset'
 import { watchThemeColor } from './lib/theme-color'
 
