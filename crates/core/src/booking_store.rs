@@ -197,12 +197,10 @@ impl Store {
         self.booking_links()?.into_iter().find(|l| l.token == token).ok_or_else(|| Error::NotFound("this booking link isn't active".into()))
     }
 
-    /// Who the page says you are: the calendar's account, or your first one.
+    /// Who the page says you are (Vale 56): your own name, through the calendar's account, or your first one.
     fn host_name(&self, calendar_id: &str) -> Result<String> {
-        let accounts = self.accounts()?;
         let c = self.collection(calendar_id)?;
-        let pick = c.account_id.and_then(|id| accounts.iter().find(|a| a.id == id).cloned()).or_else(|| accounts.first().cloned());
-        Ok(pick.map(|a| a.config.display_name).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "your host".into()))
+        Ok(self.owner_name(c.account_id.as_deref())?.unwrap_or_else(|| "your host".into()))
     }
 
     /// Every free start on the half hour, inside the link's hours, from two
@@ -472,6 +470,38 @@ mod tests {
         assert_eq!((edited.token, edited.input.minutes), (l.token.clone(), 45), "editing keeps the address");
         s.delete_booking_link(&l.id).unwrap();
         assert!(s.public_booking(&l.token).is_err(), "a deleted link's page stops working");
+    }
+
+    #[test]
+    fn the_page_leads_with_your_name_not_the_accounts_label() {
+        // Vale 56: visitors book a person. The account's "Name on sent mail" can be its label ("Personal");
+        // the name your own sent mail carries is you. Mail that only claims to be from you doesn't count.
+        use crate::{AccountConfig, FetchedMessage, Provider, Security, ServerConfig, SyncBatch};
+        let (s, cal) = store();
+        let l = s.save_booking_link(None, &input(&cal)).unwrap();
+        assert_eq!(s.public_booking(&l.token).unwrap().host, "your host", "no account: no name");
+        let server = ServerConfig { host: "localhost".into(), port: 143, security: Security::Plain };
+        let config = AccountConfig { display_name: "Personal".into(), address: "sean@example.com".into(), username: "sean".into(), provider: Provider::Generic, imap: server.clone(), smtp: ServerConfig { port: 25, ..server }, jmap: None, dav: None, oauth: None };
+        let a = s.add_account(&config).unwrap();
+        assert_eq!(s.public_booking(&l.token).unwrap().host, "Personal", "with nothing else, the name on sent mail");
+        // One batch per mailbox: a sync pass lists every message the mailbox holds.
+        let mail = |mailbox: &str, names: &[(&str, u32)]| {
+            let new_messages: Vec<FetchedMessage> = names
+                .iter()
+                .enumerate()
+                .map(|(i, (name, day))| {
+                    let raw = format!("From: {name} <sean@example.com>\r\nTo: ana@example.org\r\nSubject: Hi\r\nMessage-ID: <{mailbox}{i}@x>\r\nDate: {day} Oct 2026 10:00:00 +0000\r\n\r\nHello\r\n");
+                    FetchedMessage { uid: i as u32 + 1, seen: true, flagged: false, raw: raw.into_bytes() }
+                })
+                .collect();
+            let server_uids = (1..=names.len() as u32).collect();
+            s.apply_sync(&a.id, &SyncBatch { mailbox: mailbox.into(), uid_validity: 1, new_messages, server_uids, ..Default::default() }).unwrap();
+        };
+        // The older one carries your name; Vale sent the newer with the label.
+        mail(crate::store::SENT, &[("Sean Sands", 13), ("Personal", 14)]);
+        mail("INBOX", &[("Your Bank", 15)]);
+        assert_eq!(s.public_booking(&l.token).unwrap().host, "Sean Sands");
+        assert_eq!(s.owner_name(Some(&a.id)).unwrap().as_deref(), Some("Sean Sands"));
     }
 
     #[test]

@@ -393,7 +393,8 @@ export function createDemoPim(emit: (event: CoreEvent, payload?: unknown) => voi
     if (!l) throw new Error("this booking link isn't active")
     return l
   }
-  const HOST = "Me"
+  // The owner's own name, as the core's owner_name finds it on their sent mail (Vale 56), never an account's label.
+  const HOST = "Alex Rivera"
   const birthdayDetail = (id: string, start?: number | null): EventDetail => {
     const from = start != null ? start - 1 : Math.floor(Date.now() / 1000)
     const o = birthdays(from, from + 367 * 86_400).find((b) => b.eventId === id)

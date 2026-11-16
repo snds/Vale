@@ -321,6 +321,30 @@ impl Store {
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
     }
 
+    /// Your own name, for people who aren't on your accounts (the booking page, Vale 56; your teammates,
+    /// Vale 43): the name on the newest mail you sent from the account (`account_id`, else your first),
+    /// leaving out the account's "Name on sent mail" when it is used as the account's label ("Personal")
+    /// and some other name is on your mail; else that name; `None` with neither (never the address,
+    /// which a public page shouldn't show). Only your Sent mail
+    /// counts, so mail that claims to be from you can't rename you.
+    pub fn owner_name(&self, account_id: Option<&str>) -> Result<Option<String>> {
+        let accounts = self.accounts()?;
+        let Some(a) = account_id.and_then(|id| accounts.iter().find(|a| a.id == id)).or_else(|| accounts.first()) else { return Ok(None) };
+        let label = a.config.display_name.trim();
+        let sent: Option<String> = self
+            .db
+            .query_row(
+                &format!(
+                    "SELECT trim(from_name) FROM messages WHERE account_id = ?1 AND mailbox = '{SENT}' AND lower(from_email) = lower(?2)
+                     AND trim(COALESCE(from_name, '')) NOT IN ('', ?3) ORDER BY date DESC LIMIT 1"
+                ),
+                params![a.id, a.config.address.trim(), label],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(sent.or_else(|| (!label.is_empty()).then(|| label.to_string())))
+    }
+
     pub fn account(&self, id: &str) -> Result<Account> {
         self.db
             .query_row(

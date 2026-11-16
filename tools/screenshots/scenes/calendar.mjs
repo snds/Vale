@@ -1173,7 +1173,10 @@ export const scenes = [
       // Vale 56: the page leads with the owner's name, not Vale's lockup; a phone shows three days, then MORE DAYS.
       ensure(!(await page.locator('[data-slot^="app-lockup"]').count()), "the visitor's page shows Vale's lockup")
       const host = page.locator('[data-slot="booking-host"]')
-      ensure((await host.count()) === 1 && (await host.innerText()).trim().length > 0, "the page does not lead with the owner's name")
+      ensure((await host.count()) === 1, "the page does not lead with the owner's name")
+      // The owner's name, not an account's label ("Personal", "Work") or a stand-in ("Me").
+      ensure((await host.innerText()).trim() === "Alex Rivera", `the page leads with "${(await host.innerText()).trim()}", not the owner's name`)
+      ensure(await page.getByText("With Alex Rivera", { exact: true }).isVisible(), "the page does not say it is with the owner")
       const days = page.locator('[data-slot="booking-day"]')
       const more = page.getByRole("button", { name: "More days", exact: true })
       if (app.phone) {
@@ -1284,7 +1287,7 @@ export const scenes = [
     path: CHANGE,
     scenario: "booking-moved-out",
     assert: async ({ page }) => {
-      ensure(await page.getByText("It has moved as often as it can. Write to Me.").isVisible(), "a booking moved five times does not say so")
+      ensure(await page.getByText("It has moved as often as it can. Write to Alex Rivera.").isVisible(), "a booking moved five times does not say so")
       ensure(await page.getByRole("button", { name: "Cancel booking" }).isVisible(), "a booking moved five times cannot be canceled")
     },
   },

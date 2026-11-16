@@ -147,7 +147,8 @@ function Times({ label, slots, value, onPick }: { label: string; slots: TimeSlot
     </FilterChipGroup>
     {shown.length < days.length && (
       <div>
-        <Button variant="link" size="inline" onClick={() => setAllDays(true)}>
+        {/* A button in Vale's mono capitals (Vale 56: MORE DAYS), not a link: it adds to this page, it goes nowhere. */}
+        <Button variant="ghost" size="sm" onClick={() => setAllDays(true)}>
           More days
         </Button>
       </div>

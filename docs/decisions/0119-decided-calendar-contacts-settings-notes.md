@@ -16,7 +16,8 @@
 - **Menu-bar window (Vale 52):** NEXT UP's event is left out of the day list. Scene `mini-calendar`.
 - **Read-only calendars (Vale 53):** one line, with the read-only state as a mark and "Read-only" in the row's name. Unicron's `NavItem` has no trailing icon mark yet, so the mark is the neutral square, not the lock the decision asks for (a Unicron gap). Scene `calendar-calendars`.
 - **Past days (Vale 54):** the date-and-time picker cannot pick a past day: it is faint, a press does nothing, and the keys stop at today. Earlier today stays pickable, and a time already gone is the field's error. Scene `picker-keys`.
-- **The visitor's page (Vale 56):** it leads with the owner's name, not Vale's lockup; a phone shows the first three days of times, then MORE DAYS. COPY LINK disabled with its reason stays. Scene `calendar-booking-page`.
+- **The visitor's page (Vale 56):** it leads with the owner's name, not Vale's lockup; a phone shows the first three days of times, then MORE DAYS, a button in Vale's mono capitals (it adds to the page; it goes nowhere). COPY LINK disabled with its reason stays. Scene `calendar-booking-page`, which checks the name.
+  - **Whose name:** the core's `owner_name`, through the link's calendar's account (else your first): the name on the newest mail you sent from it, leaving out the account's "Name on sent mail" when that is used as the account's label ("Personal") and another name is on your mail; else that name; else "your host". Never the address: the page is public. Only your Sent mail counts, so mail that only claims to be from you can't rename you. The gateway names its owner the same way (ADR-0060). Core test `the_page_leads_with_your_name_not_the_accounts_label`. The demo's owner is Alex Rivera, as in its shared inbox.
 
 ### Contacts
 
