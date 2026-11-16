@@ -57,7 +57,8 @@ export function createDemoTeam(thread: (threadId: string) => MessageDetail[], fr
       if (live) return later(pub(live))
       const list = thread(threadId).sort((a, b) => a.date - b.date)
       if (!list.length) throw new Error("that conversation is no longer here")
-      const t = { id: crypto.randomUUID().replaceAll("-", ""), role: "owner" as const, threadId, revoked: false, relay: null, token: null, key: sealed() ? demoShareKey() : null, title: list.at(-1)!.subject, from: fromName(), created: now(), updated: now(), ydoc: null }
+      // The row's time from the start is the newest message's (Vale 43), as the core sets it.
+      const t = { id: crypto.randomUUID().replaceAll("-", ""), role: "owner" as const, threadId, revoked: false, relay: null, token: null, key: sealed() ? demoShareKey() : null, title: list.at(-1)!.subject, from: fromName(), created: now(), updated: now(), latest: list.at(-1)!.date, ydoc: null }
       rows.set(t.id, t)
       return done(pub(t))
     },
@@ -90,6 +91,11 @@ export function createDemoTeam(thread: (threadId: string) => MessageDetail[], fr
       if (title?.trim()) t.title = title.trim()
       if (latest !== null) t.latest = latest
       touch(t)
+      return done(pub(t))
+    },
+    fillTeamLatest: async (id: string, latest: number) => {
+      const t = get(id)
+      if (t.latest == null) t.latest = latest
       return done(pub(t))
     },
   }

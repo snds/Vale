@@ -2282,8 +2282,24 @@ export const scenes = [
     sizes: ["desktop"],
     run: (app) => lane(app, "Team"),
     assert: async ({ page }) => {
-      const times = await page.getByRole("list", { name: "Team" }).getByRole("listitem").evaluateAll((els) => els.map((el) => el.querySelector('[data-slot="list-row-status"], [data-slot="list-row-time"]')?.textContent?.trim() ?? ""))
-      ensure(times.every((t) => t.length > 0), `a Team row has no time: ${JSON.stringify(times)}`)
+      const rows = await page
+        .getByRole("list", { name: "Team" })
+        .getByRole("listitem")
+        .evaluateAll((els) => els.map((el) => ({ text: el.textContent ?? "", time: el.querySelector('[data-slot="list-row-status"], [data-slot="list-row-time"]')?.textContent?.trim() ?? "" })))
+      ensure(rows.every((r) => r.time.length > 0), `a Team row has no time: ${JSON.stringify(rows.map((r) => r.time))}`)
+      // The scenario's newest messages: Token audit 18 minutes ago, Supplier contract renewal 6 hours ago, Venue shortlist 4 days ago.
+      const at = ["Token audit", "Supplier contract renewal", "Venue shortlist"].map((t) => rows.findIndex((r) => r.text.includes(t)))
+      ensure(at.every((i, k) => i >= 0 && (k === 0 || i > at[k - 1])), `the Team rows are not newest message first: ${JSON.stringify(rows.map((r) => r.text.slice(0, 40)))}`)
+      // Supplier contract renewal's row reads its newest message's time, not when the share last changed (the minute may have turned since).
+      const expected = await page.evaluate(() =>
+        [0, 1, 2].map((m) => {
+          const d = new Date(Date.now() - 6 * 3_600_000 - m * 60_000)
+          const pad = (n) => String(n).padStart(2, "0")
+          return (d.toDateString() === new Date().toDateString() ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : d.toLocaleDateString(undefined, { weekday: "short" })).toUpperCase()
+        }),
+      )
+      const supplier = rows[at[1]].time.toUpperCase()
+      ensure(expected.includes(supplier), `Supplier contract renewal's row reads ${supplier}, not its newest message's ${expected[0]}`)
     },
   },
   {

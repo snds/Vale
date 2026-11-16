@@ -206,6 +206,8 @@ export interface CoreClient {
   teamDoc(id: string): Promise<string | null>
   /** `latest`: when the newest message in it was written (Vale 43). */
   saveTeamDoc(id: string, ydoc: string, title: string | null, latest?: number | null): Promise<TeamThread>
+  /** The newest message's time for a share that has none yet, from its stored copy (Vale 43). Doesn't mark it active. */
+  fillTeamLatest(id: string, latest: number): Promise<TeamThread>
   /** Opt-in AI (ADR-0059). Keys go to the keychain (or the gateway's sealed store) and never come back. */
   aiSettings(): Promise<AiSettings>
   setAiPrefs(prefs: AiPrefs): Promise<AiSettings>
@@ -483,6 +485,7 @@ function commands(call: Call): Omit<CoreClient, "kind" | "remote" | "on"> {
     removeTeamThread: (id) => call("remove_team_thread", { id }),
     teamDoc: (id) => call("team_doc", { id }),
     saveTeamDoc: (id, ydoc, title, latest = null) => call("save_team_doc", { id, ydoc, title, latest }),
+    fillTeamLatest: (id, latest) => call("fill_team_latest", { id, latest }),
     aiSettings: () => call("ai_settings"),
     setAiPrefs: (prefs) => call("set_ai_prefs", { prefs }),
     setAiKey: (provider, key) => call("set_ai_key", { provider, key }),

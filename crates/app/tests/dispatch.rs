@@ -137,6 +137,8 @@ async fn every_command_routes_and_works() {
     assert_eq!((&joined["role"], &joined["from"], &joined["threadId"]), (&json!("guest"), &json!("Sam"), &Value::Null));
     dispatch(&app, &state, "save_team_doc", json!({ "id": joined["id"], "ydoc": "AAA=", "title": null })).await.unwrap();
     assert_eq!(json_of(dispatch(&app, &state, "team_doc", json!({ "id": joined["id"] })).await.unwrap()), "AAA=");
+    // Vale 43: a copy with no time yet takes its newest message's, once.
+    assert_eq!(json_of(dispatch(&app, &state, "fill_team_latest", json!({ "id": joined["id"], "latest": 1_700_000_000 })).await.unwrap())["latest"], 1_700_000_000);
     assert_eq!(json_of(dispatch(&app, &state, "stop_team_thread", json!({ "id": joined["id"] })).await.unwrap())["revoked"], true);
     assert!(dispatch(&app, &state, "join_team_thread", json!({ "link": link })).await.is_err());
     dispatch(&app, &state, "remove_team_thread", json!({ "id": joined["id"] })).await.unwrap();

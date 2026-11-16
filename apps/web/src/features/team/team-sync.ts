@@ -34,6 +34,9 @@ const bump = (id: string) => useTeamVersions.setState((s) => ({ [id]: (s[id] ?? 
 /** Whether a shared conversation is connected right now, by id. */
 export const useTeamLive = create<Record<string, boolean>>(() => ({}))
 
+/** The newest message's time in a shared conversation's document, or null when it has none. */
+const newestOf = (snap: ReturnType<typeof snapshot>) => snap.messages.reduce<number | null>((n, m) => (n === null || m.date > n ? m.date : n), null)
+
 class TeamWatch {
   readonly ready: Promise<Ready>
   private p: ReturnType<typeof rejoining> | null = null
@@ -102,7 +105,7 @@ class TeamWatch {
     this.saved = state
     const snap = snapshot(this.doc)
     // The newest message's time is the Team list's time and order (Vale 43).
-    const latest = snap.messages.reduce<number | null>((n, m) => (n === null || m.date > n ? m.date : n), null)
+    const latest = newestOf(snap)
     await this.o.core.saveTeamDoc(this.t.id, state, snap.subject || null, latest).catch(() => {})
   }
 
@@ -124,6 +127,8 @@ export class TeamSync {
   private docs = new Map<string, Y.Doc>()
   private loading = new Map<string, Promise<Y.Doc>>()
   private joining = new Set<string>()
+  /** Shares whose missing time was asked for once this run (Vale 43). */
+  private filling = new Set<string>()
   private offs: (() => void)[]
   private refreshTimer: ReturnType<typeof setTimeout> | undefined
   private stopped = false
@@ -189,6 +194,8 @@ export class TeamSync {
   async refresh() {
     if (this.stopped) return
     const list = await this.core.teamThreads().catch(() => [] as TeamThread[])
+    // A share saved before its row kept a time, or a stopped copy that never saves again: its time comes from its copy (Vale 43).
+    for (const t of list) if (t.latest == null && !this.filling.has(t.id)) void this.fillLatest(t.id)
     const live = new Map(list.filter((t) => !t.revoked && (t.role === "owner" ? !!this.relay : !!t.relay && !!t.token)).map((t) => [t.id, t]))
     for (const [id, w] of this.watches) {
       if (!live.has(id)) {
@@ -204,6 +211,12 @@ export class TeamSync {
         this.sockets.delete(url)
       }
     }
+  }
+
+  private async fillLatest(id: string) {
+    this.filling.add(id)
+    const latest = newestOf(snapshot(await this.doc(id).catch(() => new Y.Doc())))
+    if (latest !== null && !this.stopped) await this.core.fillTeamLatest(id, latest).catch(() => {})
   }
 
   private async watch(t: TeamThread) {

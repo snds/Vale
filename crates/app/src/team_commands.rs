@@ -62,6 +62,16 @@ pub fn save_team_doc(app: AppHandle, state: &Shared, id: String, ydoc: String, t
     Ok(t)
 }
 
+/// A share's newest message's time, from its stored copy, when it has none yet (Vale 43).
+pub fn fill_team_latest(app: AppHandle, state: &Shared, id: String, latest: i64) -> Res<TeamThread> {
+    let before = with_store(state, |s| s.team_thread(&id))?;
+    let t = with_store(state, |s| s.fill_team_latest(&id, latest))?;
+    if t.latest != before.latest {
+        changed(&app);
+    }
+    Ok(t)
+}
+
 // ── A shared inbox on the gateway (ADR-0063) ────────────────────────────────
 // `by` and `owner` come from the gateway's session: it overwrites whatever
 // the page sent, so nobody can act as someone else.

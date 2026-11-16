@@ -34,7 +34,10 @@ CREATE INDEX team_threads_thread ON team_threads(thread_id);
 
 /// Version 24: when the newest message in a shared conversation was written (Vale 43): the Team
 /// list's time and order, as shared inboxes sort.
-pub(crate) const MIGRATE_V24: &str = "ALTER TABLE team_threads ADD COLUMN latest INTEGER;";
+/// The newest message's time (Vale 43). Your own shares fill it from your mail now; a teammate's
+/// fills on its next save, or from its stored copy the first time the app reads it (`fill_team_latest`).
+pub(crate) const MIGRATE_V24: &str = "ALTER TABLE team_threads ADD COLUMN latest INTEGER;
+UPDATE team_threads SET latest = (SELECT MAX(m.date) FROM messages m WHERE m.thread_id = team_threads.thread_id) WHERE role = 'owner';";
 
 /// Version 21: a share's own key, when it's end-to-end encrypted (ADR-0062).
 pub(crate) const MIGRATE_V21: &str = "ALTER TABLE team_threads ADD COLUMN key TEXT;";
@@ -135,8 +138,17 @@ impl Store {
         let id = uuid::Uuid::new_v4().simple().to_string();
         let t = now();
         self.db.execute(
-            "INSERT INTO team_threads (id, role, thread_id, title, sender, created, updated, key) VALUES (?1, 'owner', ?2, ?3, ?4, ?5, ?5, ?6)",
-            params![id, thread_id, last.summary.subject, from.map(str::trim).filter(|f| !f.is_empty()), t, sealed.then(crate::note_shares::new_share_key)],
+            "INSERT INTO team_threads (id, role, thread_id, title, sender, created, updated, key, latest) VALUES (?1, 'owner', ?2, ?3, ?4, ?5, ?5, ?6, ?7)",
+            params![
+                id,
+                thread_id,
+                last.summary.subject,
+                from.map(str::trim).filter(|f| !f.is_empty()),
+                t,
+                sealed.then(crate::note_shares::new_share_key),
+                // The row's time from the start is the newest message's (Vale 43), not when it was shared.
+                messages.iter().map(|m| m.summary.date).max(),
+            ],
         )?;
         self.team_thread(&id)
     }
@@ -207,6 +219,14 @@ impl Store {
         }
         self.team_thread(id)
     }
+
+    /// Fills in the newest message's time for a share that has none yet (one saved before schema 24,
+    /// or a stopped copy that never saves again), from its stored copy. It doesn't mark the share
+    /// active, and a time already there stays.
+    pub fn fill_team_latest(&self, id: &str, latest: i64) -> Result<TeamThread> {
+        self.db.execute("UPDATE team_threads SET latest = ?2 WHERE id = ?1 AND latest IS NULL", params![id, latest])?;
+        self.team_thread(id)
+    }
 }
 
 #[cfg(test)]
@@ -233,6 +253,7 @@ mod tests {
         let (s, tid) = store_with_thread();
         let a = s.share_thread(&tid, Some(" Sam "), false).unwrap();
         assert_eq!((a.role, a.title.as_str(), a.from.as_deref(), a.revoked), (ShareRole::Owner, "Offsite venue", Some("Sam"), false));
+        assert_eq!(a.latest, Some(1_791_885_600), "a new share carries its newest message's time (Vale 43)");
         assert!(valid_id(&a.id));
         assert_eq!(s.share_thread(&tid, None, false).unwrap().id, a.id, "sharing again finds the same link");
         assert_eq!(s.thread_share(&tid).unwrap().map(|t| t.id), Some(a.id.clone()));
@@ -281,6 +302,29 @@ mod tests {
         s.save_team_doc(&new.id, "AAA=", None, Some(1_700_000_000)).unwrap();
         let order: Vec<String> = s.team_threads().unwrap().into_iter().map(|t| t.id).collect();
         assert_eq!(order, vec![old.id, new.id], "the newer message leads, though the other share changed later");
+    }
+
+    #[test]
+    fn a_share_without_a_time_gets_its_newest_message() {
+        // Vale 43: a share saved before schema 24 (or a stopped copy) takes its time from its stored copy once,
+        // without moving up the list as if it had changed.
+        let s = Store::open_in_memory().unwrap();
+        let link = TeamLink { id: "cccccccccccccccccccc".into(), relay: "wss://notes.example.com".into(), token: "s1.x".into(), title: "Old".into(), from: None, key: None };
+        let t = s.join_team_thread(&link).unwrap();
+        assert_eq!(t.latest, None);
+        let filled = s.fill_team_latest(&t.id, 1_700_000_000).unwrap();
+        assert_eq!((filled.latest, filled.updated), (Some(1_700_000_000), t.updated));
+        assert_eq!(s.fill_team_latest(&t.id, 1_800_000_000).unwrap().latest, Some(1_700_000_000), "a time already there stays");
+        assert!(s.fill_team_latest("nope-nope-nope-nope", 1).is_err());
+    }
+
+    #[test]
+    fn schema_24_fills_your_own_shares_from_your_mail() {
+        let (s, tid) = store_with_thread();
+        let a = s.share_thread(&tid, None, false).unwrap();
+        s.db.execute("UPDATE team_threads SET latest = NULL", []).unwrap();
+        s.db.execute_batch(MIGRATE_V24.split_once(';').unwrap().1).unwrap();
+        assert_eq!(s.team_thread(&a.id).unwrap().latest, Some(1_791_885_600));
     }
 
     #[test]

@@ -181,6 +181,7 @@ pub const COMMANDS: &[&str] = &[
     "remove_team_thread",
     "team_doc",
     "save_team_doc",
+    "fill_team_latest",
     "ai_settings",
     "set_ai_prefs",
     "set_ai_key",
@@ -716,6 +717,10 @@ pub async fn dispatch(app: &AppHandle, state: &Shared, name: &str, args: Value) 
         "save_team_doc" => {
             args!(args, id: String, ydoc: String, title: Option<String>, latest: Option<i64>);
             Output::json(crate::team_commands::save_team_doc(app.clone(), state, id, ydoc, title, latest)?)
+        }
+        "fill_team_latest" => {
+            args!(args, id: String, latest: i64);
+            Output::json(crate::team_commands::fill_team_latest(app.clone(), state, id, latest)?)
         }
         // Opt-in AI (ADR-0059).
         "ai_settings" => Output::json(crate::ai_commands::ai_settings(state)?),
