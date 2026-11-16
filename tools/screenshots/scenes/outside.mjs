@@ -10,6 +10,8 @@ const PROVIDERS = ["Gmail", "Outlook / Microsoft 365", "iCloud", "Fastmail", "Ot
 const provider = (page, name) => firstRun(page).getByRole("list", { name: "Providers" }).getByRole("button", { name, exact: true })
 /** The folio at the end of the lockup's row. */
 const folio = (page) => firstRun(page).locator('[data-slot="app-frame-focus-head"] p')
+/** The folio as written in the page, in capitals (Vale 61), not only drawn so by the style. */
+const folioWritten = (page) => folio(page).evaluate((el) => el.textContent.trim())
 
 /** Step 2 for one provider, from step 1. */
 const step2 = async (app, name) => {
@@ -73,6 +75,7 @@ export const scenes = [
     assert: async ({ page }) => {
       ensure(await firstRun(page).isVisible(), "first run does not show for someone with no account")
       ensure((await folio(page).innerText()).trim().toLowerCase() === "step 01 // 02", "step 1's folio does not read STEP 01 // 02")
+      ensure((await folioWritten(page)) === "STEP 01 // 02", `the folio is written "${await folioWritten(page)}", not in capitals (Vale 61)`)
       ensure(await page.getByRole("heading", { name: "Add your first account.", level: 1 }).isVisible(), "step 1's title is not Add your first account.")
       const names = await firstRun(page).getByRole("list", { name: "Providers" }).getByRole("button").evaluateAll((els) => els.map((el) => el.querySelector('[data-slot="nav-item-label"]')?.textContent.trim()))
       ensure(JSON.stringify(names) === JSON.stringify(PROVIDERS), `step 1 lists ${names.join(", ")}`)

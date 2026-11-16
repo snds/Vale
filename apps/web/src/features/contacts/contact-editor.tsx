@@ -136,18 +136,49 @@ function useContactForm(state: ContactEditorState, onSaved: (id: string) => void
   const [opened] = useState(values)
   const dirty = values !== opened
 
-  // Fills the form from a pasted signature; what you've typed stays unless the signature has it.
+  // What PASTE A SIGNATURE just filled on an existing card, with its UNDO (Vale 59).
+  const [filled, setFilled] = useState<{ words: string; undo: () => void } | null>(null)
+
+  // Fills the form from a pasted signature. A new card takes what the signature has over what you typed; an
+  // existing card (Vale 59: updating a card from someone's new signature) fills only its empty fields and
+  // adds emails and phones it lacks. Either way the toast's UNDO puts the form back as it was.
   const fillFrom = async (): Promise<string | null> => {
     const card = await (await getCoreClient()).parseSignature(pasted)
-    if (card.fullName) setFullName(card.fullName)
-    if (card.org) setOrg(card.org)
-    if (card.title) setTitle(card.title)
-    const kept = <T extends ContactField>(have: T[], more: T[]) => [...have.filter((f) => f.value.trim()), ...more.filter((m) => !have.some((h) => h.value.trim().toLowerCase() === m.value.trim().toLowerCase()))]
-    if (card.emails.length) setEmails((e) => kept(e, card.emails))
-    if (card.phones.length) setPhones((p) => kept(p, card.phones))
-    const found = [card.fullName && "name", card.title && "title", card.org && "company", card.phones.length && "phone", card.emails.length && "email"].filter(Boolean)
-    if (!found.length) return "Couldn't find a name, phone or email in that text"
-    toast.success(`Filled in ${found.join(", ")}`)
+    const existing = !!contactId
+    const fills = (have: string, found: string | null | undefined) => !!found && (!existing || !have.trim())
+    const before = { fullName, org, title, emails, phones }
+    const name = fills(fullName, card.fullName)
+    const company = fills(org, card.org)
+    const role = fills(title, card.title)
+    if (name) setFullName(card.fullName!)
+    if (company) setOrg(card.org!)
+    if (role) setTitle(card.title!)
+    const fresh = <T extends ContactField>(have: T[], more: T[]) => more.filter((m) => !have.some((h) => h.value.trim().toLowerCase() === m.value.trim().toLowerCase()))
+    const kept = <T extends ContactField>(have: T[], more: T[]) => [...have.filter((f) => f.value.trim()), ...fresh(have, more)]
+    const newEmails = fresh(emails, card.emails).length > 0
+    const newPhones = fresh(phones, card.phones).length > 0
+    if (newEmails) setEmails((e) => kept(e, card.emails))
+    if (newPhones) setPhones((p) => kept(p, card.phones))
+    const found = [name && "name", role && "title", company && "company", newPhones && "phone", newEmails && "email"].filter(Boolean)
+    if (!found.length) {
+      const any = card.fullName || card.title || card.org || card.phones.length || card.emails.length
+      return any ? "Everything in that text is on the card already" : "Couldn't find a name, phone or email in that text"
+    }
+    if (existing) {
+      // An existing card says what it filled in the form itself, with UNDO: a toast would stand under a phone's
+      // full-screen form, out of reach.
+      setFilled({
+        words: `Filled in ${found.join(", ")}.`,
+        undo: () => {
+          setFullName(before.fullName)
+          setOrg(before.org)
+          setTitle(before.title)
+          setEmails(before.emails)
+          setPhones(before.phones)
+          setFilled(null)
+        },
+      })
+    } else toast.success(`Filled in ${found.join(", ")}`)
     setPasted("")
     return null
   }
@@ -209,6 +240,7 @@ function useContactForm(state: ContactEditorState, onSaved: (id: string) => void
     photo,
     setPhoto,
     pasted,
+    filled,
     setPasted,
     fillFrom,
     writable,
@@ -366,6 +398,18 @@ function Fields({ form, nameRef }: { form: Form; nameRef?: Ref<HTMLInputElement>
   const suggestions = known.map((k) => k.name).filter((n) => !form.labels.some((l) => l.toLowerCase() === n.toLowerCase()))
   return (
     <div className="flex flex-col gap-6">
+      {form.filled && (
+        <Banner
+          size="compact"
+          tone="info"
+          body={form.filled.words}
+          action={
+            <Button type="button" variant="secondary" size="sm" onClick={form.filled.undo}>
+              Undo
+            </Button>
+          }
+        />
+      )}
       <div className="flex items-center gap-4" role="group" aria-label="Photo">
         <InitialTile size="l" initials={contactInitials(form.fullName || "?")} src={form.photo ?? undefined} />
         <div className="flex flex-wrap gap-2">

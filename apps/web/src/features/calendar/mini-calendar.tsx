@@ -47,7 +47,7 @@ export function MiniCalendar() {
   const setMonth = (d: Date) => setChosen({ on: todayKey, picked, month: d })
 
   const { data: soon = [] } = useOccurrences(now - AHEAD, now + AHEAD)
-  const { data: dayOcc = [] } = useOccurrences(secs(picked), secs(addDays(picked, 1)))
+  const { data: dayAll = [] } = useOccurrences(secs(picked), secs(addDays(picked, 1)))
   const gridStart = startOfWeek(new Date(month.getFullYear(), month.getMonth(), 1))
   const { data: monthOcc = [] } = useOccurrences(secs(gridStart), secs(addDays(gridStart, 42)))
   // Events per day, for the month's marks and the days' names.
@@ -57,6 +57,8 @@ export function MiniCalendar() {
     return count
   }, [monthOcc])
   const next = nextUp(soon, now)
+  // NEXT UP's event stands above; the day list leaves it out, so a small window never shows it twice (Vale 52).
+  const dayOcc = next ? dayAll.filter((o) => occurrenceKey(o) !== occurrenceKey(next)) : dayAll
 
   // The desktop brings its main window forward; a browser (the gateway) has
   // only this one, so it opens the app page in its place.

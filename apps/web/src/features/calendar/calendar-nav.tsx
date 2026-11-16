@@ -79,7 +79,10 @@ export function CalendarNav({ standalone = false }: { standalone?: boolean }) {
                 checked={!c.hidden}
                 // Toggling a calendar keeps the list open: it is a filter, and more than one may change.
                 onCheckedChange={(on) => toggle.mutate({ id: c.id, hidden: !on })}
-                description={c.writable ? undefined : "Read-only"}
+                // Read-only as a mark on the one line, its words in the row's name (Vale 53), not a second line.
+                // Unicron's NavItem has no trailing icon mark yet, so it is the neutral square; the lock asked for
+                // is a Unicron gap (hand-off), and swaps in here when NavItem takes `mark={{ icon, label }}`.
+                mark={c.writable ? undefined : { square: true, label: "Read-only" }}
                 tone={g && failing.has(g) ? "critical" : undefined}
                 toneLabel={g && failing.has(g) ? "didn't sync" : undefined}
               />

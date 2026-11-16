@@ -21,7 +21,7 @@ function FirstRunColumn() {
   const provider = useFirstRun((s) => s.provider)
   const phone = useAppFrame().phone
   return (
-    <AppFrameFocus lockup={<AppLockup name="Vale" />} folio={provider ? "Step 02 // 02" : "Step 01 // 02"} aria-label="First run">
+    <AppFrameFocus lockup={<AppLockup name="Vale" />} folio={provider ? "STEP 02 // 02" : "STEP 01 // 02"} aria-label="First run">
       {/* On a phone the step fills the column, so its primary stands at the foot; elsewhere the column centres it. */}
       <div className={phone ? "flex flex-1 flex-col" : "flex flex-col"}>
         {provider ? <AddAccountStep key={provider} preset={provider} where="focus" onBack={() => pickProvider(null)} onAdded={(a) => firstRunDone(a.address)} /> : <Welcome />}

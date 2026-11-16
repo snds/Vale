@@ -286,6 +286,8 @@ function ManageAccount({ account: a, onBack }: { account: Account; onBack: () =>
   const qc = useQueryClient()
   const signIn = useSignInAgain()
   const confirm = useConfirm()
+  const { data: core } = useCore()
+  const webDemo = core?.kind === "demo" && !isDesktopApp()
   const remove = async () => {
     const yes = await confirm.ask({
       overline: `${a.displayName} // Account`,
@@ -333,7 +335,8 @@ function ManageAccount({ account: a, onBack }: { account: Account; onBack: () =>
         {a.dav ? (a.davError ? "Not syncing" : "Connected") : "Not connected"}
       </FieldRow>
       <div className="pt-8">
-        <Button variant="ghost-destructive" onClick={() => void remove()}>
+        {/* The web demo cannot remove an account: the button says why rather than letting it fail (Vale 60, cross-app §14). */}
+        <Button variant="ghost-destructive" disabled={webDemo} disabledReason={webDemo ? "Not in the demo" : undefined} onClick={() => void remove()}>
           Remove account
         </Button>
       </div>

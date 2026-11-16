@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 
-import { AdaptiveDialog, Banner, Button, FileChip, FilterChip, FilterChipGroup, IconButton, useAppFrame } from "@unicron/ui"
+import { AdaptiveDialog, Banner, Button, FileChip, FilterChip, FilterChipGroup, IconButton, formatNavCount, useAppFrame } from "@unicron/ui"
 import { useConfirm } from "@/lib/confirm"
 import { IMAGE_SIDE } from "@/lib/image"
 import { findPage, FULL, loadPhoto, type Pt, type Quad, type ScanLook, straighten, toJpeg } from "@/lib/scan"
@@ -174,7 +174,7 @@ function Scanner({ onClose, onDone }: { onClose: () => void; onDone: (pages: Fil
           )}
           {pages.length > 0 && (
             <section className="scan-pages" aria-label="Scanned pages">
-              <span className="type-overline text-muted-foreground">Pages // {two(pages.length)}</span>
+              <span className="type-overline text-muted-foreground">Pages // {formatNavCount(pages.length)}</span>
               <ol>
                 {pages.map((p, i) => (
                   <li key={p.thumb}>

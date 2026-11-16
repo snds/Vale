@@ -111,6 +111,9 @@ function QuickOverline({ target, linked, onToggle }: { target: QuickContext | nu
   )
 }
 
+/** How many linked notes the quick note lists before MORE (Vale 68). */
+const HERE_SHOWN = 3
+
 function QuickNoteBody({ target, linked, text, onText, onDone }: { target: QuickContext | null; linked: boolean; text: string; onText: (t: string) => void; onDone: () => void }) {
   const { data: here = [] } = useLinkedNotes(target ? { kind: target.kind, id: target.id } : null)
   const jumpTo = useUi((s) => s.jumpTo)
@@ -134,7 +137,8 @@ function QuickNoteBody({ target, linked, text, onText, onDone }: { target: Quick
         <section aria-label="Here already" className="flex flex-col">
           <SectionHeader title="Here already" count={here.length} level={3} />
           <div role="list" aria-label="Notes here already" className="flex flex-col">
-            {here.map((n) => (
+            {/* Three at most (Vale 68): a quick note's dialog should not grow with every linked note. */}
+            {here.slice(0, HERE_SHOWN).map((n) => (
               <div role="listitem" key={n.id}>
                 <NoteRow
                   note={n}
@@ -147,6 +151,23 @@ function QuickNoteBody({ target, linked, text, onText, onDone }: { target: Quick
               </div>
             ))}
           </div>
+          {here.length > HERE_SHOWN && (
+            <div className="pt-2">
+              {/* MORE opens the full list, which lives on the item itself, saving what was typed first. */}
+              <Button
+                type="button"
+                variant="link"
+                size="inline"
+                aria-label={`More notes here: open ${target.label}`}
+                onClick={() => {
+                  onDone()
+                  jumpTo({ kind: target.kind, id: target.id })
+                }}
+              >
+                More
+              </Button>
+            </div>
+          )}
         </section>
       )}
     </>

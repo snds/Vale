@@ -233,7 +233,8 @@ export function ContactsView() {
       <div className="flex flex-col gap-4" role="group" aria-label="People">
         {sections.map((s) => (
           <section key={s.letter} aria-label={s.letter}>
-            <SectionHeader title={s.letter} count={s.items.length} variant="index" level={3} inset={phone} />
+            {/* The drawn overline header with its count, as every other section header in Vale (Vale 57), not the large letter. */}
+            <SectionHeader title={s.letter} count={s.items.length} level={3} inset={phone} />
             <ul>
               {s.items.map((c) => (
                 <PersonRow key={c.id} render={<li />} list contact={c} book={sourceOf(c.bookId)} selected={selected === c.id} onOpen={() => moveTo(c.id)} />
@@ -264,7 +265,8 @@ export function ContactsView() {
                       All
                     </FilterChip>
                     {chips.map((l) => (
-                      <FilterChip key={l.name} value={l.name} count={l.count}>
+                      // A label is a name someone wrote ("McKay family"): it keeps its case (Vale 8).
+                      <FilterChip key={l.name} value={l.name} count={l.count} keepCase>
                         {l.name}
                       </FilterChip>
                     ))}

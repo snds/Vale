@@ -8,7 +8,8 @@ const sectionList = (page) => page.getByRole("navigation", { name: "Settings sec
 /** Opens Settings, and one section of it when given. Mail's, calendar's and search's scenes use it too. */
 export const settings = async (app, section) => {
   await press(app, settingsButton(app.page))
-  if (section) await press(app, sectionList(app.page).getByRole("button", { name: section, exact: true }))
+  // A section's name, or its name and then its mark's words ("About, Server update available").
+  if (section) await press(app, sectionList(app.page).getByRole("button", { name: new RegExp(`^${section}(, |$)`) }))
 }
 
 /** The way back from a pushed section: the phone's top bar, or the status line's leading slot at medium width. */
@@ -180,11 +181,18 @@ export const scenes = [
       for (const label of ["Address", "Provider", "Mail", "Calendars and contacts"]) ensure(await page.getByRole("group", { name: label, exact: true }).count(), `Manage has no ${label} row`)
       ensure(/me@personal\.example/.test(await page.getByRole("group", { name: "Address", exact: true }).textContent()), "Manage does not show the account's address")
       ensure(await button(page, "Remove account").isVisible(), "Manage has no REMOVE ACCOUNT")
+      // The web demo cannot remove an account: REMOVE ACCOUNT is off and says why (Vale 60).
+      const remove = button(page, "Remove account")
+      ensure((await remove.getAttribute("aria-disabled")) === "true" || (await remove.isDisabled()), "the web demo's REMOVE ACCOUNT is not off")
+      const why = await remove.evaluate((el) => (el.getAttribute("aria-describedby") ?? "").split(" ").map((id) => document.getElementById(id)?.textContent?.trim() ?? "").join(" "))
+      ensure(/Not in the demo/.test(why), `REMOVE ACCOUNT's reason is "${why}"`)
     },
   },
   {
     // REMOVE ACCOUNT asks first, with focus on Cancel (cross-app decisions §10), and the demo's server says no.
+    // Played as the desktop app (where removing an account works), since the web demo's button is off (Vale 60).
     name: "settings-remove-account",
+    scenario: "desktop-update-ready",
     run: async (app) => {
       const { page } = app
       await manage(app, "Personal")
@@ -252,12 +260,12 @@ export const scenes = [
     },
   },
   {
-    // Signatures and templates (brief T3): a row per account with its signature's first line and EDIT;
+    // Signatures (brief T3; Vale 3: the short name, its description carries templates): a row per account with its signature's first line and EDIT;
     // TEMPLATES with a count, NEW TEMPLATE, and a row per template.
     name: "settings-signatures",
     sizes: ["desktop", "phone", "medium"],
     sean: { kind: "undrawn", area: "settings", screen: "signatures" },
-    run: (app) => settings(app, "Signatures and templates"),
+    run: (app) => settings(app, "Signatures"),
     assert: async ({ page }) => {
       const signatures = region(page, "Signatures")
       for (const name of ["Personal", "Work"]) {
@@ -269,6 +277,15 @@ export const scenes = [
       ensure(/01/.test(await templates.getByRole("heading").innerText()), "TEMPLATES does not count 01")
       ensure(await templates.getByRole("button", { name: "New template", exact: true }).isVisible(), "TEMPLATES has no NEW TEMPLATE")
       ensure(await templates.getByRole("button", { name: "Thanks, will reply soon", exact: true }).isVisible(), "the demo's template has no row")
+      // Vale 3: the two long names were cut at 204 px; the short ones fit whole, and the description keeps the rest.
+      if (await sectionList(page).isVisible()) {
+        for (const name of ["Signatures", "AI"]) {
+          const item = sectionList(page).getByRole("button", { name, exact: true })
+          ensure(await item.isVisible(), `the section list has no ${name}`)
+          ensure(!(await item.evaluate((el) => [el, ...el.querySelectorAll("*")].some((e) => e.scrollWidth > e.clientWidth + 1))), `${name} is cut in the section list`)
+        }
+      }
+      ensure(await page.getByText("What goes under your messages, and templates of text you reuse.").first().isVisible(), "Signatures' description does not carry templates")
     },
   },
   {
@@ -279,7 +296,7 @@ export const scenes = [
     sean: { kind: "undrawn", area: "settings", screen: "signature-edit" },
     run: async (app) => {
       const { page } = app
-      await settings(app, "Signatures and templates")
+      await settings(app, "Signatures")
       const row = () => region(page, "Signatures").getByRole("group", { name: "Personal", exact: true })
       const open = async () => {
         await press(app, row().getByRole("button", { name: "Edit", exact: true }))
@@ -310,7 +327,7 @@ export const scenes = [
     sean: { kind: "undrawn", area: "settings", screen: "template-form" },
     run: async (app) => {
       const { page } = app
-      await settings(app, "Signatures and templates")
+      await settings(app, "Signatures")
       await press(app, region(page, "Templates").getByRole("button", { name: "New template", exact: true }))
       const form = page.getByRole("dialog", { name: /New template/ })
       ensure(await form.getByText("Fills an empty subject.").isVisible(), "SUBJECT has no helper")
@@ -329,7 +346,7 @@ export const scenes = [
     name: "settings-template-delete",
     run: async (app) => {
       const { page } = app
-      await settings(app, "Signatures and templates")
+      await settings(app, "Signatures")
       const templates = region(page, "Templates")
       await press(app, templates.getByRole("button", { name: "New template", exact: true }))
       const form = page.getByRole("dialog", { name: /New template/ })
@@ -447,9 +464,31 @@ export const scenes = [
       for (const group of ["Calls", "Menu bar", "Time"]) ensure(await region(page, group).count(), `Calendar has no ${group} group`)
       ensure(await page.getByRole("switch", { name: "Calls open in their apps" }).isChecked(), "Calls open in their apps is not on")
       ensure(await page.getByRole("switch", { name: "Show what's next" }).isChecked(), "Show what's next is not on")
-      const week = page.getByRole("group", { name: "Week starts" })
-      ensure(/Sunday/.test(await week.textContent()) && !(await week.getByRole("button").count()), "Week starts is not the fact Sunday")
+      // WEEK STARTS (Vale 46): Sunday and Monday as chips, the region's day (en-US: Sunday) picked until changed; no description.
+      const week = page.getByRole("radiogroup", { name: "Week starts" })
+      ensure((await week.getByRole("radio").allInnerTexts()).map((t) => t.trim().toLowerCase()).join(",") === "sunday,monday", "WEEK STARTS is not the chips Sunday and Monday")
+      ensure((await week.getByRole("radio", { name: /Sunday/i }).getAttribute("aria-checked")) === "true", "the region's Sunday is not picked")
+      ensure(!(await page.getByText("From your device's region.").count()), "WEEK STARTS still has its description")
       ensure(!(await page.getByText(/Week numbers|Default alert/).count()), "Calendar shows a row it has no setting for")
+    },
+  },
+  {
+    // WEEK STARTS (Vale 46): Monday is kept on this device, and the week and the month start on it at once and after a reload.
+    name: "settings-week-starts",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await settings(app, "Calendar")
+      await press(app, page.getByRole("radiogroup", { name: "Week starts" }).getByRole("radio", { name: /Monday/i }))
+      await page.reload()
+      await page.waitForFunction(() => !!document.getElementById("root")?.innerText.trim())
+      await app.settle()
+      await settings(app, "Calendar")
+    },
+    assert: async ({ page }) => {
+      ensure((await page.getByRole("radiogroup", { name: "Week starts" }).getByRole("radio", { name: /Monday/i }).getAttribute("aria-checked")) === "true", "Monday did not outlive a reload")
+      const first = await page.evaluate(() => localStorage.getItem("vale.calendar.weekStarts"))
+      ensure(first === "1", `the device keeps ${first}, not Monday`)
     },
   },
   {
@@ -659,11 +698,11 @@ export const scenes = [
     },
   },
   {
-    // AI summaries and replies (brief T7): the caption first, MODEL RUNS as four RadioRows, Off chosen; nothing else.
+    // AI (brief T7; Vale 3, once "AI summaries and replies"): the caption first, MODEL RUNS as four RadioRows, Off chosen; nothing else.
     name: "settings-ai",
     sizes: ["desktop", "phone", "medium"],
     sean: { kind: "undrawn", area: "settings", screen: "ai" },
-    run: (app) => settings(app, "AI summaries and replies"),
+    run: (app) => settings(app, "AI"),
     assert: async ({ page }) => {
       ensure(await page.getByText("Off unless you turn it on. A conversation goes to the model only when you ask for its summary or replies.").isVisible(), "the caption is missing")
       const runs = page.getByRole("radiogroup", { name: "Model runs" })
@@ -681,7 +720,7 @@ export const scenes = [
     sean: { kind: "undrawn", area: "settings", screen: "ai-key" },
     run: async (app) => {
       const { page } = app
-      await settings(app, "AI summaries and replies")
+      await settings(app, "AI")
       await press(app, page.getByRole("radiogroup", { name: "Model runs" }).getByRole("radio", { name: "Claude, with your API key" }))
       const connection = () => page.getByRole("group", { name: "Connection" })
       ensure(/Add your API key first\./.test(await connection().textContent()), "the connection does not ask for the key first")
@@ -714,13 +753,13 @@ export const scenes = [
     sizes: ["desktop"],
     run: async (app) => {
       const { page } = app
-      await settings(app, "AI summaries and replies")
+      await settings(app, "AI")
       await press(app, page.getByRole("radiogroup", { name: "Model runs" }).getByRole("radio", { name: "On this computer" }))
       ensure(await page.getByRole("textbox", { name: "Server address" }).isVisible(), "no SERVER ADDRESS")
       await press(app, page.getByRole("group", { name: "Model" }).getByRole("button", { name: "Change", exact: true }))
       await press(app, page.getByRole("menuitemradio", { name: "qwen3:8b" }))
       await reload(app)
-      await settings(app, "AI summaries and replies")
+      await settings(app, "AI")
       ensure(await page.getByRole("radiogroup", { name: "Model runs" }).getByRole("radio", { name: "On this computer" }).isChecked(), "the choice did not survive a reload")
       ensure(/qwen3:8b/.test(await page.getByRole("group", { name: "Model" }).textContent()), "the model did not survive a reload")
       ensure(/Connected\./.test(await page.getByRole("group", { name: "Connection" }).textContent()), "the connection does not say Connected.")
@@ -1033,6 +1072,30 @@ export const scenes = [
       // Nothing else in About competes with it: no other primary (unicron's row draws its actions as text; a gap in ADR-0112).
       ensure(!(await region(page, "About").locator('[data-slot="button"][data-variant="default"]').count()), "About has a primary beside RESTART TO UPDATE")
       ensure(!(await page.locator("[data-sonner-toast]").count()), "an update that is ready raised a toast")
+    },
+  },
+  {
+    // Vale 20: a newer gateway image marks the way into Settings and About, for the gateway's owner only
+    // (cross-app decisions §3: one signal for every update). No toast.
+    name: "settings-server-update-mark",
+    scenario: "gateway-owner",
+    sizes: ["desktop", "phone"],
+    sean: { kind: "undrawn", area: "settings", screen: "server-update-mark" },
+    assert: async ({ page }) => {
+      const way = settingsButton(page).first()
+      await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => /^Settings, Server update available/.test(b.getAttribute("aria-label") ?? "")))
+      ensure(/Server update available/.test(await way.getAttribute("aria-label")), `the way into Settings is not marked: ${await way.getAttribute("aria-label")}`)
+      ensure(!(await page.locator("[data-sonner-toast]").count()), "a newer server image raised a toast")
+    },
+  },
+  {
+    // A team member cannot update the server: no mark for them (Vale 20).
+    name: "settings-server-update-member",
+    scenario: ["member", "gateway-owner"],
+    sizes: ["desktop"],
+    assert: async ({ page }) => {
+      await page.waitForTimeout(400)
+      ensure((await settingsButton(page).first().getAttribute("aria-label")) === "Settings", "a team member sees the server's update mark")
     },
   },
   {

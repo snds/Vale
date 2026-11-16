@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { formatNavCount } from "@unicron/ui"
 
 import { useNoteTasks } from "@/core/queries"
 import type { NoteTask } from "@/core/types"
@@ -8,7 +9,7 @@ import { leaveThen } from "@/lib/leave-guard"
 export const useOpenTasks = () => useNoteTasks()
 
 /** Tasks' overline (brief C6): `TASKS // 07`, the open items in two digits. */
-export const tasksOverline = (n: number | undefined) => `Tasks // ${String(n ?? 0).padStart(2, "0")}`
+export const tasksOverline = (n: number | undefined) => `Tasks // ${formatNavCount(n ?? 0)}`
 
 /**
  * The task being planned, if any (ADR-0100; brief C6). On a desktop its form

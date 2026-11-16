@@ -104,31 +104,35 @@ export function DayCards({ day, today, occurrences, coming, ctx, loading, onMore
 }
 
 /**
- * Upcoming (Desktop / 07's list): from today for `days` days, grouped by day,
- * the date in each card's mono line. Today always shows, with "Nothing
- * planned" when it is free, so you know where you are. MORE adds 30 days.
+ * Upcoming (Desktop / 07's list): from today for `days` days, one list of cards with no day headers,
+ * as Desktop / 07 draws it (Vale 45): each card's mono line carries its day ("THU 11.12 // 12:30 –
+ * 13:30"), so a header would say the date twice. A free today says "Nothing planned today" above
+ * the rest, so you know where you are. MORE adds 30 days.
  */
 export function Upcoming({ from, days, occurrences, ctx, loading, onMore }: { from: Date; days: number; occurrences: Occurrence[]; ctx: CardContext; loading: boolean; onMore: () => void }) {
-  const groups = Array.from({ length: days }, (_, i) => addDays(from, i))
-    .map((d) => ({ day: d, items: dayOrder(eventsOn(occurrences, d)) }))
-    .filter(({ items }, i) => items.length > 0 || i === 0)
+  const byDay = Array.from({ length: days }, (_, i) => dayOrder(eventsOn(occurrences, addDays(from, i))))
+  const freeToday = byDay[0]!.length === 0
+  // An event that runs over several days is listed once, on its first day here.
+  const seen = new Set<string>()
+  const items = byDay.flat().filter((o) => !seen.has(occurrenceKey(o)) && !!seen.add(occurrenceKey(o)))
   return (
-    <div className="flex flex-col gap-6" data-slot="upcoming">
-      {(loading ? groups.slice(0, 1) : groups).map(({ day, items }) => (
-        <CardSection key={day.toDateString()} title={dayHeading(day, from)} count={items.length} loading={loading} empty={items.length === 0}>
+    <section className="flex flex-col gap-2" data-slot="upcoming" aria-label="Upcoming" aria-busy={loading || undefined}>
+      {loading ? (
+        <CardSkeletons />
+      ) : (
+        <>
+          {freeToday && <p className="type-caption text-text-secondary">Nothing planned today</p>}
           {items.map((o) => (
             <EventCard key={occurrenceKey(o)} o={o} ctx={ctx} date />
           ))}
-        </CardSection>
-      ))}
-      {!loading && (
-        <div>
-          <Button variant="link" size="inline" onClick={onMore}>
-            More
-          </Button>
-        </div>
+          <div>
+            <Button variant="link" size="inline" onClick={onMore}>
+              More
+            </Button>
+          </div>
+        </>
       )}
-    </div>
+    </section>
   )
 }
 

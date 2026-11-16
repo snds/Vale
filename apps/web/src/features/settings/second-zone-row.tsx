@@ -1,6 +1,6 @@
-import { FieldRow, FieldRowAction } from "@unicron/ui"
+import { FieldRow, FieldRowAction, FilterChip, FilterChipGroup } from "@unicron/ui"
 import { ZonePicker } from "@/components/zone-picker"
-import { firstDayOfWeek } from "@/features/calendar/dates"
+import { firstDayOfWeek, setWeekStarts, useWeekStarts } from "@/features/calendar/dates"
 import { setSecondZone, useSecondZone, zoneLabel } from "@/features/calendar/zones"
 
 import { useRowSize } from "./row-size"
@@ -24,13 +24,23 @@ export function SecondZoneRow() {
   )
 }
 
-/** The day a week starts on (brief T4): a fact from the device's region, the one the calendar's weeks use. No action. */
+/** A day's name in the device's language: any Sunday, moved on by `day`. */
+const dayName = (day: number) => new Date(2026, 10, 15 + day).toLocaleDateString(undefined, { weekday: "long" })
+
+/**
+ * WEEK STARTS (Vale 46; the W4 preference): Sunday or Monday as chips, kept on this device. Until
+ * it is changed the region's day is the one picked. The chip shows the fact, so the row has no
+ * description. Every week and month follows at once.
+ */
 export function WeekStartsRow() {
-  // Any Sunday, moved on to the week's first day, named in the device's language.
-  const day = new Date(2026, 10, 15 + firstDayOfWeek()).toLocaleDateString(undefined, { weekday: "long" })
+  useWeekStarts((s) => s.day)
+  const day = firstDayOfWeek()
   return (
-    <FieldRow size={useRowSize()} label="Week starts" description="From your device's region.">
-      {day}
+    <FieldRow size={useRowSize()} label="Week starts">
+      <FilterChipGroup label="Week starts" value={day === 0 || day === 1 ? String(day) : undefined} onValueChange={(v) => setWeekStarts(v === "1" ? 1 : 0)}>
+        <FilterChip value="0">{dayName(0)}</FilterChip>
+        <FilterChip value="1">{dayName(1)}</FilterChip>
+      </FilterChipGroup>
     </FieldRow>
   )
 }

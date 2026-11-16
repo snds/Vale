@@ -63,6 +63,9 @@ export const scenes = [
       ensure((await headTitle(page)) === "People", "the list's title is not People")
       const sections = people(page).locator('[data-slot="section-header"]')
       ensure((await sections.count()) >= 5, `the list has ${await sections.count()} letter sections`)
+      // Vale 57: the letters are the drawn overline headers with a three-digit count, not the large letter.
+      ensure(!(await people(page).locator('[data-slot="section-header"][data-variant="index"]').count()), "a letter is still the large index header")
+      ensure(/^[A-Z]\b.*\b\d{3}$/.test((await sections.first().innerText()).replace(/\s+/g, " ").trim()), `a letter header reads "${(await sections.first().innerText()).trim()}"`)
       ensure(!(await people(page).getByText(/favorite/i).count()), "the list shows a Favorites section, which has no data")
       const priya = people(page).getByRole("listitem").filter({ hasText: "Priya Raman" })
       ensure(/priya@studio\.example \/\/ Work/.test(await priya.innerText()), "Priya's row does not read her email, then her address book")
@@ -331,6 +334,33 @@ export const scenes = [
     },
   },
   {
+    // PASTE A SIGNATURE on an existing card (Vale 59): only empty fields fill and new phones and emails are
+    // added; what the card has stays. The line it leaves in the form has UNDO, which puts the form back.
+    name: "contacts-edit-paste-signature",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await editPerson(app, /Priya Raman/)
+      const f = contactForm(app, "Edit contact")
+      const layer = () => page.getByRole("dialog", { name: "Paste a signature" })
+      const name = await field(f, "Name").inputValue()
+      await press(app, paster(app, f))
+      await layer().getByRole("textbox", { name: "Signature" }).fill("P. Raman\nPrincipal designer | Elsewhere Ltd\nm: +1 555 010 9988")
+      await press(app, layer().getByRole("button", { name: "Fill in", exact: true }))
+      // What it filled is said in the form itself, with UNDO: a toast would stand under a phone's full-screen form.
+      const said = f.locator('[data-slot="banner"]').filter({ hasText: "Filled in" })
+      await said.waitFor()
+      ensure((await field(f, "Name").inputValue()) === name, "the signature replaced the card's name")
+      ensure(!/\bname\b/.test(await said.innerText()), `it says it filled the name: ${await said.innerText()}`)
+      const phones = async () => f.getByRole("textbox", { name: /^Phone \d/ }).evaluateAll((els) => els.map((el) => el.value))
+      ensure((await phones()).includes("+1 555 010 9988"), "the new phone was not added")
+      await press(app, said.getByRole("button", { name: "Undo", exact: true }))
+      ensure(!(await phones()).includes("+1 555 010 9988"), "UNDO did not put the form back")
+      ensure(!(await said.count()), "the line stayed after UNDO")
+      await rest(page)
+    },
+  },
+  {
     // The contact form in the form layer (ADR-0087) where it opens there: a phone's whole screen and a dialog at
     // medium width. On a desktop it stands in the pane (ADR-0103), checked the same way: Esc closes it untouched,
     // it asks once it holds writing, and Ctrl+Enter saves it.
@@ -595,6 +625,9 @@ export const scenes = [
       ensure((await headTitle(page)) === "Studio and clay club", "the group's name is not the title")
       const chips = page.getByRole("radiogroup", { name: "Narrow Studio and clay club by label" })
       const all = await people(page).getByRole("listitem").count()
+      // A label is a name someone wrote: it keeps its case, where the chip's own words (ALL) are capitals (Vale 8).
+      ensure((await chips.getByRole("radio", { name: /^Clay club/ }).innerText()).includes("Clay club"), "the label chip does not keep its case")
+      ensure(/^ALL/.test((await chips.getByRole("radio", { name: /^All/ }).innerText()).trim()), "the chip's own word ALL is not in capitals")
       await press(app, chips.getByRole("radio", { name: /^Clay club/ }))
       const narrowed = await people(page).getByRole("listitem").count()
       ensure(narrowed > 0 && narrowed < all, `the Clay club chip shows ${narrowed} of ${all}`)
@@ -667,7 +700,7 @@ export const scenes = [
       const { page } = app
       ensure((await headTitle(page)) === "Duplicates", "the page head does not name Duplicates")
       ensure(await button(page, "Merge").first().isVisible(), "the duplicates cannot be merged from here")
-      ensure(/^duplicates\s*\/\/\s*01 set$/i.test((await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()).trim()), "the overline does not count the sets")
+      ensure(/^duplicates\s*\/\/\s*001 set$/i.test((await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()).trim()), "the overline does not count the sets")
       ensure((await oneCurrent(await groups(app), "Contacts' groups")).startsWith("Duplicates"), "Duplicates is not the current place")
       if (await switcherLayer(page).count()) await leaveLayer(app)
       await goBack(app)

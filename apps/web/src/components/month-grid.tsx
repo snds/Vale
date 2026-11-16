@@ -74,7 +74,9 @@ export function MonthGrid({ month, onMonthChange, selected = null, onPick, varia
     cells.current.get(key(active))?.focus()
   })
 
-  const go = (day: Date) => {
+  const go = (to: Date) => {
+    // The keys never land on a day that can't be picked: they stop at the first one that can (Vale 54).
+    const day = floor && to < floor ? floor : to
     refocus.current = true
     setCursor(day)
     if (!inMonth(day)) onMonthChange(day)

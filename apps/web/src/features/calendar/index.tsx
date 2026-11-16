@@ -16,6 +16,7 @@ import {
   FilterChipGroup,
   IconButton,
   Toggle,
+  toast,
   useAppFrame,
 } from "@unicron/ui"
 import { DemoBar } from "@/app/demo-bar"
@@ -23,7 +24,7 @@ import { useRefresh, useScreenFact, useScreenPlace, useScreenRoot } from "@/app/
 import { MonthGrid as MonthPicker } from "@/components/month-grid"
 import { MasterDetail } from "@/components/master-detail"
 import { ScreenHead } from "@/components/page"
-import { useAccounts, useBookingLinks, useCollections, useKeyBindings, useOccurrences } from "@/core/queries"
+import { useAccounts, useBookingLinks, useCollections, useKeyBindings, useOccurrences, usePimAction } from "@/core/queries"
 import type { Occurrence } from "@/core/types"
 import { useNowSecs } from "@/hooks/use-now"
 import { ariaKey, commandFor } from "@/lib/keys"
@@ -33,7 +34,7 @@ import { DayCards, PhoneWeek, Upcoming, WeekCards } from "./agenda"
 import { moveBetweenEvents, type CardContext } from "./card-context"
 import { CalendarNav } from "./calendar-nav"
 import { SaveSetLayer } from "./calendar-sets"
-import { addDays, addMonths, dateInput, eventsOn, folio, fromSecs, monthDay, rangeFact, sameDay, secs, startOfDay, startOfWeek, timeInput, weekNumber } from "./dates"
+import { addDays, addMonths, dateInput, eventsOn, folio, fromSecs, monthDay, rangeFact, sameDay, secs, startOfDay, startOfWeek, timeInput, useWeekStarts, weekNumber } from "./dates"
 import { EventDetailPane, EventReview } from "./event-detail"
 import { useCalendars } from "./use-calendars"
 import { MonthGrid } from "./month-grid"
@@ -124,6 +125,8 @@ function PagingSteps({ view, todayInView, onToday, onStep, keys }: { view: View;
  * and every event opens as a pushed screen.
  */
 export function CalendarView() {
+  // WEEK STARTS (Vale 46): a change in Settings redraws every week and month at once.
+  useWeekStarts((s) => s.day)
   const frame = useAppFrame()
   const phone = frame.phone
   const prefs = useCalendarViewPrefs()
@@ -281,9 +284,18 @@ export function CalendarView() {
   )
   // Every calendar hidden: say so, and the one way back (brief C1, States).
   const allHidden = calendars.size > 0 && [...calendars.values()].every((c) => c.hidden)
+  // SHOW CALENDARS turns every calendar back on, on every device (Vale 50): the empty state's button fixes the
+  // empty state. UNDO hides them all again.
+  const setHidden = usePimAction((c, { ids, hidden }: { ids: string[]; hidden: boolean }) => Promise.all(ids.map((id) => c.setCollectionHidden(id, hidden))))
   const showCalendars = () => {
-    if (switching.switcher) switching.setOpen(true)
-    else document.querySelector<HTMLElement>('nav[aria-label="Vale"] [role="checkbox"]')?.focus()
+    const ids = [...calendars.values()].filter((c) => c.hidden).map((c) => c.id)
+    setHidden.mutate(
+      { ids, hidden: false },
+      {
+        onSuccess: () => toast("Showing every calendar", { action: { label: "Undo", onClick: () => setHidden.mutate({ ids, hidden: true }) } }),
+        onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+      },
+    )
   }
 
   const chips = <RangeChips view={view} phone={phone} onChange={setView} keys={keys} />

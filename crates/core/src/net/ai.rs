@@ -31,17 +31,17 @@ impl Model {
     /// [`ANTHROPIC_URL`] outside tests.
     pub fn from_prefs(prefs: &AiPrefs, key: Option<String>, anthropic_url: &str) -> Result<Self> {
         let (url, model) = match prefs.provider {
-            AiProvider::Off => return Err(Error::Invalid("AI is off. Turn it on in Settings → AI summaries and replies.".into())),
+            AiProvider::Off => return Err(Error::Invalid("AI is off. Turn it on in Settings → AI.".into())),
             AiProvider::Local => (prefs.local.url.clone(), prefs.local.model.clone()),
             AiProvider::Compatible => (prefs.compatible.url.clone(), prefs.compatible.model.clone()),
             AiProvider::Anthropic => (anthropic_url.trim_end_matches('/').to_string(), prefs.anthropic_model.clone()),
         };
         if model.is_empty() {
-            return Err(Error::Invalid("Pick a model in Settings → AI summaries and replies.".into()));
+            return Err(Error::Invalid("Pick a model in Settings → AI.".into()));
         }
         let key = key.filter(|k| !k.trim().is_empty());
         if key.is_none() && prefs.provider != AiProvider::Local {
-            return Err(Error::Auth("add your API key in Settings → AI summaries and replies".into()));
+            return Err(Error::Auth("add your API key in Settings → AI".into()));
         }
         Ok(Self { provider: prefs.provider, url, model, key })
     }

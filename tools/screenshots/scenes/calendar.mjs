@@ -106,6 +106,12 @@ const miniParts = async (page) => {
   ensure((await grid.getByRole("gridcell", { name: /^Thursday, November 12, today, \d+ events?$/ }).getAttribute("aria-selected")) === "true", "today is not the picked day, named with its events")
   ensure((await grid.getByRole("gridcell").count()) === 42, "the month is not six weeks")
   ensure(await mini.getByRole("region", { name: "Today", exact: true }).isVisible(), "the picked day has no section")
+  // NEXT UP's event is not listed again under the day (Vale 52).
+  if (await next.locator('[data-slot="calendar-event"]').count()) {
+    const title = (await next.locator('[data-slot="calendar-event-title"]').innerText()).trim()
+    const listed = await mini.getByRole("region", { name: "Today", exact: true }).locator('[data-slot="calendar-event-title"]').allInnerTexts()
+    ensure(!listed.map((t) => t.trim()).includes(title), `NEXT UP's ${title} is listed again under the day`)
+  }
   ensure(await mini.getByRole("textbox", { name: "Quick add event" }).isVisible(), "the window has no quick add")
 }
 
@@ -178,7 +184,8 @@ export const scenes = [
     },
   },
   {
-    // Upcoming (Desktop / 07's list): 30 days from today, grouped by day, with no paging.
+    // Upcoming (Desktop / 07's list): 30 days from today, one list with no day headers (Vale 45), the date
+    // in each card's line, and no paging.
     name: "calendar-agenda",
     sizes: ["desktop", "medium"],
     sean: { kind: "undrawn", area: "calendar", screen: "upcoming" },
@@ -187,6 +194,10 @@ export const scenes = [
       ensure((await headTitle(page)) === "Coming up", `Upcoming's title is "${await headTitle(page)}"`)
       ensure(!(await page.getByRole("button", { name: /^(Next|Previous) / }).count()), "Upcoming pages")
       ensure(await page.getByRole("button", { name: "More", exact: true }).isVisible(), "Upcoming has no MORE")
+      const list = page.locator('[data-slot="upcoming"]:visible')
+      ensure(!(await list.locator('[data-slot="section-header"]').count()), "Upcoming groups its cards under day headers")
+      const lines = await list.locator('[data-slot="calendar-event-time"]').allInnerTexts()
+      ensure(lines.length > 0 && lines.every((t) => /^[A-Z]{3} \d{2}\.\d{2} \/\/ /i.test(t.trim())), `a card's line does not start with its day: ${JSON.stringify(lines.slice(0, 3))}`)
       await oneEmphasis(page, "Upcoming")
     },
   },
@@ -253,6 +264,24 @@ export const scenes = [
       const cards = await sat.locator('[data-slot="calendar-event"]').evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")))
       ensure(/^Cabin weekend, all day/.test(cards[0] ?? ""), `Saturday does not start with its all-day event: ${cards.join(" | ")}`)
       ensure(await page.getByRole("heading", { name: /^Thu 12 \/\/ Today/ }).count(), "today's section is not marked")
+    },
+  },
+  {
+    // WEEK STARTS on Monday (Vale 46): the month's first column and the week's first day are Monday.
+    name: "calendar-week-starts-monday",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await page.evaluate(() => localStorage.setItem("vale.calendar.weekStarts", "1"))
+      await page.reload()
+      await page.waitForFunction(() => !!document.getElementById("root")?.innerText.trim())
+      await app.settle()
+      await calendarView(app, "Month")
+    },
+    assert: async ({ page }) => {
+      const grid = page.getByRole("grid", { name: "November 2026" })
+      const first = await grid.getByRole("gridcell").first().getAttribute("aria-label")
+      ensure(/^Monday, October 26/.test(first ?? ""), `the month starts on ${first}, not Monday, October 26`)
     },
   },
   {
@@ -357,16 +386,36 @@ export const scenes = [
       const { page } = app
       await area(app, "Calendar")
       await page.getByText("Every calendar is hidden.").waitFor()
-      await press(app, button(page, "Show calendars"))
-      if (await switcherLayer(page).count()) {
-        ensure(await switcherLayer(page).getByRole("checkbox").first().isVisible(), "SHOW CALENDARS did not open the calendars")
-        await leaveLayer(app)
-      } else ensure(await page.evaluate(() => document.activeElement?.getAttribute("role")) === "checkbox", "SHOW CALENDARS did not go to the calendars")
-      await page.evaluate(() => document.activeElement?.blur())
     },
     assert: async ({ page }) => {
       ensure(await page.getByText("Every calendar is hidden.").isVisible(), "the calendar does not say every calendar is hidden")
+      ensure(await button(page, "Show calendars").isVisible(), "the empty state has no SHOW CALENDARS")
       ensure(!(await page.locator('[data-slot="calendar-event"]:visible').count()), "events show with every calendar hidden")
+    },
+  },
+  {
+    // SHOW CALENDARS turns every calendar back on (Vale 50), with "Showing every calendar" and UNDO, which hides them again.
+    name: "calendar-show-calendars",
+    scenario: "all-hidden",
+    sizes: ["desktop", "phone"],
+    run: async (app) => {
+      const { page } = app
+      await area(app, "Calendar")
+      await page.getByText("Every calendar is hidden.").waitFor()
+      await press(app, button(page, "Show calendars"))
+      const shown = page.locator("[data-sonner-toast]").filter({ hasText: "Showing every calendar" })
+      await shown.waitFor()
+      await page.getByText("Every calendar is hidden.").waitFor({ state: "detached" })
+      ensure(await page.locator('[data-slot="calendar-event"]:visible').count(), "SHOW CALENDARS showed no events")
+      await press(app, shown.getByRole("button", { name: "Undo", exact: true }))
+      await page.getByText("Every calendar is hidden.").waitFor()
+      await press(app, button(page, "Show calendars"))
+      await page.getByText("Every calendar is hidden.").waitFor({ state: "detached" })
+      await page.mouse.move(0, 0)
+    },
+    assert: async ({ page }) => {
+      ensure(await page.locator('[data-slot="calendar-event"]:visible').count(), "the calendars are not shown")
+      ensure(!(await switcherLayer(page).count()), "SHOW CALENDARS opened the calendars list instead of showing them")
     },
   },
   {
@@ -415,6 +464,10 @@ export const scenes = [
       for (const row of ["When", "Where", "Calendar"]) ensure(await rowOf(pane, row).count(), `the event has no ${row} row`)
       ensure((await rowOf(pane, "When").evaluate((el) => el.textContent)).includes("12:30 – 13:30"), "WHEN is not 12:30 – 13:30")
       ensure(await rowOf(pane, "Where").getByRole("link", { name: /^Map of Café Lisboa/ }).count(), "WHERE has no MAP")
+      // MAP (Vale 48): the system's maps app on Apple devices; on this Linux browser, OpenStreetMap.
+      const map = await rowOf(pane, "Where").getByRole("link", { name: /^Map of Café Lisboa/ }).first().getAttribute("href")
+      const apple = await page.evaluate(() => /mac|iphone|ipad/i.test(navigator.platform))
+      ensure(apple ? map.startsWith("maps://?q=") : map.startsWith("https://www.openstreetmap.org/search?query="), `MAP goes to ${map}`)
       for (const row of ["Repeats", "Travel", "Time zone", "Alert", "Link"]) ensure(!(await rowOf(pane, row).count()), `the event shows an empty ${row} row`)
       if (phone) {
         const bar = page.locator('[data-slot="top-bar"]:visible').first()
@@ -702,6 +755,10 @@ export const scenes = [
       for (const row of ["Tasks", "Booking links", "Save as set…"]) ensure(await list.getByRole("button", { name: row, exact: true }).count(), `${row} is not in the calendars list`)
       ensure(await list.getByRole("button", { name: "Add calendars", exact: true }).count(), "the first group has no Add calendars action")
       ensure(!(await list.locator('[role="checkbox"][aria-current]').count()), "a calendar says it is the current place: it is a filter")
+      // Read-only (Vale 53): a mark on the row's one line, its words in the name, no second line.
+      const holidays = list.getByRole("checkbox", { name: /^Holidays/ })
+      ensure(await list.getByRole("checkbox", { name: /^Holidays.*Read-only/ }).count(), "the read-only calendar does not say so in its name")
+      ensure(!(await holidays.locator('[data-slot="nav-item-description"]').count()), "the read-only calendar still has a second line")
       // One current place: the calendar itself, which the sidebar names under Apps and the layer in its own list.
       ensure((await oneCurrent((await switcherLayer(page).count()) ? list : sidebar(page), "the calendars list")) === "Calendar", "Calendar is not the current place")
       // Quick add left the list for the event form's title (ADR-0099; brief C4, Q5); the month f3 left in the
@@ -929,7 +986,7 @@ export const scenes = [
     },
   },
   {
-    // Tasks is a place of its own (ADR-0084, ADR-0100; brief C6): TASKS // NN, rows with a checkbox,
+    // Tasks is a place of its own (ADR-0084, ADR-0100; brief C6): TASKS // NNN, rows with a checkbox,
     // the note's title, PLAN; checking one ticks it in its note, with UNDO.
     name: "places-tasks",
     sizes: ["phone", "desktop", "medium"],
@@ -953,7 +1010,7 @@ export const scenes = [
       ensure(await page.getByRole("region", { name: "Tasks" }).first().isVisible(), "the Tasks panel is not showing")
       ensure(await button(page, "Plan: Board games").first().isVisible(), "a task cannot be planned from here")
       const overline = (await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()).trim()
-      ensure(/^TASKS \/\/ \d\d$/i.test(overline), `the head's overline reads "${overline}"`)
+      ensure(/^TASKS \/\/ \d{3}$/i.test(overline), `the head's overline reads "${overline}"`)
       ensure((await headTitle(page)) === "Tasks", "the page head does not name Tasks")
       if (await sidebar(page).locator('[aria-label="Tasks"]').count()) ensure((await oneCurrent(sidebar(page), "the sidebar")) === "Tasks", "Tasks is not the sidebar's current place")
       else ensure((await oneCurrent(await groups(app), "the calendars list")) === "Tasks", "Tasks is not the current place")
@@ -966,7 +1023,7 @@ export const scenes = [
     },
   },
   {
-    // Booking links, a place too (ADR-0101; brief C7): BOOKING LINKS // 02, NEW LINK, a row per link with
+    // Booking links, a place too (ADR-0101; brief C7): BOOKING LINKS // 002, NEW LINK, a row per link with
     // its length, days and hours. On the way: the second time zone, which left the calendar's side list
     // for Settings › Calendar.
     name: "places-booking-links",
@@ -983,7 +1040,7 @@ export const scenes = [
       ensure(await page.getByRole("region", { name: "Booking links" }).first().isVisible(), "the Booking links panel is not showing")
       ensure(await button(page, "New link").first().isVisible(), "a booking link cannot be made from here")
       const overline = (await page.locator('[data-slot="page-head-overline"]:visible').first().innerText()).trim()
-      ensure(/^BOOKING LINKS \/\/ 02$/i.test(overline), `the head's overline reads "${overline}"`)
+      ensure(/^BOOKING LINKS \/\/ 002$/i.test(overline), `the head's overline reads "${overline}"`)
       ensure((await headTitle(page)) === "Booking links", "the page head does not name Booking links")
       const rows = page.getByRole("list", { name: "Your booking links" }).getByRole("listitem")
       ensure((await rows.count()) === 2, `${await rows.count()} rows, not the demo's two links`)
@@ -1099,7 +1156,7 @@ export const scenes = [
     },
   },
   {
-    // The visitor's page (brief C7, B), in the focus frame at 432: BOOK // 30 MIN, the title, "With …"
+    // The visitor's page (brief C7, B), in the focus frame at 432, led by the owner's name (Vale 56): BOOK // 30 MIN, the title, "With …"
     // and the note; FREE TIMES as one chip group across the days; YOUR DETAILS; one primary BOOK.
     name: "calendar-booking-page",
     path: INTRO,
@@ -1113,6 +1170,16 @@ export const scenes = [
       ensure(/^BOOK \/\/ 30 MIN$/i.test((await page.locator('[data-slot="page-head-overline"]').first().innerText()).trim()), "the head's overline is not BOOK // 30 MIN")
       ensure((await page.getByRole("heading", { level: 1 }).innerText()).trim() === "Intro call", "the head does not name the link")
       ensure(await page.getByText(/^With /).isVisible(), "the page does not say who it is with")
+      // Vale 56: the page leads with the owner's name, not Vale's lockup; a phone shows three days, then MORE DAYS.
+      ensure(!(await page.locator('[data-slot^="app-lockup"]').count()), "the visitor's page shows Vale's lockup")
+      const host = page.locator('[data-slot="booking-host"]')
+      ensure((await host.count()) === 1 && (await host.innerText()).trim().length > 0, "the page does not lead with the owner's name")
+      const days = page.locator('[data-slot="booking-day"]')
+      const more = page.getByRole("button", { name: "More days", exact: true })
+      if (app.phone) {
+        ensure((await days.count()) === 3, `a phone shows ${await days.count()} days, not three`)
+        ensure(await more.isVisible(), "a phone has no MORE DAYS")
+      } else ensure(!(await more.count()), "a desktop has MORE DAYS")
       ensure(await page.getByText(/^Times are in your time zone \(.+\)\.$/).isVisible(), "the page does not name the visitor's zone")
       ensure((await page.getByRole("radiogroup", { name: "Free times" }).count()) === 1, "the free times are not one chip group")
       ensure((await page.getByRole("radiogroup", { name: "Free times" }).getByRole("radio").count()) > 4, "the page offers almost no times")
@@ -1344,11 +1411,22 @@ export const scenes = [
       // The paging buttons.
       await press(app, picker.getByRole("button", { name: "Previous month" }))
       ensure(await grid("November 2026").isVisible(), "Previous month did not return to November")
-      // A time in the past is the field's error, and the primary does not schedule.
+      // A past day cannot be picked (Vale 54): it says so, a press does nothing, and the keys stop at today.
       const error = picker.getByText("Pick a time at least a minute from now.")
       ensure(!(await error.count()), "the picker shows the error before a past time is picked")
-      await press(app, day(/^Wednesday, November 11/))
-      ensure(await error.isVisible(), "a past time shows no error")
+      ensure((await day(/^Wednesday, November 11/).getAttribute("aria-disabled")) === "true", "a past day can be picked")
+      await day(/^Wednesday, November 11/).click({ force: true })
+      await app.settle()
+      ensure((await day(/^Friday, November 20/).getAttribute("aria-selected")) === "true", "pressing a past day picked it")
+      // From the picked Friday 20th, two weeks up would be the 6th: the keys stop at today, the 12th.
+      await day(/^Friday, November 20/).focus()
+      await page.keyboard.press("ArrowUp")
+      await page.keyboard.press("ArrowUp")
+      ensure(/November 12/.test(await focused()), `two weeks up from the 20th went to the past: "${await focused()}"`)
+      // Earlier today is still a day you can pick, and a time already gone is the field's error; the primary does not schedule.
+      await press(app, day(/^Thursday, November 12/))
+      await picker.getByRole("textbox", { name: "Time" }).fill("08:00")
+      ensure(await error.isVisible(), "a time earlier today shows no error")
       ensure((await picker.getByRole("textbox", { name: "Time" }).getAttribute("aria-invalid")) === "true", "the Time field is not marked invalid")
       await press(app, picker.getByRole("button", { name: "Schedule", exact: true }))
       ensure(await picker.isVisible(), "a past time was scheduled")
